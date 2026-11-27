@@ -1,5 +1,6 @@
 /* Library > Songs (docs/oled-design.md#song-rows): the Shuffle row, pinned under the status row,
- * and under it every song by title, its artist inline after it. */
+ * and under it every song by title, its artist inline after it (or as Song Artist puts it) and, with Song
+ * Length's All Lists, its length on the right column. */
 #include <stdlib.h>
 
 #include "q2ui.h"
@@ -14,7 +15,9 @@ static void row(void *ctx, int i, ui_row *out) {
         out->title = "Shuffle", out->icon = icon("shuffle"), out->flags = ROW_ACCENT;
         return;
     }
+    static char len[16];
     out->title = lib_title(i - 1), out->detail = lib_artist(i - 1);
+    if (config_song_length() == SONG_LENGTH_ALL) out->length = lib_length(i - 1, len, sizeof len);
 }
 
 /* Centre: the whole list is the queue, from the song chosen; the Shuffle row shuffles it. Now

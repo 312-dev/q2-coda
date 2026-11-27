@@ -764,6 +764,7 @@ enum { SONG_LENGTH_ALBUMS, SONG_LENGTH_ALL, SONG_LENGTH_OFF };
 enum { SONGS_MIXED = 1, SONGS_ARTIST, SONGS_ALBUM, SONGS_FOLDER };
 enum { SONG_INLINE = 1, SONG_RIGHT };
 int song_artist(void), song_length(void);
+int song_option_set(int length, int v); /* theme_engine.c: q2ui's choice of Song Artist (0) or Song Length (1) */
 /* theme_engine.c: Track Time's value, and its switch on a tap (np_bar.c np_time_tap) */
 int np_time_total(void), np_time_toggle(void);
 int np_time_tap(void *ctx, void *event);

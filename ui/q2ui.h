@@ -321,6 +321,8 @@ int notice_trace(char *out, size_t room); /* "notice card=ID lit=N level=X toast
 void notice_stats(char *out, size_t room); /* the stats file's "card", "card_from", "toast", "toasts_waiting" */
 /* ---- status.c: the status row, an overlay drawn over every page ---- */
 void status_draw(rect_t r);
+#define HOME_PANE_X 196   /* Home's art from here to the right edge, from the top (page_home.c) */
+int status_over_ink(void); /* the ink Home's glyphs over the art took: 1 white, 2 black, 0 none yet */
 void status_step(void);
 rect_t status_rect(void);
 void status_clock_fixed(const char *hhmm);
@@ -353,7 +355,8 @@ enum {
 typedef struct {
     const char *title;
     const char *detail;    /* inline after the title, smaller and muted (a song's artist) */
-    const char *value;     /* at the right column (a setting's value, a length) */
+    const char *value;     /* at the right column (a setting's value, a playlist song's artist) */
+    const char *length;    /* a song's length, small at the right column, the playing song's bars before it (Song Length) */
     const char *sub;       /* the second line of a two-line row */
     const char *caption;   /* said under the title only while the row is selected, the row growing to hold it */
     const char *lead;      /* small text in the leading column (a track number) */
@@ -383,7 +386,8 @@ typedef struct ui_source {
     int row_h;  /* 32, or 52 for two-line rows; 0 is 32 */
     int letters; /* 1: sorted by title, so a fast spin jumps by letter */
     rect_t box; /* where the list lives; w 0 is the whole screen under the status row */
-    int fade_to; /* where the rows past the list's end have faded into the ground; 0: the screen's foot's (y 311) */
+    int fade_to; /* where the rows past the list's end have faded into the ground; 0: the screen's foot's (y 311).
+                    Given, a list that starts lower than a list page's runs on to the screen's foot (Home's eighth row) */
     int bare;    /* 1: no ground and no fades of its own, over what the page has drawn (a menu sheet's material) */
 } ui_source;
 typedef struct ui_list ui_list;
@@ -406,6 +410,11 @@ int config_light_setting(void);  /* [IPOD] LIGHT as the file has it: 0 Off, 1 On
 int config_motion_setting(void); /* [IPOD] REDUCEMOTION: 1 on */
 int config_night_setting(void);  /* [Q2POD] NIGHTSHIFT: 0 Off, 1 On, 2 Auto (from 19:00 to 7:00) */
 int config_night_kelvin(void);   /* [Q2POD] NIGHTK, its temperature */
+/* the song rows' options (docs/oled-design.md#song-rows), as patch/navigation.h numbers them */
+enum { SONG_ARTIST_INLINE, SONG_ARTIST_SELECTED, SONG_ARTIST_RIGHT, SONG_ARTIST_OFF };
+enum { SONG_LENGTH_ALBUMS, SONG_LENGTH_ALL, SONG_LENGTH_OFF };
+int config_song_artist(void); /* [IPOD] SONGARTIST */
+int config_song_length(void); /* [IPOD] SONGLENGTH */
 void fb_warm(int kelvin);        /* Night Shift's warming of every pixel turned to the panel; 0 off (fb.c) */
 void display_push(void);         /* Settings > Display (page_display.c) */
 void playback_push(void);        /* Settings > Playback (page_playback.c) */
@@ -446,6 +455,10 @@ ui_list *list_page_list(void *st);
  * its caption; slide: how far the rows a moved row passed are still from their places, together) */
 int list_trace(char *out, size_t room);
 int list_rows_dump(const char *path); /* the top list's rows as text, a line each (a script's rows FILE) */
+/* ... and those in sight as laid out, a line each: the row, then where its title, detail and length begin and end,
+ * where the playing song's bars end (0 for a part it has not) and the length shown, tab-separated (a script's
+ * layout FILE) */
+int list_layout_dump(const char *path);
 int list_last_selected(void); /* that list's selection; -1 with none */
 
 /* ---- lib.c: the library, read from stock's database and the server catalogue ---- */
@@ -456,6 +469,11 @@ const char *lib_artist(int i);
 const int *lib_ids(void); /* each song's row id in its table, in the list's order */
 const char *lib_album(int i);
 int lib_track(int i);
+/* a song's length in seconds (a CUE track's, a server row's, or its file's in demo's durations cache), -1 unknown;
+ * and as Now Playing writes it ("3:45", "1:02:05"), empty when unknown */
+int lib_seconds(int i);
+const char *lib_length(int i, char *out, size_t room);
+extern const char *lib_durations_file; /* demo's durations cache (--durations) */
 enum { LIB_ARTIST, LIB_ALBUM, LIB_KINDS };
 int lib_groups(int kind);                             /* how many artists, or albums */
 const char *lib_group_name(int kind, int g);

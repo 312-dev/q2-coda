@@ -14,7 +14,8 @@
  * folder). The kernel's files are read when the minute turns and when what plays changes, never on
  * a timer of their own, so the row costs nothing at rest; a cable put in shows within the minute.
  * Only the sync's arrows move, 30 frames a second while a card app checks its server. The
- * theme's glyphs are tools/art.py's PNGs, in the half for Light Mode. ponytail: a strip too wide
+ * theme's glyphs are tools/art.py's PNGs, in the half for Light Mode; on Home, over the art, in one ink picked
+ * for the row from the art under them (glyphs_over_art). ponytail: a strip too wide
  * for its room is cut at the clock, not slid as demo's marquee slides it. */
 #include <math.h>
 #include <stdio.h>
@@ -307,13 +308,9 @@ static void slim(float x, int level) {
     fill_round((rectf_t){ x + 16, 20.8f, 1.5f, 4.4f }, 0.8f, 0, 0x6e6e6e, 1, 0);
 }
 
-void status_draw(rect_t r) {
-    if (!rect_meet(r, status_rect(), 0)) return;
-    int home = !strcmp(ui_top_name(), "home");
+/* Everything right of the clock, in the inks of the half in use */
+static void glyphs(void) {
     uint32_t ink = tok(TOK_PRIMARY);
-    if (!S.run.n || run_stale(&S.run)) run_make(&S.run, FACE_MEDIUM, TYPE(15), S.clock, -1);
-    /* on Home the clock stands over the list in Text Primary (docs/oled-design.md#status-row) */
-    run_draw(&S.run, INSET, CLOCK_Y, tok(home ? TOK_PRIMARY : TOK_SECONDARY), 256);
     if (S.volume_at) {
         fill_round((rectf_t){ VOLUME_X, 21, VOLUME_W, 4 }, 2, 0, tok(TOK_TRACK), 1, 0);
         if (S.volume > 0) fill_round((rectf_t){ VOLUME_X, 21, 4 + (VOLUME_W - 4) * (float)S.volume / 100, 4 }, 2, 0, ink, 1, 0);
@@ -375,4 +372,86 @@ void status_draw(rect_t r) {
     }
     if (S.lock) art("keylock", x - LOCK_W, 16), x -= LOCK_W + GAP;
     if (S.offline) art("status_offline", x - GLYPH, 16);
+}
+
+/* Home's glyphs over the art (docs/oled-design.md#status-row, patch/coverflow.c home_ink): where the pane runs up
+ * under the row, every glyph is drawn as the dark half draws it on a black ground, and then laid over the art in
+ * one ink for the whole row, white or black, whichever has the higher WCAG contrast against the art's mean
+ * luminance under all of their inked pixels together, each weighed by its share (its greatest channel: an
+ * antialiased edge, the battery's dim outline, a part), held 0.03 past the bound against flicker. A status colour
+ * (the charging green, the low red, the accent's ring) keeps its hue, laid over the art as it was drawn. */
+#define STRIP_Y0 12
+#define STRIP_Y1 34
+#define STRIP_W (SCREEN_W - HOME_PANE_X)
+#define INK_WHITE_MAX 0.17913f /* where black and white have the same contrast: (L + 0.05)^2 = 0.0525 */
+#define INK_HOLD 0.03f
+#define INK_HUE_MIN 48 /* a pixel with a spread of channels this wide is a status colour's */
+static int over_ink; /* the ink the row took: 1 white, 2 black, 0 not yet picked */
+static float srgb_lin(unsigned v) {
+    float c = (float)v / 255;
+    return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
+}
+static float lum(uint32_t p) { return 0.2126f * srgb_lin(p >> 16 & 255) + 0.7152f * srgb_lin(p >> 8 & 255) + 0.0722f * srgb_lin(p & 255); }
+int status_over_ink(void) { return over_ink; }
+static void glyphs_over_art(rect_t part, int whole) {
+    static uint32_t art_px[(STRIP_Y1 - STRIP_Y0) * STRIP_W];
+    for (int y = part.y; y < part.y + part.h; ++y)
+        for (int x = part.x; x < part.x + part.w; ++x) {
+            art_px[(y - STRIP_Y0) * STRIP_W + x - HOME_PANE_X] = canvas[y * SCREEN_W + x];
+            canvas[y * SCREEN_W + x] = 0xff000000;
+        }
+    int light = ui_light;
+    ui_light = 0;
+    glyphs();
+    ui_light = light;
+    /* a repaint of part of the row shows too little of it to pick from: it keeps the ink it has */
+    if (whole || !over_ink) {
+        float sum = 0, weight = 0;
+        for (int y = part.y; y < part.y + part.h; ++y)
+            for (int x = part.x; x < part.x + part.w; ++x) {
+                uint32_t p = canvas[y * SCREEN_W + x];
+                unsigned r = p >> 16 & 255, g = p >> 8 & 255, b = p & 255, hi = r > g ? (r > b ? r : b) : (g > b ? g : b),
+                         lo = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                if (!hi || hi - lo >= INK_HUE_MIN) continue;
+                float c = (float)hi / 255;
+                sum += c * lum(art_px[(y - STRIP_Y0) * STRIP_W + x - HOME_PANE_X]), weight += c;
+            }
+        if (weight > 0) {
+            float bound = over_ink == 1 ? INK_WHITE_MAX + INK_HOLD : over_ink == 2 ? INK_WHITE_MAX - INK_HOLD : INK_WHITE_MAX;
+            over_ink = sum <= weight * bound ? 1 : 2;
+        }
+    }
+    uint32_t ink = over_ink == 2 ? 0x000000 : 0xffffff;
+    for (int y = part.y; y < part.y + part.h; ++y)
+        for (int x = part.x; x < part.x + part.w; ++x) {
+            uint32_t p = canvas[y * SCREEN_W + x], a = art_px[(y - STRIP_Y0) * STRIP_W + x - HOME_PANE_X] & 0xffffff;
+            unsigned r = p >> 16 & 255, g = p >> 8 & 255, b = p & 255, hi = r > g ? (r > b ? r : b) : (g > b ? g : b),
+                     lo = r < g ? (r < b ? r : b) : (g < b ? g : b);
+            float c = (float)hi / 255;
+            if (hi - lo >= INK_HUE_MIN) { /* a status colour, over the art as it was drawn over the ground */
+                unsigned ar = a >> 16 & 255, ag = a >> 8 & 255, ab = a & 255;
+                canvas[y * SCREEN_W + x] = 0xff000000 | (unsigned)(r + ar * (1 - c) + 0.5f) << 16 |
+                                           (unsigned)(g + ag * (1 - c) + 0.5f) << 8 | (unsigned)(b + ab * (1 - c) + 0.5f);
+            } else
+                canvas[y * SCREEN_W + x] = 0xff000000 | rgb_mix(a, ink, c);
+        }
+}
+
+void status_draw(rect_t r) {
+    if (!rect_meet(r, status_rect(), 0)) return;
+    int home = !strcmp(ui_top_name(), "home");
+    if (!S.run.n || run_stale(&S.run)) run_make(&S.run, FACE_MEDIUM, TYPE(15), S.clock, -1);
+    /* on Home the clock stands over the list in Text Primary (docs/oled-design.md#status-row) */
+    run_draw(&S.run, INSET, CLOCK_Y, tok(home ? TOK_PRIMARY : TOK_SECONDARY), 256);
+    if (!home) {
+        glyphs();
+        return;
+    }
+    rect_t was = clip_get(), part, strip = { HOME_PANE_X, STRIP_Y0, STRIP_W, STRIP_Y1 - STRIP_Y0 };
+    if (rect_meet(was, (rect_t){ 0, 0, HOME_PANE_X, SCREEN_H }, &part)) clip_set(part), glyphs(); /* over the list */
+    if (rect_meet(was, strip, &part)) {
+        clip_set(part);
+        glyphs_over_art(part, part.w == strip.w && part.h == strip.h);
+    }
+    clip_set(was);
 }

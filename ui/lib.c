@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
+#include <time.h>
 
 #include <sqlite3.h>
 
@@ -17,8 +19,9 @@
 static struct {
     char *text;
     unsigned used, room;
-    unsigned (*row)[3]; /* title, artist, album */
+    unsigned (*row)[4]; /* title, artist, album, file */
     int *id, *track;
+    int *sec; /* a CUE track's or a server row's length in seconds; -1 - its start: the file's, from the durations cache */
     struct group {
         int n;       /* groups */
         int *first;  /* each group's first place in order, and one past the last group's */
@@ -109,11 +112,23 @@ int lib_open(const char *path, const char *catalogue, int limit) {
         sqlite3_finalize(q);
     }
     const char *sql =
-        server ? "select name, songer, id, album, track from (select name, songer, id, album, track from "
-                 "main.songtable union all select name, songer, id, album, track from cat.servertable) "
-                 "order by name collate nocase, id limit ?"
-               : "select name, songer, id, album, track from songtable order by name collate nocase, id limit ?";
-    if (sqlite3_prepare_v2(db, sql, -1, &q, 0) != SQLITE_OK) {
+        "select name, songer, id, album, track, fileurl, sec from (select name, songer, id, album, track, fileurl, "
+        "case when time_end > time then time_end - time else -1 - max(time, 0) end as sec from main.songtable%s) "
+        "order by name collate nocase, id limit ?";
+    /* a server row's length is the catalogue's (servermeta, patch/catalogue.c ix_build), which a catalogue
+     * without it leaves unknown */
+    static const char *const servers[] = {
+        " union all select s.name, s.songer, s.id, s.album, s.track, s.fileurl, coalesce((select m.seconds from "
+        "cat.servermeta m where m.id = s.id), 0) from cat.servertable s",
+        " union all select name, songer, id, album, track, fileurl, 0 from cat.servertable",
+    };
+    char text[640];
+    int ok = 0;
+    for (int k = server ? 0 : 2; k < 3 && !ok; ++k) {
+        snprintf(text, sizeof text, sql, k < 2 ? servers[k] : "");
+        ok = sqlite3_prepare_v2(db, text, -1, &q, 0) == SQLITE_OK;
+    }
+    if (!ok) {
         sqlite3_close(db);
         return -1;
     }
@@ -125,18 +140,87 @@ int lib_open(const char *path, const char *catalogue, int limit) {
             lib.row = realloc(lib.row, (size_t)lib.rows * sizeof *lib.row);
             lib.id = realloc(lib.id, (size_t)lib.rows * sizeof *lib.id);
             lib.track = realloc(lib.track, (size_t)lib.rows * sizeof *lib.track);
+            lib.sec = realloc(lib.sec, (size_t)lib.rows * sizeof *lib.sec);
         }
         lib.id[lib.n] = sqlite3_column_int(q, 2);
         lib.row[lib.n][2] = keep(sqlite3_column_text(q, 3));
         lib.track[lib.n] = sqlite3_column_int(q, 4);
         lib.row[lib.n][0] = keep(sqlite3_column_text(q, 0));
         lib.row[lib.n][1] = keep(sqlite3_column_text(q, 1));
+        lib.row[lib.n][3] = keep(sqlite3_column_text(q, 5));
+        lib.sec[lib.n] = sqlite3_column_int(q, 6);
         ++lib.n;
     }
     if (rc != SQLITE_DONE) fprintf(stderr, "q2ui: songs: %s\n", sqlite3_errmsg(db));
     sqlite3_finalize(q);
     sqlite3_close(db);
     return 0;
+}
+
+/* ---- song lengths (docs/oled-design.md#song-rows, Song Length): a CUE track's from its start and end, a server
+ * row's from the catalogue, and a file's from demo's durations cache (patch/durations.c: "Q2DUR2" and its NUL,
+ * then records ascending by the path's FNV-1a 64, each the key, the file's size, mtime and ns, and its seconds),
+ * read again when the file changes (demo writes it after a scan or Long Songs' measuring). ---- */
+const char *lib_durations_file = "/mnt/data/ringnav-durations-v1";
+#define DUR_MAGIC "Q2DUR2"
+struct dur_rec {
+    unsigned long long key;
+    unsigned size, mtime, ns;
+    int sec;
+};
+static struct {
+    struct dur_rec *rec;
+    size_t n;
+    time_t checked;
+    struct timespec mtime;
+    off_t size;
+} dur;
+static void dur_check(void) {
+    time_t now = time(0);
+    if (dur.checked == now) return; /* a list asks for many rows a frame: the file is looked at once a second */
+    dur.checked = now;
+    struct stat st;
+    if (stat(lib_durations_file, &st)) st.st_size = -1, st.st_mtim = (struct timespec){ 0, 0 };
+    if (st.st_size == dur.size && st.st_mtim.tv_sec == dur.mtime.tv_sec && st.st_mtim.tv_nsec == dur.mtime.tv_nsec) return;
+    dur.size = st.st_size, dur.mtime = st.st_mtim;
+    free(dur.rec);
+    dur.rec = 0, dur.n = 0;
+    FILE *f = st.st_size >= 8 ? fopen(lib_durations_file, "rb") : 0;
+    if (!f) return;
+    char magic[8];
+    size_t n = ((size_t)st.st_size - 8) / sizeof *dur.rec;
+    struct dur_rec *rec = malloc(n ? n * sizeof *rec : 1);
+    int ok = rec && fread(magic, 1, 8, f) == 8 && !memcmp(magic, DUR_MAGIC, 8) && fread(rec, sizeof *rec, n, f) == n &&
+             ((size_t)st.st_size - 8) % sizeof *rec == 0;
+    for (size_t i = 1; ok && i < n; ++i) ok = rec[i - 1].key < rec[i].key; /* demo's own check: else no cache */
+    fclose(f);
+    if (ok) dur.rec = rec, dur.n = n;
+    else free(rec);
+}
+static int dur_find(const char *path) {
+    unsigned long long h = 0xcbf29ce484222325ull;
+    for (const unsigned char *p = (const unsigned char *)path; *p; ++p) h = (h ^ *p) * 0x100000001b3ull;
+    size_t lo = 0, hi = dur.n;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (dur.rec[mid].key < h) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo < dur.n && dur.rec[lo].key == h ? dur.rec[lo].sec : -1;
+}
+int lib_seconds(int i) {
+    int sec = lib.sec[i];
+    if (sec >= 0) return sec;
+    dur_check();
+    int start = -1 - sec, whole = *(lib.text + lib.row[i][3]) ? dur_find(lib.text + lib.row[i][3]) : -1;
+    return whole < 0 ? -1 : whole > start ? whole - start : 0;
+}
+const char *lib_length(int i, char *out, size_t room) {
+    int sec = lib_seconds(i);
+    if (sec <= 0) snprintf(out, room, "%s", ""); /* unknown or unreadable: no length, never 0:00 */
+    else if (sec >= 3600) snprintf(out, room, "%d:%02d:%02d", sec / 3600, sec / 60 % 60, sec % 60);
+    else snprintf(out, room, "%d:%02d", sec / 60, sec % 60);
+    return out;
 }
 
 /* ---- playlists: stock's table playlist in the same database (patch/playlists.c). A list is a row

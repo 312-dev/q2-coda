@@ -1,7 +1,8 @@
 /* The settings q2ui takes from /mnt/data/config.ini (docs/internals.md#configini), which demo owns
  * and writes while it owns the settings pages: read here, never written. [IPOD] LIGHT (0 dark, 1
- * Light Mode, 2 Auto: light from 7:00 to 19:00, patch/theme_engine.c light_day; Auto when absent) and REDUCEMOTION
- * (1 on). Read at the start and whenever demo writes the file (a watch of its folder), and Auto
+ * Light Mode, 2 Auto: light from 7:00 to 19:00, patch/theme_engine.c light_day; Auto when absent), REDUCEMOTION
+ * (1 on), and the song rows' SONGARTIST (0 Inline, 1 Selected Row, 2 Right, 3 Off) and SONGLENGTH (0 Albums, 1 All
+ * Lists, 2 Off), a value outside its range read as its default, 0, as demo reads them (theme_engine.c settings_read). Read at the start and whenever demo writes the file (a watch of its folder), and Auto
  * again when the minute turns (status.c). --light and --reduce-motion on the command line hold
  * their setting on whatever the file says. */
 #include <stdio.h>
@@ -25,6 +26,9 @@ int config_light_setting(void) { return light_setting; }
 int config_night_setting(void) { return night_setting; }
 int config_night_kelvin(void) { return night_k; }
 int config_motion_setting(void) { return motion_setting; }
+static int song_artist_setting, song_length_setting;
+int config_song_artist(void) { return song_artist_setting; }
+int config_song_length(void) { return song_length_setting; }
 
 /* [section] key=value's number; def when the file, the section or the key is not there */
 int config_int(const char *section, const char *key, int def) {
@@ -68,7 +72,11 @@ void config_read(void) {
     night_setting = night_setting >= 0 && night_setting <= 2 ? night_setting : 0;
     int k = config_int("Q2POD", "NIGHTK", 0); /* patch/nightshift.c settings: a temperature off its steps is the default */
     night_k = k >= NS_WARM && k <= NS_COOL && !(k % NS_STEP) ? k : NS_DEFAULT;
-    list_rows_changed(); /* a page may show a setting (page_display.c) */
+    song_artist_setting = config_int("IPOD", "SONGARTIST", 0);
+    song_artist_setting = song_artist_setting >= 0 && song_artist_setting <= SONG_ARTIST_OFF ? song_artist_setting : 0;
+    song_length_setting = config_int("IPOD", "SONGLENGTH", 0);
+    song_length_setting = song_length_setting >= 0 && song_length_setting <= SONG_LENGTH_OFF ? song_length_setting : 0;
+    list_rows_changed(); /* a page may show a setting (page_display.c), and song rows are drawn by two */
     int reduce = config_motion_forced || motion_setting;
     if (reduce != ui_reduce_motion) ui_reduce_motion = reduce, ui_mark_all();
     config_light_now();
