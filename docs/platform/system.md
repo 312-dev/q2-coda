@@ -1,6 +1,6 @@
 # Q2SYS/1: the system
 
-`q2sysd`'s socket, `/run/vamp/sys.sock` ([q2sysd](../sysd.md)), in [the common shape](README.md#the-common-shape): the screen, the battery, the USB mode and standby.
+`q2sysd`'s socket, `/run/vamp/sys.sock` ([q2sysd](../sysd.md)), in [the common shape](README.md#the-common-shape): the screen, the battery, the USB mode, standby and the clock.
 
 | Command | Answer |
 | --- | --- |
@@ -16,15 +16,18 @@
 | `standby` | `ok`, before the Q2 suspends |
 | `heat` | `heat STATE`: the overheat guardian's state, `pending`, `ok`, `nosensor`, `warn`, `loadwarn`, `poweroff-hot` or `poweroff-load`, or `off` where it does not run (a card boot: today's Vamp's own guards) ([q2sysd: Heat](../sysd.md#heat)); capability word `heat` |
 | `jack` | `jack po=P bal=B`: the 3.5 mm (`po`) and 4.4 mm (`bal`) jacks, 1 plugged, 0 not, -1 not read yet ([q2sysd: The jacks](../sysd.md#the-jacks)); capability word `jack` |
+| `time` | `time zone=NAME`: the zone in effect, the zoneinfo name config.ini's `[SYSSET] TIMEZONE` gives, or `none` ([q2sysd: The clock](../sysd.md#the-clock)); capability word `time` |
+| `time set SECONDS` | `ok`, or `err time`: the system clock set to SECONDS since 1970 (UTC), then the RTC written, as stock's Set Time does |
+| `time save` | `ok`, or `err time`: the system clock written to the RTC (UTC), as stock does after a network sync (`q2netd`'s) |
 | `heat cancel` | `ok`: the load warning's Cancel, for a UI that does not serve Q2UI/1's `ask` |
-| `watch` | `ok`; then `screen on`, `screen off`, `battery ...`, `charge held level=N`, `charge allowed level=N`, `usb adb`, `usb storage`, `usb dac`, `usb car`, `car`, `usb ask` (a cable in on Ask Every Time: the chooser's to draw), `standby`, `resumed`, `charge wait` (Auto Power Off with a cable in: the Q2 stays on until the cable is out or the battery is full, [q2sysd](../sysd.md#auto-standby-and-auto-power-off); the charge screen is the UI's to draw), `jack po 1`, `jack po 0`, `jack bal 1`, `jack bal 0` (a plug, an unplug that lasted), `heat warn`, `heat nosensor`, `heat ok`, `heat loadwarn left=S`, `heat cancelled`, `heat off` (the guardian's events: the music paused, the power off 10 s later), `lowbattery warn` (under 16%, once a discharge) and `lowbattery off` (the power off that follows five low readings: [q2sysd: A low battery](../sysd.md#a-low-battery)), `power off` and `reboot` lines as they happen |
-| `caps` | `caps screen awake brightness usb usb-dac usb-car standby heat jack battery watch` |
+| `watch` | `ok`; then `screen on`, `screen off`, `battery ...`, `charge held level=N`, `charge allowed level=N`, `usb adb`, `usb storage`, `usb dac`, `usb car`, `car`, `usb ask` (a cable in on Ask Every Time: the chooser's to draw), `standby`, `resumed`, `charge wait` (Auto Power Off with a cable in: the Q2 stays on until the cable is out or the battery is full, [q2sysd](../sysd.md#auto-standby-and-auto-power-off); the charge screen is the UI's to draw), `jack po 1`, `jack po 0`, `jack bal 1`, `jack bal 0` (a plug, an unplug that lasted), `heat warn`, `heat nosensor`, `heat ok`, `heat loadwarn left=S`, `heat cancelled`, `heat off` (the guardian's events: the music paused, the power off 10 s later), `time zone=NAME` (the zone changed) and `time set` (the clock set by hand), `lowbattery warn` (under 16%, once a discharge) and `lowbattery off` (the power off that follows five low readings: [q2sysd: A low battery](../sysd.md#a-low-battery)), `power off` and `reboot` lines as they happen |
+| `caps` | `caps screen awake brightness usb usb-dac usb-car standby heat jack battery time watch` |
 
 ```conformance
 > Q2SYS/1
 < Q2SYS/1 ok
 > caps
-< caps screen awake brightness usb usb-dac usb-car standby heat jack battery watch
+< caps screen awake brightness usb usb-dac usb-car standby heat jack battery time watch
 > screen
 < screen on
 > awake
@@ -61,6 +64,15 @@
 < ~ jack po=-?[01] bal=-?[01]
 > heat cancel
 < ok
+> time
+< ~ time zone=[A-Za-z0-9_+/-]+
+> time save
+< ~ ok|err time
+> time set 1767225600
+<* ~ time set
+< ~ ok|err time
+> time set 12x
+< err time
 > watch
 < ok
 > standby

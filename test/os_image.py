@@ -29,7 +29,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -205,6 +205,11 @@ def check_image(build, fs, manifest, perturb=None):
           "/etc/passwd and /etc/group are links into /run/vamp, the image's own users in the .base files")
     check(not (fs/'etc/init.d').exists() or sorted(p.name for p in (fs/'etc/init.d').iterdir()) == ['rcK', 'rcS'],
           '/etc/init.d holds rcS and rcK alone')
+    zones = (fs/'usr/share/vamp/timezones').read_text().splitlines() if (fs/'usr/share/vamp/timezones').exists() else []
+    missing = [z for z in zones if not (fs/'usr/share/zoneinfo'/z).is_file()]
+    check(os.readlink(fs/'etc/localtime') == '/run/vamp/localtime' and zones == vamp_os.zone_names() and not missing,
+          f"the clock: /etc/localtime a link into /run/vamp, q2sysd's {len(zones)} zones, each in the image's tzdata"
+          f"{': not ' + ', '.join(missing[:5]) if missing else ''}")
 
 
 def expected_modules(fs):
@@ -320,15 +325,15 @@ def hot_reload_check(fs, log):
     q2play(fs, 'resume')
     return before, after, bool(pids) and restarted
 
-def sys_heat(fs):
-    """Q2SYS/1's heat answer from the booted image's q2sysd (docs/sysd.md#heat), or what went wrong"""
+def sys_heat(fs, ask='heat'):
+    """Q2SYS/1's heat answer (or another command's) from the booted image's q2sysd (docs/sysd.md#heat), or what went wrong"""
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(10)
         s.connect(str(fs/'run/vamp/sys.sock'))
         f = s.makefile('rw')
         out = []
-        for line in ('Q2SYS/1', 'heat'):
+        for line in ('Q2SYS/1', ask):
             f.write(line + '\n')
             f.flush()
             out.append(f.readline().strip())
@@ -336,6 +341,17 @@ def sys_heat(fs):
         return out[-1]
     except OSError as e:
         return repr(e)
+
+
+def day_zone(fs):
+    """(index, name) of a zone in q2sysd's table whose clock reads between 10:00 and 15:59 now, by the image's tzdata"""
+    import datetime
+    import zoneinfo
+    for i, name in enumerate((fs/'usr/share/vamp/timezones').read_text().splitlines()):
+        with open(fs/'usr/share/zoneinfo'/name, 'rb') as f:
+            if 10 <= datetime.datetime.now(zoneinfo.ZoneInfo.from_file(f)).hour < 16:
+                return i, name
+    raise SystemExit('no zone in the table is at midday now')
 
 
 def sysd_checks(fs, power_key, log):
@@ -603,6 +619,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     if perturb == 'heat-card':  # q2sysd not told it is a card boot: its heat beside today's q2guard
         r = fs/'etc/sv/q2sysd/run'
         r.write_text(r.read_text().replace('&& card=--card-boot', '&& card='))
+    if perturb == 'zone-off':  # no zone table: rcS's q2sysd zone and the service set none
+        (fs/'usr/share/vamp/timezones').unlink()
     if perturb == 'sysd-off':  # no q2sysd
         (fs/'etc/sv/q2sysd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'playd-off':  # no q2playd
@@ -657,11 +675,15 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/rel).write_text(text + '\n')
     console = open(work/'console.log', 'wb')
     extra = []
+    zone_want = 'UTC'  # a fresh /mnt/data (a tmpfs here) has no zone saved
     if card:
         # as today's Vamp hands the Q2 over from the card (patch/q2vampos.sh): /mnt/data mounted, stock's modules loaded
         (emu/'data').mkdir(exist_ok=True)
         (emu/'data/database.db').write_bytes((fs/'mnt/data/database.db').read_bytes())
         (emu/'data/wpa_supplicant.conf').write_text('network={\n\tssid="Home"\n\tpsk="secret123"\n}\n')  # networks saved
+        # a zone chosen: q2sysd sets it (a zone at midday now, for q2ui's Light Mode)
+        zone_index, zone_want = day_zone(fs)
+        (emu/'data/config.ini').write_text(f'[SYSSET]\nTIMEZONE={zone_index}\n')
         (emu/'modules').write_text(''.join(f'{ko[:-3]} 16384 0 - Live 0x00000000\n' for ko, _ in want))
         extra = ['--bind', emu/'data', '/mnt/data', '--ro-bind', emu/'modules', '/proc/modules']
     outer = []
@@ -703,6 +725,9 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             check(got == 'heat off', f"q2sysd: no heat of its own on a card boot, today's Vamp's q2guard's ({got})")
             if not outer_adbd:
                 adb_checks(fs, emu/'data/adb_keys')
+        if proc.poll() is None:
+            got = sys_heat(fs, 'time')
+            check(got == f'time zone={zone_want}', f"q2sysd: the zone config.ini saves, {zone_want} (docs/sysd.md#the-clock) ({got})")
         if not card and proc.poll() is None:
             sysd_checks(fs, inp/'event2', emu/'record')
         if card:  # the services' first lines
@@ -743,6 +768,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     first = lambda prefix: at(lambda s: s.startswith(prefix))  # noqa: E731
     check(first('accounts: 0 package users') is not None and (first('data: ') or 0) < first('accounts: '),
           'rcS composes the accounts (q2pkgd accounts) once /mnt/data is there')
+    zone_at, svc_at = first(f'clock: zone /usr/share/zoneinfo/{zone_want}, '), first('q2player: start')
+    check(zone_at is not None and (svc_at is None or zone_at < svc_at), f"rcS sets the time zone (q2sysd zone, {zone_want}) before the services")
     if card:
         check(not any(s.startswith('insmod ') for s in order) and first('modules: already loaded, not run again; not loaded: none') is not None,
               'card boot: the module script is not run again over loaded modules')
@@ -791,7 +818,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()

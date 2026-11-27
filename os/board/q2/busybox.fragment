@@ -1,5 +1,5 @@
 # Over Buildroot's busybox.config: runit's applets for the services (docs/vamp-os.md#process-model), UBI attach
-# for /mnt/data. No ubimkvol, ubiformat or flash_erase: nothing in the image can format the data partition.
+# for /mnt/data, ntpd for q2netd's network time (ntpd -q, docs/netd.md#network-time; no server). No ubimkvol, ubiformat or flash_erase: nothing in the image can format the data partition.
 CONFIG_RUNSV=y
 CONFIG_RUNSVDIR=y
 CONFIG_FEATURE_RUNSVDIR_LOG=y
@@ -8,6 +8,9 @@ CONFIG_SV_DEFAULT_SERVICE_DIR="/var/service"
 CONFIG_SVLOGD=y
 CONFIG_CHPST=y
 CONFIG_UBIATTACH=y
+CONFIG_NTPD=y
+# CONFIG_FEATURE_NTPD_SERVER is not set
+# CONFIG_FEATURE_NTPD_CONF is not set
 # CONFIG_UBIMKVOL is not set
 # CONFIG_UBIRMVOL is not set
 # CONFIG_UBIRSVOL is not set

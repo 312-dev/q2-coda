@@ -7,6 +7,7 @@
     python3 tools/vampos.py qemu                                      # the static qemu-mipsel test/os_image.py boots with
     python3 tools/vampos.py card --image composed.squashfs --card DIR [--always | --no-switch]
     python3 tools/vampos.py release --image vampos.squashfs --zip ZIP --tag TAG --out DIR [--key PEM]
+    python3 tools/vampos.py zones OUT                                 # q2sysd's zone table (os/board/q2/post-build.sh)
 
 `build` runs Buildroot (BUILDROOT, pinned by SHA-256, with os/patches/buildroot applied) over os/ as a
 BR2_EXTERNAL tree. Its sources are exported from git first: this tree's os/, tools/, player/, playd/, sysd/, libd/, netd/, pkgd/, patch/, assets/signing and
@@ -26,6 +27,8 @@ release key's Ed25519 signature of it (the key's PEM from --key, or tools/signin
 `vampos.squashfs` holds no file of Shanling's. `compose` appends /vendor to a copy of it: the files
 os/vendor/V1.36.tsv names, each checked against its SHA-256, taken from the user's own stock firmware ZIP or
 from an unpacked root filesystem (on a Q2, its own running one: the installer's seam, docs/vamp-os.md#installer-and-updates).
+
+`zones` writes the zone page's index to zone name table q2sysd reads (docs/sysd.md#the-clock), a name a line.
 """
 import argparse
 import hashlib
@@ -173,6 +176,19 @@ def build(out, worktree=False, jobs=JOBS):
     if size > ROOTFS_ROOM:
         sys.exit(f'os: vampos.squashfs is {size:,} bytes, over the {ROOTFS_ROOM:,} mtd2 holds')
     print(out/'vampos.squashfs')
+
+
+# The zone page's saved index (stock's [SYSSET] TIMEZONE) to the zone q2sysd sets, from tools/build.py's TIMEZONES, which
+# today's Vamp sets as demo's TZ. Its POSIX rules stand in for zones the stock rootfs's tzdata (older than 2022) has wrong;
+# the image's own tzdata (Buildroot's) has them right, so those take their names here (docs/sysd.md#the-clock).
+ZONE_FOR_RULE = {'<-12>12': 'Etc/GMT+12', 'CST6': 'America/Mexico_City', '<+0330>-3:30': 'Asia/Tehran',
+                 '<+12>-12': 'Pacific/Fiji'}
+
+
+def zone_names():
+    sys.path.insert(0, str(ROOT/'tools'))
+    import build
+    return [ZONE_FOR_RULE.get(tz, tz) for _, tz in build.TIMEZONES]
 
 
 def read_manifest(path=MANIFEST):
@@ -345,6 +361,8 @@ def main():
     r.add_argument('--tag', required=True)
     r.add_argument('--out', type=pathlib.Path, required=True)
     r.add_argument('--key')
+    z = sub.add_parser('zones')
+    z.add_argument('out', type=pathlib.Path)
     k = sub.add_parser('card')
     k.add_argument('--image', type=pathlib.Path, required=True)
     k.add_argument('--card', type=pathlib.Path, required=True)
@@ -360,6 +378,9 @@ def main():
         release(a.image, a.zip, a.tag, a.out, a.key)
     elif a.cmd == 'card':
         card(a.image, a.card, None if a.no_switch else 'boot-always' if a.always else 'boot-once')
+    elif a.cmd == 'zones':
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        a.out.write_text(''.join(name + '\n' for name in zone_names()))
     elif a.cmd == 'qemu':
         print(qemu())
     else:

@@ -19,4 +19,8 @@ fi
 for s in "$t"/etc/sv/*; do
     ln -sfn "/run/runit/supervise.${s##*/}" "$s/supervise"
 done
+# The time zone (docs/sysd.md#the-clock): /etc/localtime a link to the one q2sysd sets in /run/vamp, and the zone page's
+# index-to-zone table it reads, from tools/build.py's TIMEZONES
+ln -sfn /run/vamp/localtime "$t/etc/localtime"
+python3 "$VAMP_SRC/vamp/tools/vampos.py" zones "$t/usr/share/vamp/timezones"
 printf 'VAMP_COMMIT=%s\nQ2UI_COMMIT=%s\n' "$(cat "$VAMP_SRC/vamp/COMMIT")" "$(cat "$VAMP_SRC/q2ui/COMMIT")" > "$t/etc/vamp-release"

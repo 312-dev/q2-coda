@@ -2,13 +2,15 @@
 """q2netd (netd/q2netd.c, docs/netd.md) built for this machine, with a stand-in for wpa_supplicant on its control socket
 and commands standing in for ifconfig and udhcpc: the radio on with saved networks and off without, DHCP once
 associated, Smart Wi-Fi's idle off and what holds the radio (the boot hold, wake, hold, the Wi-Fi adbd's use mark,
-smart off), the saved networks edited in stock's file with the rest of it kept, scans, and Q2NET/1. Run it as
+smart off), the saved networks edited in stock's file with the rest of it kept, scans, network time (a stand-in ntpd and
+q2sysd), and Q2NET/1. Run it as
 python3 test/netd.py (pytest). Q2NETD_SOURCE builds another copy, to show a broken one fails here."""
 import os
 import pathlib
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -50,6 +52,13 @@ while True:
     s.sendto(out.encode(), peer)
 '''
 
+# ntpd -q's stand-in: logs the server it was given; exits 0 for the one named in ntp-answer, hangs with ntp-hang
+FAKE_NTP = '''echo "$2" >> "$1/ntp-log"
+[ -f "$1/ntp-hang" ] && exec sleep 1000
+[ -f "$1/ntp-answer" ] && [ "$(cat "$1/ntp-answer")" = "$2" ] && exit 0
+exit 1
+'''
+
 
 @pytest.fixture(scope='session')
 def binary(tmp_path_factory):
@@ -58,6 +67,7 @@ def binary(tmp_path_factory):
     src.write_bytes(SOURCE.read_bytes())
     subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-I', str(conformance.PERM), '-o', str(out/'q2netd'), str(src)], check=True)
     (out/'fake_wpa.py').write_text(FAKE_WPA)
+    (out/'fake_ntp.sh').write_text(FAKE_NTP)
     return out
 
 
@@ -70,7 +80,7 @@ def start(binary, root, *extra, conf=CONF):
         (root/'mnt/data/wpa_supplicant.conf').write_text(conf)
     cmd = [str(binary/'q2netd'), '--root', str(root), '--wpa', f'exec python3 {binary}/fake_wpa.py {root} -iwlan0',
            '--dhcp', f'touch {root}/dhcp-ran; exec sleep 1000', '--up', f'echo up >> {root}/ifconfig',
-           '--down', f'echo down >> {root}/ifconfig', '--idle', '3', *extra]
+           '--down', f'echo down >> {root}/ifconfig', '--ntp', f'exec sh {binary}/fake_ntp.sh {root}', '--idle', '3', *extra]
     p = subprocess.Popen(cmd, stderr=subprocess.PIPE)
     end = time.monotonic() + 5
     while not (root/'run/vamp/net.sock').exists() and time.monotonic() < end:
@@ -278,6 +288,132 @@ def test_another_version_is_refused(run):
     root = run(conf=None)
     a = Api(root, 'Q2NET/2')
     assert a.line() == 'err version'
+
+
+# ---- network time (docs/netd.md#network-time) ----
+
+class FakeSysd:
+    """q2sysd's socket: Q2SYS/1's hello, `time save` answered ok, every line logged"""
+    def __init__(self, root):
+        (root/'run/vamp').mkdir(parents=True, exist_ok=True)
+        self.lines = []
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.s.bind(str(root/'run/vamp/sys.sock'))
+        self.s.listen(4)
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            c, _ = self.s.accept()
+            f = c.makefile('rw')
+            for line in f:
+                line = line.rstrip('\n')
+                self.lines.append(line)
+                f.write('Q2SYS/1 ok\n' if line == 'Q2SYS/1' else 'ok\n')
+                f.flush()
+            c.close()
+
+
+def ntp_log(root):
+    p = root/'ntp-log'
+    return p.read_text().split() if p.exists() else []
+
+
+def time_status(a):
+    a.say('time')
+    words = a.line().split()
+    assert words[0] == 'time', words
+    return dict(w.split('=', 1) for w in words[1:])
+
+
+STOCK_ORDER = ['time.nist.gov', 'time.apple.com', '0.pool.ntp.org', 'time.windows.com']
+
+
+def test_a_connect_syncs_from_the_first_server_that_answers_then_writes_the_rtc(run, tmp_path):
+    """networktime_adjust_thd: stock's servers in turn until one answers, then toolsSetRtcTime (q2sysd's time save)"""
+    (tmp_path/'ntp-answer').write_text('0.pool.ntp.org')
+    (tmp_path/'wpa-state').write_text('SCANNING')
+    sysd = FakeSysd(tmp_path)
+    root = run('--boot-hold', '60')
+    a = Api(root)
+    assert a.line() == 'Q2NET/1 ok'
+    a.say('watch')
+    assert a.line() == 'ok'
+    time.sleep(1.5)
+    assert ntp_log(root) == [], 'nothing before the connect'
+    (root/'wpa-state').write_text('COMPLETED')
+    assert wait_for(lambda: 'time save' in sysd.lines), sysd.lines
+    assert ntp_log(root) == STOCK_ORDER[:3]
+    while (l := a.line()).startswith(('status', 'radio')):
+        pass
+    assert l == 'time synced server=0.pool.ntp.org'
+    st = time_status(a)
+    assert (st['auto'], st['state'], st['server']) == ('1', 'idle', '0.pool.ntp.org') and int(st['synced']) > 1.7e9
+    time.sleep(2.5)
+    assert ntp_log(root) == STOCK_ORDER[:3] and sysd.lines.count('time save') == 1, 'one round a connect'
+    (root/'wpa-state').write_text('SCANNING')
+    assert wait_for(lambda: status(a)['state'] == 'scanning')
+    (root/'wpa-state').write_text('COMPLETED')
+    assert wait_for(lambda: sysd.lines.count('time save') == 2), 'a round at the next connect'
+    assert ntp_log(root) == STOCK_ORDER[:3] * 2
+
+
+def test_no_server_answering_still_writes_the_rtc(run, tmp_path):
+    """stock writes the RTC after the round whether a server answered or not"""
+    sysd = FakeSysd(tmp_path)
+    root = run('--boot-hold', '60')
+    a = Api(root)
+    assert a.line() == 'Q2NET/1 ok'
+    a.say('watch')
+    assert a.line() == 'ok'
+    assert wait_for(lambda: 'time save' in sysd.lines), sysd.lines
+    assert ntp_log(root) == STOCK_ORDER
+    while (l := a.line()).startswith(('status', 'radio')):
+        pass
+    assert l == 'time failed'
+    assert time_status(a)['synced'] == '0'
+    time.sleep(2.5)
+    assert ntp_log(root) == STOCK_ORDER and sysd.lines.count('time save') == 1, 'one round a connect, answered or not'
+
+
+@pytest.mark.parametrize('value', ['0', '2'])
+def test_set_time_automatically_off_asks_no_server_and_turning_it_on_does(run, tmp_path, value):
+    """config_init: AUTOSYNCTIME 1 is on, anything else off; the switch turned on asks at once (its flag)"""
+    (tmp_path/'mnt/data').mkdir(parents=True)
+    (tmp_path/'mnt/data/config.ini').write_text(f'[SYSSET]\nTIME24H=1\nAUTOSYNCTIME={value}\n[IPOD]\nAUTOSYNCTIME=1\n')
+    sysd = FakeSysd(tmp_path)
+    root = run('--boot-hold', '60')
+    a = Api(root)
+    assert a.line() == 'Q2NET/1 ok'
+    assert wait_for(lambda: status(a)['state'] == 'connected')
+    time.sleep(2.5)
+    assert ntp_log(root) == [] and sysd.lines == [] and time_status(a)['auto'] == '0'
+    (root/'mnt/data/config.ini').write_text('[SYSSET]\nTIME24H=1\nAUTOSYNCTIME=1\n')
+    assert wait_for(lambda: 'time save' in sysd.lines), 'a round once the switch is on'
+    assert time_status(a)['auto'] == '1'
+
+
+def test_a_round_holds_the_radio_up(run, tmp_path):
+    """Smart Wi-Fi's off waits for a round in progress (a server not answering yet)"""
+    (tmp_path/'ntp-hang').write_text('')
+    root = run('--boot-hold', '5')  # past the connect (about 3 s here), which starts the round
+    a = Api(root)
+    assert a.line() == 'Q2NET/1 ok'
+    assert wait_for(lambda: time_status(a)['state'] == 'syncing')
+    time.sleep(5)  # past the boot hold
+    assert status(a)['state'] == 'connected' and time_status(a)['state'] == 'syncing'
+    assert ntp_log(root) == STOCK_ORDER[:1]
+
+
+def test_a_card_boot_asks_no_server(run, tmp_path):
+    """today's Vamp syncs the clock on a card boot"""
+    (tmp_path/'ntp-answer').write_text('time.nist.gov')
+    root = run('--card-boot')
+    a = Api(root)
+    assert a.line() == 'Q2NET/1 ok'
+    assert wait_for(lambda: status(a)['state'] == 'connected')
+    time.sleep(2.5)
+    assert ntp_log(root) == [] and time_status(a)['state'] == 'external'
 
 
 # ---- Vamp API 1 (docs/platform/network.md) ----

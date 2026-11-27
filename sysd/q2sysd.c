@@ -298,6 +298,63 @@ static long long light_stamp = -1;
 static const int SAVEPOWER_S[] = {60, 180, 300, 600};
 static int standby_s, savepower_s, time_scale = 1;
 
+/* ---- the time zone (docs/sysd.md#the-clock) ----
+ * Stock's [SYSSET] TIMEZONE, the zone page's index: config_init reads it with atoi and takes a value past the list as
+ * 22 (Shanghai); a file without the key is a fresh /mnt/data, read as Vamp's default, UTC (tools/build.py
+ * DEFAULT_TIMEZONE). The index's zone name is line index of ZONES (one name a line, made from tools/build.py's
+ * TIMEZONES by tools/vampos.py zones). The zone is /run/vamp/localtime, a link to its zoneinfo file, and /etc/localtime
+ * in the image a link to that, so every program's localtime() follows it (glibc reads /etc/localtime again when it
+ * changes), with no TZ in anyone's environment. Set again whenever config.ini changes. */
+#define ZONES "/usr/share/vamp/timezones"
+#define ZONE_STOCK 22   /* config_init's for an index past the list */
+#define ZONE_DEFAULT 43 /* tools/build.py DEFAULT_TIMEZONE, GMT+0 UTC */
+static char zone_now[80];
+
+static int zone_name(int index, char *out, size_t room) {
+    char line[80];
+    FILE *f = fopen(path(ZONES), "r");
+    int i = 0, n = 0, found = -1;
+    while (f && fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\n")] = 0;
+        if (i == index) snprintf(out, room, "%s", line), found = 0;
+        ++i, ++n;
+    }
+    if (f) fclose(f);
+    if (index >= n) return -2; /* past the list */
+    return found;
+}
+
+static void zone_apply(void) {
+    char name[80] = "", target[120], tmp[400];
+    int v = config_int("SYSSET", "TIMEZONE", ZONE_DEFAULT);
+    if (v < 0 || zone_name(v, name, sizeof name) == -2) v = ZONE_STOCK, zone_name(v, name, sizeof name);
+    if (!*name || strchr(name, '.') || name[0] == '/') { say("time zone %d: no zone in %s", v, ZONES); return; }
+    if (!strcmp(name, zone_now)) return;
+    snprintf(target, sizeof target, "/usr/share/zoneinfo/%s", name);
+    if (access(path(target), R_OK)) say("time zone %s: no %s", name, target);
+    snprintf(tmp, sizeof tmp, "%s", path("/run/vamp/localtime.new"));
+    unlink(tmp);
+    if (symlink(target, tmp) || rename(tmp, path("/run/vamp/localtime"))) { say("time zone %s: %s", name, strerror(errno)); return; }
+    snprintf(zone_now, sizeof zone_now, "%s", name);
+    say("time zone %d: %s", v, name);
+    tell("time zone=%s", name);
+}
+
+/* The RTC holds UTC: the kernel reads it as UTC at boot (hctosys). Stock writes it after every time set, by hand or
+ * from the network (toolsSetRtcTime: date -s, then hwclock -w, which today's Vamp makes -wu, docs/internals.md#clock). */
+static int rtc_save(void) {
+    int r = run_tool("/sbin/hwclock -w -u");
+    say(r ? "rtc: hwclock failed (%d)" : "rtc: written", r);
+    return r;
+}
+static int time_set(long long s) {
+    if (run_tool("/bin/date -u -s @%lld >/dev/null", s)) return say("time set %lld: date failed", s), -1;
+    say("time set %lld", s);
+    tell("time set");
+    rtc_save();
+    return 0;
+}
+
 static void light_poll(void) {
     struct stat st;
     long long stamp = stat(path("/mnt/data/config.ini"), &st) ? 0 : (long long)st.st_mtime * 1000003 + (long long)st.st_size;
@@ -310,6 +367,7 @@ static void light_poll(void) {
     savepower_s = v >= 1 && v <= 4 ? SAVEPOWER_S[v - 1] : 0;
     use_now();
     say("screen off time %d s, auto standby %d s, auto power off %d s (0: never)", light_s, standby_s, savepower_s);
+    zone_apply();
 }
 
 /* the charger on (allow) or held off, through PE22 (active low: 1 holds it off) as the kernel's GPIO class gives it */
@@ -759,7 +817,7 @@ static void client_line(struct client *c, const char *line) {
         c->hello = 1;
         client_say(c, "Q2SYS/1 ok");
     } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby heat jack battery watch");
+        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby heat jack battery time watch");
     } else if (!strcmp(line, "battery")) {
         char text[160];
         read_battery();
@@ -787,6 +845,15 @@ static void client_line(struct client *c, const char *line) {
     } else if (!strcmp(line, "usb storage") || !strcmp(line, "usb adb") || !strcmp(line, "usb dac") || !strcmp(line, "usb car")) {
         int r = line[4] == 's' ? usb_set_storage() : line[4] == 'd' ? usb_set_dac() : line[4] == 'c' ? usb_set_car() : usb_set_adb();
         client_say(c, r ? "err usb" : "ok");
+    } else if (!strcmp(line, "time")) { /* the time zone in effect (docs/sysd.md#the-clock) */
+        client_say(c, "time zone=%s", *zone_now ? zone_now : "none");
+    } else if (!strcmp(line, "time save")) { /* the system clock into the RTC, after a network sync (q2netd) */
+        client_say(c, rtc_save() ? "err time" : "ok");
+    } else if (!strncmp(line, "time set", 8) && (!line[8] || line[8] == ' ')) { /* by hand: seconds since 1970, UTC */
+        char *end;
+        long long s = line[8] ? strtoll(line + 9, &end, 10) : 0;
+        if (!line[8] || *end || end == line + 9 || s <= 0) { client_say(c, "err time"); return; }
+        client_say(c, time_set(s) ? "err time" : "ok");
     } else if (!strcmp(line, "standby")) {
         client_say(c, "ok"); /* answered first: the write that suspends returns only at the resume */
         standby();
@@ -1124,6 +1191,7 @@ static void ui_read(void) {
     if (ui_n >= sizeof ui_in - 1) ui_n = 0, ui_in[0] = 0;
 }
 
+static int zone_only;
 static volatile sig_atomic_t stopping;
 static void on_term(int s) { (void)s, stopping = 1; }
 
@@ -1134,8 +1202,14 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--heat-file") && i + 1 < argc) snprintf(heat_file, sizeof heat_file, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--reboot") && i + 1 < argc) snprintf(reboot_cmd, sizeof reboot_cmd, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--card-boot")) card_boot = 1;
+        else if (!strcmp(argv[i], "zone")) zone_only = 1;
         else if (!strcmp(argv[i], "--time-scale") && i + 1 < argc && atoi(argv[i + 1]) > 0) time_scale = atoi(argv[++i]);
-        else return fprintf(stderr, "usage: q2sysd [--root DIR] [--poweroff COMMAND] [--reboot COMMAND] [--card-boot] [--time-scale N] [--heat-file F]\n"), 2;
+        else return fprintf(stderr, "usage: q2sysd [--root DIR] [--poweroff COMMAND] [--reboot COMMAND] [--card-boot] [--time-scale N] [--heat-file F] [zone]\n"), 2;
+    }
+    if (zone_only) { /* rcS, before any service: the zone set once (docs/sysd.md#the-clock) */
+        mkdir(path("/run"), 0755), mkdir(path("/run/vamp"), 0755);
+        zone_apply();
+        return *zone_now ? 0 : 1;
     }
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);

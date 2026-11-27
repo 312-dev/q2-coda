@@ -1,6 +1,6 @@
 # Q2NET/1: the network
 
-`q2netd`'s socket, `/run/vamp/net.sock` ([q2netd](../netd.md)), in [the common shape](README.md#the-common-shape): Wi-Fi's state, the saved networks, and holding the radio up (Smart Wi-Fi). SSIDs and passphrases are percent-encoded both ways.
+`q2netd`'s socket, `/run/vamp/net.sock` ([q2netd](../netd.md)), in [the common shape](README.md#the-common-shape): Wi-Fi's state, the saved networks, holding the radio up (Smart Wi-Fi) and network time. SSIDs and passphrases are percent-encoded both ways.
 
 | Command | Answer |
 | --- | --- |
@@ -13,14 +13,15 @@
 | `hold S` | `ok`: held up S seconds more |
 | `off` | `ok`: the radio off now |
 | `smart on`, `smart off` | `ok`: Smart Wi-Fi's turning off when nothing holds it, or the radio kept up |
-| `watch` | `ok`; then `status ...` and `radio on`, `radio off` lines as they change |
-| `caps` | `caps status scan networks add forget wake hold off smart watch` |
+| `time` | `time auto=0\|1 state=idle\|syncing\|external synced=SECONDS server=NAME`: Set Time Automatically (`[SYSSET] AUTOSYNCTIME`), whether a round is asking the servers now (`external` on a card boot, whose clock is today's Vamp's), when the last answer set the clock (seconds since 1970, 0 for none yet) and the server that gave it (`none`) ([q2netd: Network time](../netd.md#network-time)); capability word `time` |
+| `watch` | `ok`; then `status ...`, `radio on`, `radio off` lines as they change, and `time synced server=NAME` or `time failed` at the end of a round |
+| `caps` | `caps status scan networks add forget wake hold off smart time watch` |
 
 ```conformance
 > Q2NET/1
 < Q2NET/1 ok
 > caps
-< caps status scan networks add forget wake hold off smart watch
+< caps status scan networks add forget wake hold off smart time watch
 > networks
 < network ssid=Home
 < ok
@@ -34,6 +35,8 @@
 < err no such network
 > status
 < ~ status state=\S+ ssid=\S* ip=\S* smart=1 held=\d+
+> time
+< ~ time auto=[01] state=(idle|syncing|external) synced=\d+ server=\S+
 > smart off
 < ok
 > smart on
@@ -49,7 +52,7 @@
 > watch
 < ok
 > off
-<* ~ radio off|status .*
+<* ~ radio off|status .*|time .*
 < ok
 ```
 

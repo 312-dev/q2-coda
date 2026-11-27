@@ -4,7 +4,7 @@
 #   2. /mnt/data, the UBIFS on the "userdata" partition: attached and mounted, never erased or formatted
 #      (on any failure it is a tmpfs for this boot, and the boot log says why), or left as it is when already
 #      mounted (a boot from the card, docs/vamp-os-base.md#card-boot); then the accounts, the packages' users
-#      added to the image's (q2pkgd accounts);
+#      added to the image's (q2pkgd accounts), and the time zone config.ini names (q2sysd zone);
 #   3. Shanling's own module script, /vendor/module_driver/driver_default_init_script.sh, run unchanged from
 #      its folder, as stock's S11module_driver_default runs it; then what loaded, against the .ko files there.
 #      Not run when any of them is loaded already (a boot from the card);
@@ -94,6 +94,13 @@ if /usr/bin/q2pkgd accounts; then
     step "accounts: $(grep -c '^app-' /run/vamp/passwd) package users"
 else
     step "accounts: q2pkgd accounts FAILED, the image's users alone"
+fi
+
+# the time zone from config.ini, before any service reads the time (q2sysd zone, docs/sysd.md#the-clock)
+if /usr/bin/q2sysd zone 2>/dev/null; then
+    step "clock: zone $(readlink /run/vamp/localtime), $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
+else
+    step "clock: no zone set, UTC"
 fi
 
 # loaded: which of /module_driver's modules /proc/modules has; missing: which it has not

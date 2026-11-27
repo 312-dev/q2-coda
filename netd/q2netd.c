@@ -204,6 +204,106 @@ static void poll_status(void) {
     }
 }
 
+/* ---- network time (docs/netd.md#network-time) ----
+ * Stock's networktime_adjust_thd: with [SYSSET] AUTOSYNCTIME on (Set Time Automatically), a round at each Wi-Fi connect
+ * (network_checkstatus's turn to connected) and when the switch is turned on: ntpdate against each of NTP_SERVERS in
+ * turn until one answers, then the system clock written to the RTC (toolsSetRtcTime) whether one answered or not.
+ * Here BusyBox's ntpd -q stands in for ntpdate and the RTC is q2sysd's (Q2SYS/1 time save). 0.pool.ntp.org is today's
+ * Vamp's in place of stock's cn.pool.ntp.org (tools/build.py NTP_POOL). On a card boot today's Vamp syncs the clock
+ * itself, so no round runs here. */
+static const char *const NTP_SERVERS[] = {"time.nist.gov", "time.apple.com", "0.pool.ntp.org", "time.windows.com"};
+#define NTP_N (int)(sizeof NTP_SERVERS / sizeof *NTP_SERVERS)
+#define NTP_MAX_MS 70000 /* a server's try, at most: ntpd -q gives the first answer 10 s and the sync 50 s more */
+static char ntp_cmd[512];
+static int autosync = -1, ntp_due, ntp_try = -1; /* ntp_try: the server being tried, -1 between rounds */
+static pid_t ntp_pid;
+static unsigned long long ntp_at;
+static long long synced_at; /* the last round's answer, seconds since 1970; 0 none yet */
+static char synced_by[32];
+
+static int config_int(const char *section, const char *key, int fallback) {
+    char line[256], head[64];
+    int in = 0, v = fallback;
+    snprintf(head, sizeof head, "[%s]", section);
+    FILE *f = fopen(path("/mnt/data/config.ini"), "r");
+    size_t k = strlen(key);
+    while (f && fgets(line, sizeof line, f)) {
+        if (line[0] == '[') in = !strncmp(line, head, strlen(head));
+        else if (in && !strncmp(line, key, k) && line[k] == '=') v = atoi(line + k + 1);
+    }
+    if (f) fclose(f);
+    return v;
+}
+
+/* Set Time Automatically: config_init's 1 is on, anything else off; a file without the key (a fresh /mnt/data) reads
+ * as stock's own file, 1. Looked at once a second (its time and size); turned on, a round is due. */
+static void autosync_poll(void) {
+    static long long stamp = -1;
+    struct stat sb;
+    long long now = stat(path("/mnt/data/config.ini"), &sb) ? 0 : (long long)sb.st_mtime * 1000003 + (long long)sb.st_size;
+    if (now == stamp) return;
+    stamp = now;
+    int on = config_int("SYSSET", "AUTOSYNCTIME", 1) == 1;
+    if (on && autosync == 0) ntp_due = 1; /* the switch turned on: at once, as stock's switch sets the flag */
+    if (!on) ntp_due = 0;
+    if (on != autosync) say("set time automatically %s", on ? "on" : "off");
+    autosync = on;
+}
+
+/* Q2SYS/1 time save: the RTC is q2sysd's (docs/sysd.md#the-clock) */
+static void rtc_save(void) {
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    char got[128] = "";
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    struct timeval tv = {3, 0};
+    if (fd >= 0) setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    if (fd < 0 || sun(&a, path("/run/vamp/sys.sock")) || connect(fd, (struct sockaddr *)&a, sizeof a) ||
+        send(fd, "Q2SYS/1\ntime save\n", 18, MSG_NOSIGNAL) != 18) {
+        say("time: no q2sysd for the RTC");
+    } else {
+        size_t n = 0;
+        ssize_t r;
+        while (n < sizeof got - 1 && (r = recv(fd, got + n, sizeof got - 1 - n, 0)) > 0) {
+            n += (size_t)r, got[n] = 0;
+            if (strstr(got, "\nok\n") || strstr(got, "\nerr")) break;
+        }
+        say(strstr(got, "\nok\n") ? "time: the RTC written" : "time: the RTC not written");
+    }
+    if (fd >= 0) close(fd);
+}
+
+static void ntp_start(int i) {
+    char cmd[700];
+    snprintf(cmd, sizeof cmd, "%s %s", ntp_cmd, NTP_SERVERS[i]);
+    ntp_try = i, ntp_pid = spawn(cmd), ntp_at = now_ms();
+}
+
+/* a round: started when due and connected, a server at a time, the RTC written at its end */
+static void ntp_poll(int connected) {
+    if (ntp_try < 0) {
+        if (ntp_due && connected && !card_boot) ntp_due = 0, ntp_start(0);
+        return;
+    }
+    int status, r = waitpid(ntp_pid, &status, WNOHANG), ok = r == ntp_pid && WIFEXITED(status) && !WEXITSTATUS(status);
+    if (r == 0 && now_ms() < ntp_at + NTP_MAX_MS) return;
+    if (r == 0) say("time: %s did not answer in %d s", NTP_SERVERS[ntp_try], NTP_MAX_MS / 1000), stop_child(&ntp_pid);
+    ntp_pid = 0;
+    if (ok) {
+        synced_at = (long long)time(0);
+        snprintf(synced_by, sizeof synced_by, "%s", NTP_SERVERS[ntp_try]);
+        say("time: set from %s", synced_by);
+        tell("time synced server=%s", synced_by);
+    } else if (ntp_try + 1 < NTP_N) {
+        ntp_start(ntp_try + 1);
+        return;
+    } else {
+        say("time: no server answered");
+        tell("time failed");
+    }
+    ntp_try = -1;
+    rtc_save();
+}
+
 /* ---- the saved networks (stock's wpa_supplicant.conf) ---- */
 
 static char *read_all(const char *p, size_t *n) {
@@ -371,7 +471,7 @@ static void client_line(struct client *c, char *line) {
         c->hello = 1;
         client_say(c, "Q2NET/1 ok");
     } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps status scan networks add forget wake hold off smart watch");
+        client_say(c, "caps status scan networks add forget wake hold off smart time watch");
     } else if (!strcmp(line, "status")) {
         status_line(a, sizeof a);
         client_say(c, "%s", a);
@@ -410,6 +510,9 @@ static void client_line(struct client *c, char *line) {
     } else if (!strncmp(line, "forget ", 7)) {
         snprintf(b, sizeof b, "%s", line + 7), dec(b);
         client_say(c, forget_network(b) ? "err no such network" : "ok");
+    } else if (!strcmp(line, "time")) { /* network time (docs/netd.md#network-time) */
+        client_say(c, "time auto=%d state=%s synced=%lld server=%s", autosync == 1, card_boot ? "external" : ntp_try >= 0 ? "syncing" : "idle", synced_at,
+                   *synced_by ? synced_by : "none");
     } else if (!strcmp(line, "watch")) {
         c->watch = 1;
         client_say(c, "ok");
@@ -463,10 +566,11 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--dhcp") && v) snprintf(dhcp_cmd, sizeof dhcp_cmd, "%s", v), ++i;
         else if (!strcmp(argv[i], "--up") && v) snprintf(up_cmd, sizeof up_cmd, "%s", v), ++i;
         else if (!strcmp(argv[i], "--down") && v) snprintf(down_cmd, sizeof down_cmd, "%s", v), ++i;
+        else if (!strcmp(argv[i], "--ntp") && v) snprintf(ntp_cmd, sizeof ntp_cmd, "%s", v), ++i;
         else if (!strcmp(argv[i], "--idle") && v) idle_s = atoi(v), ++i;
         else if (!strcmp(argv[i], "--boot-hold") && v) boot_hold_s = atoi(v), ++i;
         else if (!strcmp(argv[i], "--card-boot")) card_boot = 1;
-        else return fprintf(stderr, "usage: q2netd [--root DIR] [--wpa CMD] [--dhcp CMD] [--up CMD] [--down CMD] [--idle S] [--boot-hold S]\n"), 2;
+        else return fprintf(stderr, "usage: q2netd [--root DIR] [--wpa CMD] [--dhcp CMD] [--up CMD] [--down CMD] [--ntp CMD] [--idle S] [--boot-hold S]\n"), 2;
     }
     if (!*wpa_cmd)
         snprintf(wpa_cmd, sizeof wpa_cmd, "exec /usr/sbin/wpa_supplicant -Dnl80211 -i%s -c%s/mnt/data/wpa_supplicant.conf -O%s%s", iface,
@@ -474,6 +578,7 @@ int main(int argc, char **argv) {
     if (!*dhcp_cmd) snprintf(dhcp_cmd, sizeof dhcp_cmd, "exec /sbin/udhcpc -f -i %s -S", iface);
     if (!*up_cmd) snprintf(up_cmd, sizeof up_cmd, "ifconfig %s up", iface);
     if (!*down_cmd) snprintf(down_cmd, sizeof down_cmd, "ifconfig %s down", iface);
+    if (!*ntp_cmd) snprintf(ntp_cmd, sizeof ntp_cmd, "exec /usr/sbin/ntpd -n -q -p"); /* the server after it */
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);
     signal(SIGINT, on_term);
@@ -499,7 +604,9 @@ int main(int argc, char **argv) {
     struct timespec used = {0, 0};
     ino_t used_ino = 0;
     unsigned seen = st_seq;
-    unsigned long long polled = 0;
+    unsigned long long polled = 0, autosync_at = 0;
+    int was_connected = 0;
+    autosync_poll();
     while (!stopping) {
         struct pollfd p[1 + CLIENTS];
         int n = 0;
@@ -509,7 +616,7 @@ int main(int argc, char **argv) {
             p[n++] = (struct pollfd){.fd = cl[i].scan_until ? -1 : cl[i].fd, .events = POLLIN};
             waiting |= cl[i].fd >= 0 && cl[i].scan_until;
         }
-        poll(p, (nfds_t)n, waiting ? 100 : 1000);
+        poll(p, (nfds_t)n, waiting || ntp_try >= 0 ? 100 : 1000); /* a round's next server as soon as one ends */
         if (p[0].revents & POLLIN) {
             int fd = accept4(api, 0, 0, SOCK_CLOEXEC), i = 0;
             while (fd >= 0 && i < CLIENTS && cl[i].fd >= 0) ++i;
@@ -531,7 +638,13 @@ int main(int argc, char **argv) {
         }
         unsigned long long t = now_ms();
         if (radio_on && t >= polled + STATUS_EVERY_MS) poll_status(), polled = t;
-        if (radio_on && smart && t >= held_until && t >= started_at && held_until) radio(0);
+        if (t >= autosync_at + 1000) autosync_poll(), autosync_at = t;
+        int connected = radio_on && !strcmp(st.state, "connected");
+        if (connected && !was_connected && autosync == 1) ntp_due = 1; /* a connect: a round, as network_checkstatus asks */
+        was_connected = connected;
+        ntp_poll(connected);
+        /* the radio stays up through a round (Smart Wi-Fi's off waits for it) */
+        if (radio_on && smart && t >= held_until && t >= started_at && held_until && ntp_try < 0) radio(0);
         if (wpa_pid > 0 && waitpid(wpa_pid, 0, WNOHANG) == wpa_pid) wpa_pid = 0, say("wpa_supplicant ended");
         if (dhcp_pid > 0 && waitpid(dhcp_pid, 0, WNOHANG) == dhcp_pid) dhcp_pid = 0;
         if (radio_on && !external && wpa_pid == 0 && t >= wpa_at + RESPAWN_MS) wpa_pid = spawn(wpa_cmd), wpa_at = t; /* started again */
@@ -542,6 +655,7 @@ int main(int argc, char **argv) {
             seen = st_seq;
         }
     }
+    stop_child(&ntp_pid);
     if (!card_boot) radio(0);
     else if (!external) stop_child(&dhcp_pid), stop_child(&wpa_pid); /* its own, at its end */
     unlink(path("/run/vamp/net.sock"));

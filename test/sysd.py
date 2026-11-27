@@ -17,6 +17,9 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import conformance  # noqa: E402
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
+import vampos  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE = pathlib.Path(os.environ.get('Q2SYSD_SOURCE') or ROOT/'sysd/q2sysd.c')
 KEY_POWER, KEY_VOLUMEUP, EV_KEY = 116, 115, 1
@@ -54,6 +57,10 @@ def tree(tmp_path):
     (tmp_path/'dev/input').mkdir(parents=True)
     os.mkfifo(tmp_path/'dev/input/event1')
     conformance.accounts(tmp_path)
+    names = vampos.zone_names()  # the image's table (os/board/q2/post-build.sh), and a stand-in zoneinfo file each
+    put(tmp_path, '/usr/share/vamp/timezones', ''.join(n + '\n' for n in names))
+    for n in names:
+        put(tmp_path, f'/usr/share/zoneinfo/{n}', 'TZif')
     return tmp_path
 
 
@@ -62,8 +69,8 @@ TOOL = '#!/bin/sh\necho "$(basename "$0") $*" >> {root}/tools.log\nexit $(cat {r
 
 @pytest.fixture
 def tools(tree):
-    """mount, umount, sync, q2adb-gadget, sv and q2car as stand-ins that log to tools.log; NAME.status sets one's exit status"""
-    for rel in ('bin/mount', 'bin/umount', 'bin/sync', 'usr/bin/q2adb-gadget', 'usr/bin/sv', 'usr/bin/q2car'):
+    """mount, umount, sync, q2adb-gadget, sv, q2car, hwclock and date as stand-ins that log to tools.log; NAME.status sets one's exit status"""
+    for rel in ('bin/mount', 'bin/umount', 'bin/sync', 'usr/bin/q2adb-gadget', 'usr/bin/sv', 'usr/bin/q2car', 'sbin/hwclock', 'bin/date'):
         put(tree, rel, TOOL.format(root=tree))
         (tree/rel).chmod(0o755)
     return tree
@@ -1158,6 +1165,84 @@ def test_no_watchdog_device_is_said_and_nothing_else(binary, tree, tools, wdt_sh
     time.sleep(1.5)
     code, err = w.end()
     assert code == 0 and 'no watchdog' in err and w.calls() == [], err
+
+
+# ---- the clock (docs/sysd.md#the-clock) ----
+
+def zone(root):
+    p = root/'run/vamp/localtime'
+    return os.readlink(p) if p.is_symlink() else None
+
+
+def until(pred, secs=4):
+    end = time.monotonic() + secs
+    while not pred() and time.monotonic() < end:
+        time.sleep(0.1)
+    return pred()
+
+
+def test_the_zone_is_config_inis_index_and_follows_a_change(run):
+    """no TIMEZONE (a fresh /mnt/data) is Vamp's UTC; index 38 is Chicago (tools/build.py TIMEZONES), set within a
+    second of the change and told"""
+    root, _ = run
+    assert until(lambda: zone(root) == '/usr/share/zoneinfo/UTC'), zone(root)
+    a = Api(root)
+    assert a.line() == 'Q2SYS/1 ok'
+    a.say('time')
+    assert a.line() == 'time zone=UTC'
+    a.say('watch')
+    assert a.line() == 'ok'
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nTIME24H=1\nTIMEZONE=38\n[IPOD]\nTIMEZONE=5\n')
+    assert until(lambda: zone(root) == '/usr/share/zoneinfo/America/Chicago'), zone(root)
+    assert a.line() == 'time zone=America/Chicago'
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nTIMEZONE=6\n')  # stock's Mexico City row, a POSIX rule in today's Vamp
+    assert until(lambda: zone(root) == '/usr/share/zoneinfo/America/Mexico_City'), zone(root)
+
+
+@pytest.mark.parametrize('value', ['44', '-1', '200'])
+def test_a_zone_index_past_the_list_is_stocks_shanghai(run, value):
+    """config_init takes an index past the list as 22, Asia/Shanghai"""
+    root, _ = run
+    put(root, '/mnt/data/config.ini', f'[SYSSET]\nTIMEZONE={value}\n')
+    assert until(lambda: zone(root) == '/usr/share/zoneinfo/Asia/Shanghai'), zone(root)
+
+
+def test_q2sysd_zone_sets_it_once_and_ends(binary, tree):
+    """rcS's `q2sysd zone`, before any service: the link made, exit 0, no socket"""
+    put(tree, '/mnt/data/config.ini', '[SYSSET]\nTIMEZONE=12\n')
+    r = subprocess.run([str(binary), '--root', str(tree), 'zone'], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, r.stderr
+    assert zone(tree) == '/usr/share/zoneinfo/Europe/London' and not (tree/'run/vamp/sys.sock').exists()
+    (tree/'usr/share/vamp/timezones').unlink()  # no table: nothing set, a failure for rcS's log
+    (tree/'run/vamp/localtime').unlink()
+    r = subprocess.run([str(binary), '--root', str(tree), 'zone'], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 1 and zone(tree) is None
+
+
+def test_time_save_writes_the_rtc_in_utc_and_time_set_sets_then_saves(run):
+    """stock's toolsSetRtcTime: date -s, then hwclock -w, made -wu by today's Vamp (docs/internals.md#clock)"""
+    root, _ = run
+    a = Api(root)
+    assert a.line() == 'Q2SYS/1 ok'
+    a.say('time save')
+    assert a.line() == 'ok'
+    assert read(root, '/tools.log').splitlines()[-1] == 'hwclock -w -u'
+    a.say('watch')
+    assert a.line() == 'ok'
+    a.say('time set 1767225600')
+    assert a.line() == 'time set' and a.line() == 'ok'
+    assert read(root, '/tools.log').splitlines()[-2:] == ['date -u -s @1767225600', 'hwclock -w -u']
+    for bad in ('time set', 'time set 12x', 'time set -5', 'time set 0'):
+        a.say(bad)
+        assert a.line() == 'err time', bad
+    put(root, '/date.status', '1')  # date refused (no CAP_SYS_TIME): no set, no RTC write
+    before = read(root, '/tools.log')
+    a.say('time set 1767225600')
+    assert a.line() == 'err time'
+    assert read(root, '/tools.log').splitlines()[len(before.splitlines()):] == ['date -u -s @1767225600']
+    put(root, '/hwclock.status', '1')
+    a.say('time save')
+    assert a.line() == 'err time'
 
 
 if __name__ == '__main__':
