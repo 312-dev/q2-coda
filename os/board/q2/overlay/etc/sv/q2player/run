@@ -1,0 +1,7 @@
+#!/bin/sh
+# q2player (player/, docs/player.md). It is the client of /tmp/sock_play, whose server, q2playd, is not
+# built yet (docs/vamp-os.md, M6): without one it ends after five seconds, and finish waits before the next try.
+. /usr/libexec/vamp/log
+step "q2player: start"
+exec 2>&1
+exec /usr/bin/q2player

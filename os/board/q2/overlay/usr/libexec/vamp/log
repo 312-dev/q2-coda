@@ -1,0 +1,10 @@
+# Sourced by rcS and the services' scripts. step MESSAGE: one line, the seconds since boot first, in
+# /run/vamp/boot.log, and in /mnt/data/vamp/boot.log too once rcS has the data partition (/run/vamp/keep), so a
+# boot can be read afterwards, from stock over adb if need be (docs/vamp-os-base.md#first-boot-on-a-q2).
+step() {
+    local t rest
+    read -r t rest < /proc/uptime
+    echo "$t $*" >> /run/vamp/boot.log
+    [ -e /run/vamp/keep ] && echo "$t $*" >> /mnt/data/vamp/boot.log
+    return 0
+}

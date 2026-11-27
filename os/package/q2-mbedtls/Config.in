@@ -1,0 +1,5 @@
+config BR2_PACKAGE_Q2_MBEDTLS
+	bool "q2-mbedtls"
+	help
+	  mbedTLS at tools/thirdparty.py's release, configured with its MBEDTLS_UNSET (a TLS client and nothing
+	  more), static, for q2player's FFmpeg (https). Staging only: nothing goes into the image.

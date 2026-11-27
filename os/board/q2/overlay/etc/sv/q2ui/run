@@ -1,0 +1,11 @@
+#!/bin/sh
+# q2ui, the screen and the keys (ui/ on feat/render-engine). Its library is /mnt/data/database.db, stock's
+# (q2libd, the image's own index, is not built yet: docs/vamp-os.md, M6); without one it ends at once.
+. /usr/libexec/vamp/log
+if [ ! -e /dev/fb0 ]; then
+    step "q2ui: no /dev/fb0"
+    exec sleep 2
+fi
+step "q2ui: start"
+exec 2>&1
+exec /usr/bin/q2ui --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons

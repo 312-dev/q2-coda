@@ -1,0 +1,22 @@
+# Over Buildroot's busybox.config: runit's applets for the services (docs/vamp-os.md#process-model), UBI attach
+# for /mnt/data. No ubimkvol, ubiformat or flash_erase: nothing in the image can format the data partition.
+CONFIG_RUNSV=y
+CONFIG_RUNSVDIR=y
+CONFIG_FEATURE_RUNSVDIR_LOG=y
+CONFIG_SV=y
+CONFIG_SV_DEFAULT_SERVICE_DIR="/var/service"
+CONFIG_SVLOGD=y
+CONFIG_CHPST=y
+CONFIG_UBIATTACH=y
+# CONFIG_UBIMKVOL is not set
+# CONFIG_UBIRMVOL is not set
+# CONFIG_UBIRSVOL is not set
+# CONFIG_UBIUPDATEVOL is not set
+# CONFIG_FLASH_ERASEALL is not set
+# CONFIG_FLASH_LOCK is not set
+# CONFIG_FLASH_UNLOCK is not set
+# CONFIG_FLASHCP is not set
+# CONFIG_MODPROBE is not set
+# CONFIG_DEPMOD is not set
+# CONFIG_TELNETD is not set
+# CONFIG_HTTPD is not set

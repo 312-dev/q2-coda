@@ -1,0 +1,104 @@
+#!/bin/sh
+# Vamp OS's start, run once by init before any service (docs/vamp-os-base.md#what-boots), in this order:
+#   1. the kernel's file systems and a tmpfs /dev, as stock's inittab makes them; mdev, then its daemon;
+#   2. /mnt/data, the UBIFS on the "userdata" partition: attached and mounted, never erased or formatted
+#      (on any failure it is a tmpfs for this boot, and the boot log says why);
+#   3. Shanling's own module script, /vendor/module_driver/driver_default_init_script.sh, run unchanged from
+#      its folder, as stock's S11module_driver_default runs it; then what loaded, against the .ko files there;
+#   4. a wait for /dev/fb0, and the input devices found.
+# Then init starts runsvdir (/etc/inittab). Nothing of Shanling's userspace runs: the scripts in /vendor are
+# insmod lines run by this image's BusyBox.
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+export PATH
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t tmpfs -o mode=0755,nosuid tmpfs /dev
+mknod -m 0666 /dev/null c 1 3
+mknod -m 0600 /dev/console c 5 1
+mkdir -p /dev/pts /dev/shm
+mount -t devpts -o gid=5,mode=620,ptmxmode=0666 devpts /dev/pts
+mount -t tmpfs -o mode=0777 tmpfs /dev/shm
+mount -t tmpfs -o mode=1777 tmpfs /tmp
+mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
+ln -sfn /proc/self/fd /dev/fd
+ln -sf /proc/self/fd/0 /dev/stdin
+ln -sf /proc/self/fd/1 /dev/stdout
+ln -sf /proc/self/fd/2 /dev/stderr
+mkdir -p /run/vamp /run/runit
+for s in /etc/sv/*; do mkdir -p "/run/runit/supervise.${s##*/}"; done
+hostname -F /etc/hostname
+
+. /usr/libexec/vamp/log
+step "rcS: start, $(cat /proc/version 2>/dev/null)"
+
+mdev -s
+mdev -d
+step "mdev: scanned, daemon started"
+
+# wait_for PATH TENTHS: PATH exists within TENTHS tenths of a second
+wait_for() {
+    local n=0
+    while [ ! -e "$1" ]; do
+        [ "$n" -ge "$2" ] && return 1
+        n=$((n + 1))
+        sleep 0.1
+    done
+}
+
+data() {
+    local num ubi d
+    num=$(sed -n 's/^mtd\([0-9]*\):.*"userdata"$/\1/p' /proc/mtd 2>/dev/null)
+    if [ -z "$num" ]; then
+        step "data: no \"userdata\" partition in /proc/mtd"
+        return 1
+    fi
+    wait_for /dev/ubi_ctrl 50 || { step "data: no /dev/ubi_ctrl"; return 1; }
+    for d in /sys/class/ubi/ubi[0-9]*; do
+        [ "$(cat "$d/mtd_num" 2>/dev/null)" = "$num" ] && ubi=${d##*/}
+    done
+    if [ -z "$ubi" ]; then
+        # ubi1, the number stock's mount_ubifs.sh gives it when nothing is attached
+        ubiattach -m "$num" -d 1 /dev/ubi_ctrl || { step "data: ubiattach of mtd$num failed"; return 1; }
+        ubi=ubi1
+    fi
+    wait_for "/dev/${ubi}_0" 50 || { step "data: no /dev/${ubi}_0"; return 1; }
+    mount -t ubifs -o sync "/dev/${ubi}_0" /mnt/data || { step "data: mount of /dev/${ubi}_0 failed"; return 1; }
+    step "data: /dev/${ubi}_0 (mtd$num) on /mnt/data"
+}
+if data; then
+    mkdir -p /mnt/data/vamp
+    [ -f /mnt/data/vamp/boot.log ] && mv -f /mnt/data/vamp/boot.log /mnt/data/vamp/boot.log.1
+    cp /run/vamp/boot.log /mnt/data/vamp/boot.log && touch /run/vamp/keep
+else
+    mount -t tmpfs -o mode=0755 tmpfs /mnt/data
+    step "data: a tmpfs for this boot, nothing written is kept"
+fi
+
+if [ -f /module_driver/driver_default_init_script.sh ]; then
+    step "modules: start"
+    (cd /module_driver && sh ./driver_default_init_script.sh) > /run/vamp/modules.log 2>&1
+    missing=
+    for ko in /module_driver/*.ko; do
+        name=${ko##*/}
+        name=${name%.ko}
+        grep -q "^$name " /proc/modules || missing="$missing $name"
+    done
+    step "modules: done, not loaded:${missing:- none}"
+else
+    step "modules: no /vendor/module_driver (an image composed without the vendor set)"
+fi
+
+if wait_for /dev/fb0 50; then step "fb0: present"; else step "fb0: missing"; fi
+for e in /dev/input/event*; do
+    [ -e "$e" ] && step "input: ${e##*/} $(cat "/sys/class/input/${e##*/}/device/name" 2>/dev/null)"
+done
+if [ -e /dev/watchdog ]; then
+    step "watchdog: /dev/watchdog present, $(cat /sys/class/watchdog/watchdog0/state 2>/dev/null || echo state unknown); nothing opens it"
+fi
+if [ -e /run/vamp/keep ]; then
+    dmesg > /mnt/data/vamp/dmesg.log 2>&1
+    cp /run/vamp/modules.log /mnt/data/vamp/modules.log 2>/dev/null
+    cat /proc/cmdline /proc/modules > /mnt/data/vamp/kernel.txt 2>&1
+fi
+step "rcS: done, starting the services"

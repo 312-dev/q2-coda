@@ -1,0 +1,5 @@
+config BR2_PACKAGE_VAMP_ASSETS
+	bool "vamp-assets"
+	help
+	  The image's own fonts: Inter, under the SIL Open Font License, from assets/fonts/, at the
+	  names q2ui opens (inter.ttf, inter-medium.ttf) in /usr/share/vamp/fonts.

@@ -1,0 +1,4 @@
+#!/bin/sh
+# A login on the serial port, as stock has one (ttyS3, 115200), where the port exists.
+[ -c /dev/ttyS3 ] && exec /sbin/getty -L ttyS3 115200 vt100
+exec sleep 2147483647

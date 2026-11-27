@@ -1,0 +1,6 @@
+config BR2_PACKAGE_Q2PLAYER_FFMPEG
+	bool "q2player-ffmpeg"
+	select BR2_PACKAGE_Q2_MBEDTLS
+	help
+	  FFmpeg at tools/player.py's release, configured with its configure_args() (the demuxers,
+	  decoders and protocols q2player uses and nothing else), static. Staging only: q2player links it in.

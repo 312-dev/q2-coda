@@ -1,0 +1,3 @@
+# tools/ui.py's STB and STB_IMAGE
+sha256  ecd30b05e0dd4fea3a13c26810dd9e1992dc379049482c393d5a19e6b5090aab  stb_truetype.h
+sha256  594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3  stb_image.h

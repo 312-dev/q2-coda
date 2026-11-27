@@ -1,0 +1,8 @@
+config BR2_PACKAGE_Q2UI
+	bool "q2ui"
+	select BR2_PACKAGE_SQLITE
+	select BR2_PACKAGE_Q2UI_STB
+	select BR2_PACKAGE_VAMP_ASSETS
+	help
+	  Vamp's UI (ui/ on feat/render-engine, docs/ui-rewrite.md there), from the commit
+	  tools/vampos.py pins (Q2UI_COMMIT) and exports into $(VAMP_SRC)/q2ui.

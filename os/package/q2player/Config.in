@@ -1,0 +1,8 @@
+config BR2_PACKAGE_Q2PLAYER
+	bool "q2player"
+	select BR2_PACKAGE_ALSA_LIB
+	select BR2_PACKAGE_Q2PLAYER_FFMPEG
+	select BR2_PACKAGE_Q2_MBEDTLS
+	help
+	  Vamp's player (player/, docs/player.md), built by player/Makefile as tools/player.py builds it for
+	  every image (Car Audio's output on), against this image's alsa-lib.

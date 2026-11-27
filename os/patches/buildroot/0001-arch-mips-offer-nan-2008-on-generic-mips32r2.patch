@@ -1,0 +1,30 @@
+arch/mips: offer the NaN 2008 choice on generic MIPS32R2
+
+The Q2's userspace ABI is MIPS32R2, o32, hard float with a 64-bit FPU and
+IEEE 754-2008 NaNs (docs/vamp-os.md, "Toolchain and libc"). Buildroot ties
+MIPS32R2 to legacy NaNs and offers the choice only on R5, so this lets the
+generic MIPS32R2 variant pick 2008 too; legacy stays its default, and the
+XBurst and interAptiv variants are unchanged.
+
+--- a/arch/Config.in.mips
++++ b/arch/Config.in.mips
+@@ -4,7 +4,7 @@
+ 	select BR2_MIPS_NAN_LEGACY
+ config BR2_MIPS_CPU_MIPS32R2
+ 	bool
+-	select BR2_MIPS_NAN_LEGACY
++	select BR2_MIPS_NAN_LEGACY if !BR2_mips_32r2
+ config BR2_MIPS_CPU_MIPS32R3
+ 	bool
+ 	select BR2_MIPS_NAN_LEGACY
+@@ -210,8 +210,9 @@
+ 
+ choice
+ 	prompt "Target NaN"
++	default BR2_MIPS_ENABLE_NAN_LEGACY if BR2_mips_32r2
+ 	default BR2_MIPS_ENABLE_NAN_2008
+-	depends on BR2_mips_32r5 || BR2_mips_64r5
++	depends on BR2_mips_32r2 || BR2_mips_32r5 || BR2_mips_64r5
+ 	help
+ 	  MIPS supports two different NaN encodings, legacy and 2008.
+ 	  Information about MIPS NaN encodings can be found here:

@@ -1,0 +1,4 @@
+#!/bin/sh
+. /usr/libexec/vamp/log
+step "q2player: ended, status $1"
+[ "$1" = 0 ] || sleep 10

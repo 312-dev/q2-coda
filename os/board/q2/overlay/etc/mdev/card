@@ -1,0 +1,14 @@
+#!/bin/sh
+# mdev's rule for the card (/etc/mdev.conf): MDEV is the block device, ACTION add or remove. A card with
+# partitions is mounted by its first one, a card without by the whole device.
+. /usr/libexec/vamp/log
+case "$MDEV" in
+mmcblk[0-9]) ls /dev/"$MDEV"p[0-9]* > /dev/null 2>&1 && exit 0 ;;
+esac
+if [ "$ACTION" = add ]; then
+    if mount /dev/"$MDEV" /mnt/mmc; then step "card: /dev/$MDEV on /mnt/mmc"; else step "card: mount of /dev/$MDEV failed"; fi
+elif [ "$ACTION" = remove ]; then
+    sync
+    umount -l /mnt/mmc 2> /dev/null
+    step "card: /dev/$MDEV gone"
+fi

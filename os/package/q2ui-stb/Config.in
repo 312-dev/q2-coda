@@ -1,0 +1,5 @@
+config BR2_PACKAGE_Q2UI_STB
+	bool "q2ui-stb"
+	help
+	  stb_truetype 1.26 and stb_image 2.30, the public-domain headers q2ui is compiled with, at
+	  tools/ui.py's commit and hashes. Staging only, in usr/include/stb.
