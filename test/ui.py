@@ -1956,11 +1956,18 @@ def status(binary, work):
     faint = sum(1 for c in rest if max(abs(v - 77) for v in c) <= 1)
     good &= check("the fan's unlit bands are its ink at 30% (grey 77 on black), no other grey", faint >= 6 and all(len(set(c)) == 1 for c in rest),
                   f'{faint} {sorted(set(rest))[:6]}')
+    # tools/art.py STATUS_FAN, the owner's by eye on a Q2 (2026-11-27): up its centre from the apex on row 28, the dot to
+    # radius 3, a band from 5 to 7 and one from 9 to 11, 2 px of wholly dark ground between
+    lit, dark = (17, 18, 21, 22, 25, 26), (19, 20, 23, 24)  # row 27, the point, is cut by the sector's sides
+    # dark: no ink to see, under 3% (the bands' smoothed edges reach a hundredth of a pixel into a gap off the centre)
+    centre = [x for x in range(250, 281) if all(strong.at(x, y)[0] >= 200 for y in lit) and all(max(strong.at(x, y)) <= 8 for y in dark)]
+    good &= check("the fan's dot and bands are 2 px apart, the gaps dark, up its centre", bool(centre),
+                  str([[strong.at(x, y)[0] for y in range(16, 29)] for x in range(250, 281) if strong.at(x, 17)[0] > 100]))
     return good & told(binary, work)
 
 
 # the status glyphs demo's word draws (tools/art.py status_images), made up here as a colour each, at their boxes' sizes
-TOLD_ART = {'status_wired_d': (14, (0, 200, 0)), 'status_noaudio_d': (10, (200, 0, 0)), 'status_bt_d': (9, (0, 0, 200)),
+TOLD_ART = {'status_wired_d': (14, (0, 200, 0)), 'status_noaudio_d': (10, (200, 0, 0)), 'status_bt_d': (9, (0, 0, 200)),  # the ear: never drawn
             'status_btdim_d': (9, (0, 0, 100)), 'status_car_d': (19, (100, 0, 100)), 'status_headphones_d': (14, (200, 200, 0)),
             'keylock_d': (14, (0, 200, 200)), 'status_offline_d': (14, (200, 0, 200)), 'status_wifi_x_d': (16, (100, 100, 0))}
 
@@ -1990,15 +1997,15 @@ def told(binary, work):
     colour = lambda name: TOLD_ART[name][1]  # noqa: E731
     # the battery's body starts at 285.5, so the slots end at 279, GAP (6) left of it
     wire, ear, other = row({'out': 'wire'}), row({'out': 'none'}), row({'out': 'other'})
-    good &= check('wired headphones, the deaf ear with no output, nothing for any other output: each in its box by the battery',
+    good &= check('wired headphones in their box by the battery; with no output, or any other, nothing there (no deaf ear: '
+                  "the owner's, 2026-11-27)",
                   wire.at(272, 22) == colour('status_wired_d') and wire.at(264, 22) == (0, 0, 0) and
-                  ear.at(274, 22) == colour('status_noaudio_d') and ear.at(268, 22) == (0, 0, 0) and
-                  all(other.at(x, 22) == (0, 0, 0) for x in range(200, 280)),
-                  f"{wire.at(272, 22)} {ear.at(274, 22)} {[x for x in range(200, 280) if other.at(x, 22) != (0, 0, 0)]}")
+                  all(r.at(x, 22) == (0, 0, 0) for r in (ear, other) for x in range(200, 280)),
+                  f"{wire.at(272, 22)} {[x for x in range(200, 280) if ear.at(x, 22) != (0, 0, 0)]}")
     rune, dim = row({'out': 'none', 'bt': 'rune'}), row({'out': 'none', 'bt': 'connecting'})
-    good &= check('the Bluetooth rune stands left of the ear, GAP between, and dim while a device connects',
-                  rune.at(274, 22) == colour('status_noaudio_d') and rune.at(258, 22) == colour('status_bt_d') and
-                  dim.at(258, 22) == colour('status_btdim_d'), f'{rune.at(258, 22)} {dim.at(258, 22)}')
+    good &= check('the Bluetooth rune stands by the battery with no output, the slots closing up, and dim while a device connects',
+                  rune.at(274, 22) == colour('status_bt_d') and dim.at(274, 22) == colour('status_btdim_d') and
+                  rune.at(258, 22) == (0, 0, 0), f'{rune.at(274, 22)} {dim.at(274, 22)} {rune.at(258, 22)}')
     headset = row({'out': 'other', 'bt': 'headset', 'btbatt': 19})
     good &= check("a headset that says its level: headphones, then its own battery, red under a fifth",
                   headset.at(253, 22) == colour('status_headphones_d') and headset.at(265, 23) == (0xff, 0x45, 0x3a),

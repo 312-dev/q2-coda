@@ -255,7 +255,8 @@ All lists share one grid.
     2026-11-16). On Home, while its first row is in sight, they lead that row instead ([Home's first
     row](#homes-first-row)).
   - **Wi-Fi**, left of the play state: iOS's fan, a 90 degree sector 11 px in radius from an apex on the digits'
-    baseline (15.6 x 11 px), cut into a dot (radius 3.6) and two bands (5.0 to 7.3, 8.7 to 11) with 1.4 px gaps;
+    baseline (15.6 x 11 px), cut into a dot (radius 3) and two 2 px bands (5 to 7, 9 to 11) with 2 px gaps, on whole
+    pixels up its centre so the gaps are wholly dark (the owner's, chosen by eye on a Q2, 2026-11-27);
     the signal lights the dot, then the bands, in Text Primary and the rest is Text Primary at 30% (iOS's rule,
     the owner's, 2026-11-27: faint white on black, faint black in Light Mode), so the shape keeps its size; Phosphor `wifi-x` (bold) connected with no internet; nothing with Wi-Fi
     off or not connected (`mock_wifi_status.py`, `mock_status_icons.py`).
@@ -267,10 +268,8 @@ All lists share one grid.
     it (S2, `mock_sync_status.py`).
   - **Wired headphones**, left of the sync: Phosphor `headphones` (regular) in Text Primary, 12 px tall on rows 16 to
     27 as the battery's body (its ink 13.6 px wide), while the sound goes to a jack (3.5 mm or 4.4 mm) or a USB DAC
-    (USB-C headphones among them) (the user's, 2026-11-25, `hpicon/mockup2.png`). With no output connected (nothing
-    plugged in, no Bluetooth device connected, no guest or AirPlay speaker playing), a deaf ear in the same place:
-    Phosphor `ear-slash` (regular), 12 px tall on the same rows, in a 10 px box, its ink as far from the fan's as the
-    headphones' (the user's, 2026-11-25: "a deaf ear icon ... ship it"), in Negative (red) in both halves (the user's, 2026-11-26).
+    (USB-C headphones among them) (the user's, 2026-11-25, `hpicon/mockup2.png`); nothing otherwise, with no output
+    connected too (the owner's, 2026-11-27: no deaf ear), the glyphs left of it closing up.
   - **Bluetooth** (P9 in `design/bt-redesign`), left of wired headphones: nothing while Bluetooth is off or nothing
     is connected, or while wired headphones take the sound (a jack plugged in over a linked headset plays there, and
     the row shows where the sound goes: one glyph, never both); Phosphor `bluetooth` (bold, 12 px tall on rows 16 to
@@ -296,7 +295,7 @@ All lists share one grid.
   headphones, 12 px on rows 16 to 27 as the battery's body, so their ink centres on row 21.5 with the battery's and
   the fan's (the user's, 2026-11-25): the Phosphor ones sized by
   their ink's height, not its longer side, so a wide one (`wifi-x`, the car) is as tall as the rest; strokes come
-  out about 2 px (the fan's bands 2.3, the bars 2, the pause 3). 6 px of black part two glyphs, 8 px the clock
+  out about 2 px (the fan's bands 2, the bars 2, the pause 3). 6 px of black part two glyphs, 8 px the clock
   from the first, as iOS spaces them (`mock_status_icons.py`, the user's, 2026-11-16).
 - Battery, in iOS's proportions: a 25x12 body on rows 16 to 27 (a row past the digits' top, as iOS's stands)
   with 4 px corners and a 1 px `#6E6E6E` outline,

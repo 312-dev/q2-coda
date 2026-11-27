@@ -3,7 +3,7 @@
  * clock, Inter Medium 15 from x 62, its figures on rows 17 to 27, in Text Secondary, and in Text
  * Primary on Home. At the right, right to left, each only while it has something to say: the
  * battery, its nub ending 62 px from the edge; the play state; Wi-Fi's fan; a card app's sync;
- * wired headphones, or the deaf ear with no output; Bluetooth; Buttons Lock's padlock; a card
+ * wired headphones; Bluetooth; Buttons Lock's padlock; a card
  * app's server out of reach. Between them, for a moment after the volume changes, its level.
  *
  * Where each comes from: the battery from the kernel's power supply files; the play state from
@@ -189,7 +189,6 @@ static void read_told(void) {
 /* The slots' boxes, patch/status_row.c's SR_* (tools/art.py's widths) */
 #define WIFI_W 16
 #define GLYPH 14   /* a glyph's box: wired headphones, the offline cloud */
-#define EAR_W 10   /* the deaf ear */
 #define RUNE_W 9   /* the Bluetooth rune */
 #define CAR_W 19
 #define LOCK_W 13
@@ -251,7 +250,7 @@ void status_step(void) {
  * at a time by how far it is from the point and how far off upright, its edges smoothed over a pixel. */
 #define UNLIT 0.3f
 static void fan(float right, float base, int lit, uint32_t ink) {
-    static const float from[] = { 0, 5.0f, 8.7f }, to[] = { 3.6f, 7.3f, 11.0f };
+    static const float from[] = { 0, 5, 9 }, to[] = { 3, 7, 11 }; /* tools/art.py STATUS_FAN */
     float ax = right - 7.8f, ay = base;
     rect_t c, box = { (int)floorf(ax - 8), (int)floorf(ay - 12), 17, 13 };
     if (!rect_meet(box, clip_get(), &c)) return;
@@ -351,8 +350,6 @@ static void glyphs(void) {
     }
     if (!strcmp(S.out, "wire"))
         art("status_wired", x - GLYPH, 16), x -= GLYPH + GAP;
-    else if (!strcmp(S.out, "none"))
-        art("status_noaudio", x - EAR_W, 16), x -= EAR_W + GAP;
     if (!strcmp(S.bt, "connecting") || !strcmp(S.bt, "rune"))
         art(S.bt[0] == 'c' ? "status_btdim" : "status_bt", x - RUNE_W, 16), x -= RUNE_W + GAP;
     else if (!strcmp(S.bt, "car"))

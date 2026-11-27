@@ -412,8 +412,7 @@ ttm.clock=(18,15); ttm.advance(61000); assert ttm.nodes[ttc]['text']=='6:15'
 assert [(ttm.nodes[ttc][f'style:{s}:font_name'],ttm.nodes[ttc][f'style:{s}:font_size']) for s in STATES]==[(FACE_NAMES[OLT['font[ROLE_BAR]']],OLT['font_px[ROLE_BAR]'])]*3
 passed()
 # Wired headphones (the user's, 2026-11-25): their glyph, 14 px and SR_GAP (6) more left of the battery, while the player's output is the Q2's DAC with a jack in (3.5 mm g_po_status, 4.4 mm g_bal_status) or a
-# USB DAC (way 2); with no output connected (no jack in and no Bluetooth device, on the DAC or on Bluetooth's way with nothing linked) the deaf ear, 10 px and
-# SR_GAP; nothing on the car's USB audio (way 3).
+# USB DAC (way 2); nothing otherwise, with no output connected too (no deaf ear: the owner's, 2026-11-27).
 class WayMachine(Machine):
     def __init__(self):
         super().__init__(); self.way=0; self.handlers[syms['mclGetOutputWay']]='w:way'
@@ -426,7 +425,7 @@ def wleft(way,po,bal):
     wshow(wm_.node('window','bare_page'))
     return signed(wm_.call(address=payload_syms['status_slots_left'],args=(0,0,0,0),gap=0))
 wbase=wleft(3,0,0); assert 0<wbase<=288,wbase
-for way,po,bal,width in ((0,1,0,14),(0,0,1,14),(2,0,0,14),(1,1,0,10),(3,0,0,0),(0,0,0,10)):
+for way,po,bal,width in ((0,1,0,14),(0,0,1,14),(2,0,0,14),(1,1,0,0),(3,0,0,0),(0,0,0,0)):
     assert wleft(way,po,bal)==wbase-(6+width if width else 0),(way,po,bal)
 passed()
 # Home on the status row names none of its own lists' and shows the clock, whether or not music plays: no flip as music

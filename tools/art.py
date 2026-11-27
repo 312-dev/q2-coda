@@ -316,7 +316,9 @@ STATUS_TOP = 1.0
 STATUS_WIFI_W = 16  # the fan's 15.6 px, status_row.c SR_WIFI_W
 STATUS_CAR_W = 19  # car-profile-bold's 18.5 px at 11 tall, status_row.c SR_CAR_W
 STATUS_FAN_DEG = 90
-STATUS_FAN = ((0, 3.6), (5.0, 7.3), (8.7, 11.0))  # the dot and the bands' radii: 1.4 px of ground between
+# the dot and the bands' radii: 2 px bands with 2 px of ground between, on whole pixels up the centre so the gaps are
+# wholly dark and do not blur (the owner's, chosen by eye on a Q2 among three, 2026-11-27)
+STATUS_FAN = ((0, 3), (5, 7), (9, 11))
 STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0),
                  'status_down': ('arrow-down-bold', 8, 0)}
 STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W),
@@ -324,13 +326,11 @@ STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W),
               # the volume pill's speaker, and muted at 0 (vol_pill.c)
               'status_vol': ('speaker-simple-high-fill', STATUS_PX), 'status_mute': ('speaker-simple-x-fill', STATUS_PX)}
 STATUS_UNLIT = 0.3  # the fan's unlit bands: its ink's opacity there (ui/status.c fan's UNLIT)
-# The Bluetooth rune, wired headphones and the deaf ear shown with no output connected (status_row.c SR_RUNE_W,
-# SR_GLYPH, SR_EAR_W) stand as tall as the battery's body, STATUS_TALL px from the box's top row, so rows 16 to 27,
-# their ink centred on row 21.5 with the battery's and the fan's (the user's mockups, 2026-11-25); each box as wide as
-# its ink, so each stands about 6.5 px of ground from the fan's ink (ear-slash's 9.4 px in 10, headphones' 13.6 in 14).
+# The Bluetooth rune and wired headphones (status_row.c SR_RUNE_W, SR_GLYPH) stand as tall as the battery's body,
+# STATUS_TALL px from the box's top row, so rows 16 to 27, their ink centred on row 21.5 with the battery's and the
+# fan's (the user's mockups, 2026-11-25); each box as wide as its ink (headphones' 13.6 px in 14).
 STATUS_TALL = 12.0
 STATUS_TALL_FIT = {'status_bt': ('bluetooth-bold', 9), 'status_wired': ('headphones', STATUS_PX)}
-STATUS_EAR_W = 10  # the deaf ear's box (status_row.c SR_EAR_W), in Negative in both halves (the user's, 2026-11-26)
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 30  # status_row.c SR_SPIN: a half turn a second at 30 fps
 KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
@@ -749,10 +749,6 @@ def status_images(prefix):
             for k, c in STATE_INKS.items()}
     out |= {f'{prefix}_status_btdim_{k}': status_glyph('bluetooth-bold', STATUS_TALL_FIT['status_bt'][1], c, STATUS_TALL, 0)
             for k, c in BT_SPIN_INKS.items()}
-    # no output connected (status_row.c wired_paint): the deaf ear, ear-slash at STATUS_TALL in Negative, the same in
-    # both halves
-    out |= {f'{prefix}_status_noaudio_{k}': status_glyph('ear-slash', STATUS_EAR_W, token('negative'), STATUS_TALL, 0)
-            for k in STATE_INKS}
     # a card app's server out of reach (status_row.c SLOT_OFFLINE): cloud-slash in Warning, the same in both halves;
     # its ink 13.6 px wide at 11 tall, so a STATUS_PX box
     out |= {f'{prefix}_status_offline_{k}': status_glyph('cloud-slash-bold', STATUS_PX, token('warning')) for k in STATE_INKS}

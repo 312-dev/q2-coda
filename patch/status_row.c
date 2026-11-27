@@ -1,6 +1,6 @@
 /* The status row's glyph slots (docs/oled-design.md#status-row,
  * docs/internals.md#status-row-slots): right to left the battery, the play state's level bars,
- * Wi-Fi, a card app's sync, wired headphones (a deaf ear with no output connected), Bluetooth (its
+ * Wi-Fi, a card app's sync, wired headphones, Bluetooth (its
  * link, a headset's battery, a car), Buttons Lock's padlock and a card app's server out of reach.
  * Each slot that shows takes its box and the gap before the one on its right. The clock stands at
  * the row's left (navigation.c clock_place) and the slots left of the battery are a strip with the
@@ -9,8 +9,8 @@
  * battery is stock's view_battery, laid out by the bar's right group and painted by navigation.c
  * paint_battery; every other slot is painted here, from the bar's background (ringnav_paint_bg), so
  * Home in Split inks them over its art (coverflow.c home_ink, one ink for the row). Every glyph is
- * the clock's digits' height, 11 px on rows 17 to 27 (cy 23), but the Bluetooth rune, wired
- * headphones and the deaf ear, the battery's body's 12 on rows 16 to 27, with SR_GAP of ground
+ * the clock's digits' height, 11 px on rows 17 to 27 (cy 23), but the Bluetooth rune and wired
+ * headphones, the battery's body's 12 on rows 16 to 27, with SR_GAP of ground
  * between two (docs/oled-design.md#status-row); the animated ones repaint only their own box. */
 #include "navigation.h"
 
@@ -31,7 +31,6 @@
 #define SR_WIFI_W 16   /* tools/art.py STATUS_WIFI_W: the fan's 15.6 px */
 #define SR_CAR_W 19    /* tools/art.py STATUS_CAR_W: car-profile 11 px tall is 18.5 wide */
 #define SR_RUNE_W 9    /* tools/art.py STATUS_TALL_FIT: the Bluetooth rune 12 px tall is 8.4 wide */
-#define SR_EAR_W 10    /* ... and ear-slash 12 px tall is 9.4 wide (no output connected) */
 #define SR_LOCK 13     /* the padlock's box, tools/art.py STATE_PX */
 #define SR_RING 16     /* the download ring's box: a 14 px ring and its stroke */
 #define SR_SPIN_W 12   /* the turning arrows' box: frame 0's ink, 12 of its SR_GLYPH art's 14 */
@@ -202,21 +201,16 @@ static int wired_on(void) {
 /* No output connected (the user's, 2026-11-25): no wire, no Bluetooth device connected (one
  * connecting is not yet), no guest playing, no AirPlay speaker and not the car's USB audio (way 3,
  * usb_car.c). A Bluetooth way with nothing linked plays to no one, so it counts as none. */
-static int no_output(void) {
-    if (wired_on() || airplay_on()) return 0;
-    int slot = bt_slot();
-    if (slot != BT_SLOT_NONE && slot != BT_SLOT_CONNECTING) return 0;
-    return status_fake('h') >= 0 || mclGetOutputWay() != 3;
-}
-/* The wired slot: headphones while they take the sound, the deaf ear with no output */
-static int wired_shown(void) { return wired_on() ? SR_GLYPH : no_output() ? SR_EAR_W : 0; }
+/* The wired slot: headphones while they take the sound; nothing otherwise, with no output connected too (the owner's,
+ * 2026-11-27: no deaf ear) */
+static int wired_shown(void) { return wired_on() ? SR_GLYPH : 0; }
 static int offline_shown(void) { return addon_offline() ? SR_OFFLINE : 0; }
 
 /* The slots' states as q2ui reads them (q2ui_gate.c q2ui_tell, ui/status.c), a key=value line each,
  * into b; its length. q2ui draws a status row of its own while it has the screen, but where the
  * sound goes, the Bluetooth link, Buttons Lock, a card app's sync and its server are demo's alone
  * today, so demo says them, by the same tests its own row paints from:
- *   out=wire|none|other  wired headphones take the sound; nothing does (the deaf ear); else
+ *   out=wire|other  wired headphones take the sound, or not
  *   bt=none|connecting|rune|headset|car|guest, btbatt=N  the Bluetooth slot, a headset's level
  *   relay=none|headphones|car  where a guest's phone plays through the Q2, while one plays
   *   lock=0|1  sync=0|1|2 syncpm=N  offline=0|1  net=0|1 (0: Wi-Fi linked with no internet)
@@ -227,7 +221,7 @@ unsigned status_row_state(char *b, unsigned room) {
     const char *relay = slot != BT_SLOT_GUEST || !guest_relayed() ? "none" : linked_w() == SR_CAR_W ? "car" : "headphones";
     int n = tk_snprintf(b, room, "out=%s\nbt=%s\nbtbatt=%d\nrelay=%s\nlock=%d\nsync=%d\nsyncpm=%d\noffline=%d\nnet=%d\n"
                                  "clock24=%d\ntz=%s\n",
-                        wired_on() ? "wire" : no_output() ? "none" : "other", bt[slot],
+                        wired_on() ? "wire" : "other", bt[slot],
                         slot == BT_SLOT_HEADSET ? bt_headset_battery() : -1, relay, !!g_keylock_flag, sync,
                         sync == 2 ? permille : 0, !!addon_offline(), !wifi_offline(), !!g_time24h_flag, autozone_tz());
     return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
@@ -385,10 +379,8 @@ static void headset_paint(void *bar, void *canvas, int x, int cy) {
 }
 
 /* Wired headphones: Phosphor's headphones (regular), 12 px tall on rows 16 to 27 (tools/art.py
- * STATUS_TALL_FIT); with no output connected, its ear-slash (regular) in Negative, the same height and rows. */
-static void wired_paint(void *bar, void *canvas, int x, int cy) {
-    status_art(bar, canvas, wired_on() ? "status_wired" : "status_noaudio", x, cy);
-}
+ * STATUS_TALL_FIT). */
+static void wired_paint(void *bar, void *canvas, int x, int cy) { status_art(bar, canvas, "status_wired", x, cy); }
 
 /* Buttons Lock's padlock (keylock.c), the theme's keylock art in Text Primary. */
 static void lock_paint(void *bar, void *canvas, int x, int cy) {
@@ -665,7 +657,7 @@ static int sr_strip_frame(void) {
  * the bars' loop while they move, the strip's marquee while it runs past its room (from rest when
  * it newly does), the arrows' loop while lit and they turn; 1 when what the slots show changed
  * (which slots, the play state, Wi-Fi's level or its internet, the sync's kind and its ring to the
- * 50th, wired headphones or the deaf ear, the Bluetooth slot's kind and the headset's level, the
+ * 50th, wired headphones, the Bluetooth slot's kind and the headset's level, the
  * lock, a server out of reach, the strip scrolling or not), so the bar repaints whole after the
  * frame. */
 int status_row_sync(void) {
@@ -690,8 +682,7 @@ int status_row_sync(void) {
                        << 14 |
                    (unsigned)!!g_keylock_flag << 21 | 1u << 22 | (unsigned)bt_slot() << 23 |
                    (unsigned)addon_offline() << 27 |
-                   (unsigned)!!sr.over << 28 | (unsigned)wired_on() << 29 |
-                   (unsigned)!!no_output() << 30;
+                   (unsigned)!!sr.over << 28 | (unsigned)wired_on() << 29;
     if (sig == sr.sig) return 0;
     sr.sig = sig;
     return 1;

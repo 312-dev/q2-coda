@@ -54,7 +54,7 @@ class Tap:
         self.bar = Bar(fw, ui)
         self.bar.level(text, icon)
         self.bar.sync()
-        # the car's USB audio (way 3): an output with no glyph, so no deaf ear's tap target meets the battery's
+        # the car's USB audio (way 3): an output with no glyph, so no slot's tap target meets the battery's
         fw.mock('mclGetOutputWay', lambda *_: 3)
         fw.mock('navigator_to_with_context', lambda page, info, *_: self.toasts.append(C.string_at(info + 8).decode()) or 0)
         # touches in the bar's pixels (status_row.c status_touch): the slot's own plus its x on the bar
