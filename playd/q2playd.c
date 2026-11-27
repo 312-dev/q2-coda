@@ -934,7 +934,15 @@ static int command(const char *verb, const int *ids, int n_ids) {
         return q.state == STOPPED && q.n ? start_at(q.at) : 0;
     }
     if (src.on && (!strcmp(verb, "next") || !strcmp(verb, "previous"))) return -1; /* a source is one URL */
-    if (!strcmp(verb, "next")) return q.at + 1 < q.n ? start_at(q.at + 1) : -1;
+    if (!strcmp(verb, "next")) {
+        if (q.at + 1 < q.n) return start_at(q.at + 1);
+        if (!q.paths || !mq.on || !*mq.want || mq.waiting || src.on) return -1;
+        stop(); /* the next not there yet: Now Playing on it, played as it lands (the firmware's addon_next_waits) */
+        mq.waiting = 1, q.at = q.n - 1, q.state = PLAYING;
+        logf_("next: waiting for %s", mq.want);
+        path_lookup_want();
+        return 0;
+    }
     if (!strcmp(verb, "previous")) {
         if (q.loaded && q.pos_ms > 3000) {
             player_send("mcl-seek", "0");

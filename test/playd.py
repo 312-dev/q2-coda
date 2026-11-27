@@ -793,6 +793,27 @@ def test_an_answer_s_song_not_there_yet_is_waited_for_and_played_as_it_lands(run
     sock.close()
 
 
+def test_next_before_the_next_song_lands_waits_for_it(run):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1, SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    one, two = '/mnt/mmc/.navi/stream/a/hi/x/Cloud One [s1].flac', '/mnt/mmc/.navi/stream/a/hi/x/Cloud Two [s2].flac'
+    land(root, one)
+    answer(root, one, two)
+    pl.pump(1.0)
+    a = api(root)
+    a.say('next')
+    assert a.line() == 'ok'
+    pl.pump(0.5)
+    assert pl.names()[-1] == 'mcl-stop', 'the song playing stopped'
+    n = now(root, 0.3)
+    assert (n['state'], n['title']) == ('1', 'Cloud Two')
+    land(root, two)
+    pl.pump(1.0)
+    assert pl.songs()[-1] == ('set-songurl', two)
+    sock.close()
+
 def test_an_answer_with_nothing_there_yet_plays_its_first_as_it_lands(run):
     root, pl = run
     sock = catalogue(root)
