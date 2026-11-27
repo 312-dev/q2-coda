@@ -301,15 +301,17 @@ time for both.
 
 ## bluealsa
 
-Another branch (`feat/bluealsa-own`) builds an own bluealsa from upstream bluez-alsa 5.0.0, at the same time.
+[bluealsa](bluealsa.md) is the same move for bluealsa, from upstream bluez-alsa 5.0.0; a `--dev` build takes both (`-- --own-bluez --own-bluealsa`).
 The two meet at `org.bluez`'s media API only, which is upstream's on both sides, so neither cutover needs the
 other: stock's bluealsa must work on our bluetoothd, and the own bluealsa on stock's. What crosses:
 
 - **Codec priority** is decided in stock by bluetoothd's endpoint order, not by bluealsa. Until that hook is
   ported, any bluealsa on our daemon gets upstream's choice.
-- Both branches add recipes to `tools/thirdparty.py` and the same `tools/bluez/glibconfig.h`; the bluealsa
-  branch links stock's own libraries where this one links stubs. One of the two ways should be kept when they
-  meet (theirs is the simpler, if the build has the stock rootfs to hand).
+- Both recipes are in `tools/thirdparty.py` and read the same `tools/bluez/glibconfig.h`, and they link the
+  stock base two ways: `bluez` against stubs (`glib`, `dbus`, `stub_library`), `bluealsa` against stock's own
+  libraries (`stocksdk`, which needs an unpacked stock rootfs). Merged on `feat/bt-own` (2026-11-27) as they
+  were, so each keeps its cached build; one way should be kept (`stocksdk`'s is the simpler, where the build
+  has the stock rootfs to hand), and on a Vamp OS base neither is used ([Bases](#bases)).
 - Switch one at a time, a release apart, so a regression has one suspect; test all four pairings on a Q2
   first.
 
@@ -404,7 +406,7 @@ What phase 2 has done that only a Q2 can confirm, in the order to try it:
   notice and react differently.
 - **Behaviors nobody wrote down**: the hooks are known from the binary's strings and code; a change Shanling
   made without a string or an import can still be there. The parity bar is the device plan, not the list.
-- **Two branches in `tools/thirdparty.py`**, above.
+- **Two ways of linking the stock base in `tools/thirdparty.py`**, above.
 
 ## Effort
 

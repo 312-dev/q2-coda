@@ -64,6 +64,19 @@ SOURCES = {
     # --dev builds' adbd (docs/adb.md), not a replacement: Debian's android-tools source, as Buildroot fetches it
     'adbd': ('4.2.2+git20130218', 'https://launchpad.net/ubuntu/+archive/primary/+files/android-tools_4.2.2+git20130218.orig.tar.xz',
              '9bfba987e1351b12aa983787b9ae4424ab752e9e646d8e93771538dc1e5d932f'),
+    # Vamp's own bluealsa (docs/bluealsa.md), installed only by a build made with --own-bluealsa: upstream
+    # bluez-alsa, its SBC, aptX and LDAC encoders linked in (sbc, freeaptx, ldac), compiled against the headers of the
+    # libraries the rootfs carries (stocksdk, whose archive here is GLib's; BLUEALSA_HEADERS the rest)
+    'bluealsa': ('5.0.0', 'https://github.com/arkq/bluez-alsa/archive/v5.0.0/bluez-alsa-5.0.0.tar.gz',
+                 'e1249cbebd24925c977814f62adab71f2ebd771e28e6a4ac58bb1ac97ce3beb5'),
+    'stocksdk': ('2.74.4', 'https://download.gnome.org/sources/glib/2.74/glib-2.74.4.tar.xz',
+                 '0e82da5ea129b4444227c7e4a9e598f7288d1994bf63f129c44b90cfd2432172'),
+    'sbc': ('2.1', 'https://www.kernel.org/pub/linux/bluetooth/sbc-2.1.tar.xz',
+            '426633cabd7c798236443516dfa8335b47e004b0ef37ff107e0c7ead3299fcc2'),
+    'ldac': ('2.0.2.3', 'https://github.com/EHfive/ldacBT/releases/download/v2.0.2.3/ldacBT-2.0.2.3.tar.gz',
+             '4bd8eece78bb5c1361fab95743e7100506e2408a25c4a592a0f8d349746dc5b4'),
+    'freeaptx': ('0.2.2', 'https://github.com/regularhunter/libfreeaptx/archive/0.2.2/libfreeaptx-0.2.2.tar.gz',
+                 '5ab5ebddf3f2eb7ce47a505b87460b00fc1ede99c70010796d3575ab31ea80bf'),
 }
 
 
@@ -619,6 +632,209 @@ def build_bluez(src, stage, env, log):
     shutil.copy(src/'COPYING', stage/'COPYING')
 
 
+# Vamp's own bluealsa (docs/bluealsa.md#build). It links the libraries the rootfs already has (GLib 2.74.4,
+# D-Bus 1.12, ALSA 1.1.6, BlueZ 5.66's libbluetooth and fdk-aac 2.0.2), which nothing here
+# builds: stocksdk is their headers, from each one's own release at the rootfs's version, with a pkg-config file
+# apiece that links the stock library itself, read from an unpacked stock rootfs (STOCKFS) and refused unless it
+# is the file V1.36 ships (BLUEALSA_STOCK_LIBS, SHA-256). So the binary names the sonames the rootfs has and
+# imports only what its libraries export.
+STOCKFS = pathlib.Path(os.environ.get('Q2_STOCKFS') or CACHE/'stockfs')
+BLUEALSA_STOCK_LIBS = {
+    'usr/lib/libglib-2.0.so.0.7400.4': 'aab8e379d595d98ee16c99a080a1caf98d243fe6e73922bdc46dd4dd6c6da0ce',
+    'usr/lib/libgobject-2.0.so.0.7400.4': '1da22edc67df699643c7b13c36272f4261d88d251f917d01ca8de8cc66143196',
+    'usr/lib/libgio-2.0.so.0.7400.4': '8897b15fdc9f2f11cf2ab6743f66ba485cbd1c527c1f5697251672cd3c102ae3',
+    'usr/lib/libdbus-1.so.3.19.15': '13664b0698c933830c36087d5a3832f308ed4efe444952d5c8a147c8b9a8b952',
+    'usr/lib/libasound.so.2.0.0': '9f125c2164028b8d728168168b9ad90cc38f6758d256ac57f3d87aab406eba46',
+    'usr/lib/libbluetooth.so.3.19.8': '09f8aef89eda2924e6fd178beb3773847f5db85d5327364c4efb893220ef329f',
+    'usr/lib/libfdk-aac.so.2.0.2': 'c15d57967908319945f1fb7e7d0583fdfdbea085cac71425b09c01199293d310'}
+# The headers stocksdk takes beside GLib's: name: (url, sha256, the directory in the archive)
+BLUEALSA_HEADERS = {
+    'dbus': ('https://dbus.freedesktop.org/releases/dbus/dbus-1.12.28.tar.gz',
+             '9da1e3f2b73f75eec0a9e4509d64be43909d1f2853fe809528a0a53984d76420', 'dbus-1.12.28'),
+    'alsa': ('https://www.alsa-project.org/files/pub/lib/alsa-lib-1.1.6.tar.bz2',
+             '5f2cd274b272cae0d0d111e8a9e363f08783329157e8dd68b3de0c096de6d724', 'alsa-lib-1.1.6'),
+    'bluez': ('https://www.kernel.org/pub/linux/bluetooth/bluez-5.66.tar.xz',
+              '39fea64b590c9492984a0c27a89fc203e1cdc74866086efb8f4698677ab2b574', 'bluez-5.66'),
+    'fdk-aac': ('https://downloads.sourceforge.net/opencore-amr/fdk-aac-2.0.2.tar.gz',
+                'c9e8630cf9d433f3cead74906a1520d2223f89bcd3fa9254861017440b8eb22f', 'fdk-aac-2.0.2'),
+}
+# What bluez-alsa is built with: the four codecs stock's has beside SBC (LDAC as a source only: the decoder
+# is not in Sony's published library), bluealsa-aplay (Guest Play's player) and bluealsactl; nothing of
+# oFono, UPower, MIDI, mSBC, LC3 or ASHA, none of which the rootfs has a library or a user for.
+# The base bluealsa is built for: the recipe that stands for the root file system's own libraries. `stocksdk` is
+# V1.36's; another base (docs/bluealsa.md#bases) is another recipe of the same shape, and nothing else changes.
+BLUEALSA_BASE = 'stocksdk'
+# Vamp's changes to bluez-alsa, each a patch file under tools/bluealsa with its reason at its head, in this order
+BLUEALSA_PATCHES = {n: (pathlib.Path(__file__).resolve().parent/'bluealsa'/n).read_text()
+                    for n in ('alsa-1.1.6-ioplug-avail.patch', 'shanling.patch')}
+BLUEALSA_OPTIONS = ['--enable-aac', '--enable-aptx', '--enable-aptx-hd', '--with-libfreeaptx', '--enable-ldac',
+                    '--enable-aplay', '--enable-ctl', '--disable-payloadcheck', '--disable-systemd',
+                    # its per-device store (volume, mute, delay) on the tmpfs: /var/lib is read-only on the Q2, and
+                    # the volume kept from one connection to the next is Vamp's own (BT_VOLUME)
+                    '--localstatedir=/tmp/q2-bluealsa',
+                    '--with-alsaplugindir=/usr/lib/alsa-lib', '--with-alsaconfdir=/usr/share/alsa/alsa.conf.d',
+                    '--with-dbusconfdir=/etc/dbus-1/system.d']
+
+
+def pkgconfig(stage, name, version, libs, cflags, requires=''):
+    """stage's pkg-config file for name: libs and cflags as given, ${prefix} the stage's usr."""
+    pc = stage/'usr/lib/pkgconfig'
+    pc.mkdir(parents=True, exist_ok=True)
+    (pc/f'{name}.pc').write_text(f'prefix={stage}/usr\nName: {name}\nDescription: {name} for the Q2\n'
+                                 f'Version: {version}\nRequires: {requires}\nLibs: {libs}\nCflags: {cflags}\n')
+
+
+def copy_headers(src, dst, pattern='*.h'):
+    dst.mkdir(parents=True, exist_ok=True)
+    for h in sorted(src.glob(pattern)):
+        shutil.copy(h, dst/h.name)
+
+
+def meson_files(text, name):
+    """The file names in meson.build text's `name = files(...)` and each `name += files(...)` after it."""
+    return [f for block in re.findall(rf'^{name} \+?= files\((.*?)\)', text, re.M | re.S)
+            for f in re.findall(r"'([^']+)'", block)]
+
+
+def build_stocksdk(src, stage, env, log):
+    for lib, digest in BLUEALSA_STOCK_LIBS.items():
+        need((STOCKFS/lib).is_file() or None, f'{STOCKFS/lib}: no stock rootfs to link against (unsquashfs one, or set Q2_STOCKFS)')
+        need(sha256(STOCKFS/lib) == digest or None, f'{STOCKFS/lib} is not V1.36\'s')
+    stock = f'-L{STOCKFS}/usr/lib'
+    # GLib, GObject and GIO: the headers its meson build installs, the generated ones made as it makes them
+    # (glibconfig.h for this target is tools/bluez/glibconfig.h; the enum headers by its own glib-mkenums)
+    inc = stage/'usr/include/glib-2.0'
+    for d in ('glib', 'glib/deprecated', 'gobject', 'gio'):
+        copy_headers(src/d, inc/d)
+    for top in ('glib/glib.h', 'glib/glib-object.h', 'glib/glib-unix.h'):
+        shutil.move(inc/top, inc/pathlib.Path(top).name)
+    shutil.copy(src/'gmodule/gmodule.h', inc/'gmodule.h')
+    copy_headers(src/'gio', stage/'usr/include/gio-unix-2.0/gio', 'gunix*.h')
+    (stage/'usr/lib/glib-2.0/include').mkdir(parents=True)
+    (stage/'usr/lib/glib-2.0/include/glibconfig.h').write_text(GLIBCONFIG)
+    tools = stage/'usr/bin'
+    tools.mkdir(parents=True)
+    mkenums = tools/'glib-mkenums'
+    mkenums.write_text((src/'gobject/glib-mkenums.in').read_text().replace('@PYTHON@', 'python3').replace('@VERSION@', '2.74.4'))
+    gio = (src/'gio/meson.build').read_text()
+    gio_headers = [h for n in ('gio_headers', 'gdbus_headers', 'application_headers', 'settings_headers') for h in meson_files(gio, n)]
+    need(len(gio_headers) > 150 or None, 'stocksdk: gio/meson.build does not list its headers as expected')
+    for out, template, headers in ((inc/'gobject/glib-enumtypes.h', src/'gobject/glib-enumtypes.h.template', [src/'glib/gunicode.h']),
+                                   (inc/'gio/gioenumtypes.h', src/'gio/gioenumtypes.h.template', [src/'gio'/h for h in gio_headers])):
+        out.write_bytes(subprocess.run([sys.executable, mkenums, '--template', template, *headers],
+                                       check=True, stdout=subprocess.PIPE).stdout)
+    # gdbus-codegen, which bluez-alsa's own generator runs: GLib's, from the same release
+    codegen = stage/'usr/share/glib-2.0/codegen'
+    shutil.copytree(src/'gio/gdbus-2.0/codegen', codegen, ignore=shutil.ignore_patterns('*.in', 'meson.build'))
+    (codegen/'config.py').write_text('VERSION = "2.74.4"\nMAJOR_VERSION = 2\nMINOR_VERSION = 74\n')
+    # 2.74's sorts "since" versions with distutils' LooseVersion, and distutils is gone from Python 3.12 (the Mac
+    # image's): the same ordering from a key of its own, numbers as numbers and the rest as text, as LooseVersion's
+    utils = codegen/'utils.py'
+    text = utils.read_text()
+    need(text.count('import distutils.version\n') == 1 and text.count('distutils.version.LooseVersion(v)') == 1 or None,
+         'stocksdk: gdbus-codegen\'s utils.py has no single distutils use to replace')
+    utils.write_text(text.replace('import distutils.version\n', 'import re as _re\n\n\n'
+                                  'def _loose(v):\n'
+                                  '    return [int(p) if p.isdigit() else p for p in _re.split(r"(\\d+|[a-z]+|\\.)", v) if p and p != "."]\n')
+                     .replace('distutils.version.LooseVersion(v)', '_loose(v)'))
+    (tools/'gdbus-codegen').write_text(f'#!/usr/bin/env python3\nimport sys\nsys.path.insert(0, {str(codegen.parent)!r})\n'
+                                       'from codegen import codegen_main\nsys.exit(codegen_main.codegen_main())\n')
+    (tools/'gdbus-codegen').chmod(0o755)
+    glib_c = '-I${prefix}/include/glib-2.0 -I${prefix}/lib/glib-2.0/include'
+    pkgconfig(stage, 'glib-2.0', '2.74.4', f'{stock} -lglib-2.0', glib_c)
+    pkgconfig(stage, 'gobject-2.0', '2.74.4', f'{stock} -lgobject-2.0', '', 'glib-2.0')
+    pkgconfig(stage, 'gio-2.0', '2.74.4', f'{stock} -lgio-2.0', '', 'gobject-2.0')
+    pkgconfig(stage, 'gio-unix-2.0', '2.74.4', '', '-I${prefix}/include/gio-unix-2.0', 'gio-2.0')
+    # the stock libraries' own dependencies (libffi, libpcre2, libz), which the linker looks for and nothing links
+    (stage/'ldflags').write_text(f'-Wl,-rpath-link,{STOCKFS}/usr/lib:{STOCKFS}/lib\n')
+    extra = {}
+    for name, (url, digest, top) in BLUEALSA_HEADERS.items():
+        d = src.parent/name
+        d.mkdir()
+        with tarfile.open(fetch(url, digest, url.rsplit('/', 1)[-1])) as t:
+            t.extractall(d, filter='data')
+        extra[name] = d/top
+    copy_headers(extra['dbus']/'dbus', stage/'usr/include/dbus-1.0/dbus', 'dbus*.h')
+    arch = (extra['dbus']/'dbus/dbus-arch-deps.h.in').read_text()
+    for k, v in {'DBUS_HAVE_INT64': '#define DBUS_HAVE_INT64 1', 'DBUS_INT64_TYPE': 'long long',
+                 'DBUS_INT64_CONSTANT': '(val##LL)', 'DBUS_UINT64_CONSTANT': '(val##ULL)', 'DBUS_INT32_TYPE': 'int',
+                 'DBUS_INT16_TYPE': 'short', 'DBUS_MAJOR_VERSION': '1', 'DBUS_MINOR_VERSION': '12',
+                 'DBUS_MICRO_VERSION': '28', 'DBUS_VERSION': '1.12.28'}.items():
+        arch = arch.replace(f'@{k}@', v)
+    (stage/'usr/lib/dbus-1.0/include/dbus').mkdir(parents=True)
+    (stage/'usr/lib/dbus-1.0/include/dbus/dbus-arch-deps.h').write_text(arch)
+    pkgconfig(stage, 'dbus-1', '1.12.28', f'{stock} -ldbus-1', '-I${prefix}/include/dbus-1.0 -I${prefix}/lib/dbus-1.0/include')
+    copy_headers(extra['alsa']/'include', stage/'usr/include/alsa')
+    copy_headers(extra['alsa']/'include/sound', stage/'usr/include/alsa/sound')
+    (stage/'usr/include/sys').mkdir()
+    shutil.copy(extra['alsa']/'include/sys.h', stage/'usr/include/sys/asoundlib.h')
+    pkgconfig(stage, 'alsa', '1.1.6', f'{stock} -lasound', '-I${prefix}/include')
+    copy_headers(extra['bluez']/'lib', stage/'usr/include/bluetooth')
+    pkgconfig(stage, 'bluez', '5.66', f'{stock} -lbluetooth', '-I${prefix}/include')
+    for d in ('libSYS/include', 'libAACenc/include', 'libAACdec/include'):
+        copy_headers(extra['fdk-aac']/d, stage/'usr/include/fdk-aac')
+    pkgconfig(stage, 'fdk-aac', '2.0.2', f'{stock} -lfdk-aac', '-I${prefix}/include')
+
+
+def build_sbc(src, stage, env, log):
+    # a static library alone: the rootfs has no libsbc (stock's bluealsa has the encoder built in too)
+    run('./configure', f'--host={env.host}', '--prefix=/usr', '--enable-static', '--disable-shared', '--with-pic',
+        '--disable-tools', '--disable-tester', cwd=src, env=env.vars, log=log)
+    run('make', f'-j{JOBS}', cwd=src, env=env.vars, log=log)
+    run('make', 'install', f'DESTDIR={stage}', cwd=src, env=env.vars, log=log)
+    pkgconfig(stage, 'sbc', '2.1', '-L${prefix}/lib -lsbc', '-I${prefix}/include')
+
+
+def build_freeaptx(src, stage, env, log):
+    # a static library alone, at the Makefile's own -O3: the aptX and aptX HD codec, the fork of libopenaptx 0.2.0
+    # (docs/bluealsa.md#codecs-and-licences)
+    (stage/'usr/lib').mkdir(parents=True)
+    run(*env.cc.split(), '-O3', '-fPIC', '-I.', '-c', 'freeaptx.c', '-o', 'freeaptx.o', cwd=src, log=log)
+    run(env.vars['AR'], 'rcs', stage/'usr/lib/libfreeaptx.a', 'freeaptx.o', cwd=src, log=log)
+    copy_headers(src, stage/'usr/include', 'freeaptx.h')
+    shutil.copy(src/'COPYING', stage/'COPYING.freeaptx')
+    pkgconfig(stage, 'libfreeaptx', '0.2.2', '-L${prefix}/lib -lfreeaptx', '-I${prefix}/include')
+
+
+def build_ldac(src, stage, env, log):
+    # Sony's encoder and its adaptive bit rate library as Android publishes them, static: the rootfs's
+    # libldacBT_ABR.so.2 is another build of it with another interface (its ldac_ABR_get_handle takes a library's
+    # path and loads it), so upstream bluez-alsa cannot use it (docs/bluealsa.md#shanlings-changes). ldaclib.c and ldacBT.c
+    # include the rest of src/, as Android's own build compiles them.
+    lib = src/'libldac'
+    (stage/'usr/lib').mkdir(parents=True)
+    for name, sources in (('ldacBT_enc', ['src/ldaclib.c', 'src/ldacBT.c']), ('ldacBT_abr', ['abr/src/ldacBT_abr.c'])):
+        objs = []
+        for s in sources:
+            objs.append(pathlib.Path(s).stem + '.o')
+            run(*env.cc.split(), '-O2', '-fPIC', '-Iinc', '-Isrc', '-Iabr/inc', '-c', s, '-o', objs[-1], cwd=lib, log=log)
+        run(env.vars['AR'], 'rcs', stage/f'usr/lib/lib{name}.a', *objs, cwd=lib, log=log)
+    for h in ('inc/ldacBT.h', 'abr/inc/ldacBT_abr.h'):
+        copy_headers(lib/pathlib.Path(h).parent, stage/'usr/include/ldac', pathlib.Path(h).name)
+    for n in ('LICENSE', 'NOTICE'):
+        shutil.copy(lib/n, stage/f'{n}.ldac')
+    pkgconfig(stage, 'ldacBT-enc', '2.0.2.3', '-L${prefix}/lib -lldacBT_enc -lm', '-I${prefix}/include/ldac')
+    pkgconfig(stage, 'ldacBT-abr', '2.0.2.3', '-L${prefix}/lib -lldacBT_abr', '-I${prefix}/include/ldac', 'ldacBT-enc')
+
+
+def build_bluealsa(src, stage, env, log):
+    # Nothing here names the stock rootfs: the base is whichever dependency carries the pkg-config files for
+    # alsa, bluez, dbus-1, gio-unix-2.0, glib-2.0 and fdk-aac, gdbus-codegen in its usr/bin, and in `ldflags`
+    # what else its libraries need at link time (BLUEALSA_BASE; docs/bluealsa.md#bases).
+    base = env.deps[BLUEALSA_BASE]
+    more = (base/'ldflags').read_text().strip() if (base/'ldflags').exists() else ''
+    vars = dict(env.vars, PATH=f'{base}/usr/bin:{env.vars["PATH"]}', LDFLAGS=f'{env.vars["LDFLAGS"]} {more}')
+    for name, text in BLUEALSA_PATCHES.items():
+        (src/name).write_text(text)
+        run('patch', '-p1', '-i', name, cwd=src, log=log)
+    run('autoreconf', '--install', '--force', cwd=src, env=vars, log=log)
+    run('./configure', f'--host={env.host}', '--prefix=/usr', *BLUEALSA_OPTIONS, cwd=src, env=vars, log=log)
+    run('make', f'-j{JOBS}', cwd=src, env=vars, log=log)
+    run('make', 'install', f'DESTDIR={stage}', cwd=src, env=vars, log=log)
+    shutil.copy(src/'LICENSE', stage/'LICENSE')
+
+
+
 RECIPES = {'openssl': (build_openssl, []),
            'zlib': (build_zlib, []),
            'mbedtls': (build_mbedtls, []), 'curl': (build_curl, ['mbedtls', 'zlib']),
@@ -628,7 +844,10 @@ RECIPES = {'openssl': (build_openssl, []),
            'libnl': (build_libnl, []), 'wpa_supplicant': (build_wpa_supplicant, ['openssl', 'libnl']),
            'ffmpeg': (build_ffmpeg, ['openssl', 'zlib']),
            'adbd': (build_adbd, []),
-           'glib': (build_glib, []), 'dbus': (build_dbus, []), 'bluez': (build_bluez, ['glib', 'dbus'])}
+           'glib': (build_glib, []), 'dbus': (build_dbus, []), 'bluez': (build_bluez, ['glib', 'dbus']),
+           'stocksdk': (build_stocksdk, []), 'sbc': (build_sbc, []), 'freeaptx': (build_freeaptx, []),
+           'ldac': (build_ldac, []),
+           'bluealsa': (build_bluealsa, [BLUEALSA_BASE, 'sbc', 'freeaptx', 'ldac'])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads

@@ -9,8 +9,9 @@
  * bluealsa, which reads the level a headset sends over HFP (+IPHONEACCEV, +XAPL) and hands it to
  * BlueZ through org.bluez.BatteryProviderManager1. BlueZ 5.66 offers that manager only with its
  * experimental interfaces on (Experimental = true in /etc/bluetooth/main.conf, tools/build.py
- * BT_EXPERIMENTAL). The sample rate is bluealsa's: its A2DP source PCM's Sampling, from
- * org.bluealsa.Manager1's GetPCMs.
+ * BT_EXPERIMENTAL). The sample rate is bluealsa's: its A2DP source PCM's Sampling (stock's 4.0.0) or Rate
+ * (5.0.0), from org.freedesktop.DBus.ObjectManager's GetManagedObjects on /org/bluealsa, which both answer
+ * (docs/bluealsa.md#the-callers).
  *
  * demo has no D-Bus client of its own, so a shell asks, off the UI thread (bt_ui.c bt_shell), one
  * answer a run: "MAC PCT RATE CLASS NAME" (each empty for none; NAME, BlueZ's Alias, to the line's
@@ -67,9 +68,9 @@ static int batt_fetch(const char *mac, int whole) {
         "org.freedesktop.DBus.Properties.Get'; f=" BATT_FILE "; %s"
         "p=$($g string:org.bluez.Battery1 string:Percentage 2>/dev/null | sed -n 's/.*byte //p'); "
         "r=$(dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "
-        "org.bluealsa.Manager1.GetPCMs 2>/dev/null | sed -n '/object path "
+        "org.freedesktop.DBus.ObjectManager.GetManagedObjects 2>/dev/null | sed -n '/object path "
         "\"\\/org\\/bluealsa\\/hci0\\/%s\\/a2dpsrc/,/object path \"\\/org\\/bluealsa/"
-        "{/\"Sampling\"/{n;s/.*uint32 //p;}}' | head -n 1); "
+        "{/\"Sampling\"/{n;s/.*uint32 //p;};/\"Rate\"/{n;s/.*uint32 //p;}}' | head -n 1); "
         "echo \"%s $p $r $c $a\" > $f.new && mv -f $f.new $f) >/dev/null 2>&1",
         dev,
         whole ? "c=$($g string:org.bluez.Device1 string:Class 2>/dev/null | sed -n 's/.*uint32 "

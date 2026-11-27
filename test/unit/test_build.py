@@ -1686,3 +1686,25 @@ def test_every_hook_is_where_a_record_not_made_from_hooks_says():
         build.hook_address_check(moved, stock, mapped)
     with pytest.raises(ValueError, match='in neither'):
         build.hook_address_check({'nowhere': (1, 'x', None)}, {}, mapped)
+
+
+def test_own_bluealsa_files_are_thirdpartys_stripped_under_names_of_their_own(tmp_path, monkeypatch):
+    import thirdparty
+    monkeypatch.setattr(thirdparty, 'build', lambda name: tmp_path/f'stage-{name}')
+    def stripped(src, dst):
+        assert src.is_relative_to(tmp_path/'stage-bluealsa') and dst.parent == tmp_path/'own-bluealsa'
+        dst.parent.mkdir(exist_ok=True)
+        dst.write_bytes(b'\x7fELF ' + src.name.encode())
+        return dst
+    monkeypatch.setattr(thirdparty, 'stripped', stripped)
+    files = build.own_bluealsa_files(tmp_path)
+    assert files == {'usr/lib/vamp-bluealsa/bluealsad': (build.HELPER_LIKE, b'\x7fELF bluealsad'),
+                     'usr/lib/vamp-bluealsa/bluealsa-aplay.own': (build.HELPER_LIKE, b'\x7fELF bluealsa-aplay'),
+                     'usr/lib/vamp-bluealsa/libasound_module_pcm_bluealsa.own.so': (build.HELPER_LIKE, b'\x7fELF libasound_module_pcm_bluealsa.so'),
+                     'usr/lib/vamp-bluealsa/libasound_module_ctl_bluealsa.own.so': (build.HELPER_LIKE, b'\x7fELF libasound_module_ctl_bluealsa.so')}
+    # the build keeps each added file in its output folder by base name: none may be stock's bluealsa's or bluealsa-aplay's
+    names = [p.rsplit('/', 1)[1] for p in files]
+    assert len(set(names)) == 4 and not {'bluealsa', 'bluealsa-aplay', 'bluealsa2'} & set(names)
+    assert build.own_bluealsa_record(files) == dict(
+        version=thirdparty.SOURCES['bluealsa'][0],
+        files={p: dict(sha256=hashlib.sha256(d).hexdigest(), bytes=len(d)) for p, (_, d) in files.items()})

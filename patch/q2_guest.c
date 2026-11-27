@@ -160,6 +160,8 @@ int dbus_message_iter_close_container(DBusMessageIter *, DBusMessageIter *);
 #define BLUEZ "org.bluez"
 #define SINK_SRV "org.bluealsa.sink"
 #define MAIN_SRV "org.bluealsa"
+#define OBJECT_MANAGER "org.freedesktop.DBus.ObjectManager"
+#define PCM_IFACE "org.bluealsa.PCM1"
 #define ADAPTER "/org/bluez/hci0"
 #define AGENT_PATH "/org/q2pod/guest_agent"
 #define A2DP_SINK_UUID "0000110b-0000-1000-8000-00805f9b34fb"
@@ -507,7 +509,7 @@ static void dev_call(const char *mac, const char *method) {
 
 /* ---- codec lines ---- */
 
-/* "CODEC RATE KBPS" from a bluealsa PCM's Codec, Sampling and CodecConfiguration (the A2DP
+/* "CODEC RATE KBPS" from a bluealsa PCM's Codec, rate and CodecConfiguration (the A2DP
  * capability octets: SBC's mode, blocks, subbands and bit pool give its bit rate; AAC carries its
  * own). Exposed for the tests. */
 void qg_codec_line(const char *codec, unsigned rate, const unsigned char *cfg, int n, char *out,
@@ -530,7 +532,7 @@ void qg_codec_line(const char *codec, unsigned rate, const unsigned char *cfg, i
 }
 
 /* A PCM's properties (a{sv}) into d (its codec line) and its transport's direction (1: the Q2 is
- * the sink). */
+ * the sink). The rate is Sampling in stock's bluealsa 4.0.0 and Rate in 5.0.0 (docs/bluealsa.md#the-callers). */
 static int pcm_props(DBusMessageIter *dict, qg_dev_t *d) {
     const char *codec = "", *device = 0, *transport = "";
     unsigned rate = 0;
@@ -547,7 +549,7 @@ static int pcm_props(DBusMessageIter *dict, qg_dev_t *d) {
         if (!strcmp(key, "Codec") && t == T_STR) dbus_message_iter_get_basic(&v, &codec);
         if (!strcmp(key, "Device") && t == T_PATH) dbus_message_iter_get_basic(&v, &device);
         if (!strcmp(key, "Transport") && t == T_STR) dbus_message_iter_get_basic(&v, &transport);
-        if (!strcmp(key, "Sampling") && t == T_U32) dbus_message_iter_get_basic(&v, &rate);
+        if ((!strcmp(key, "Sampling") || !strcmp(key, "Rate")) && t == T_U32) dbus_message_iter_get_basic(&v, &rate);
         if (!strcmp(key, "CodecConfiguration") && t == T_ARRAY) {
             DBusMessageIter a;
             dbus_message_iter_recurse(&v, &a);
@@ -1205,9 +1207,27 @@ static void pcm_removed(const char *path) {
         memset(&qg.out, 0, sizeof qg.out);
 }
 
+/* ifaces, an a{sa{sv}} (an object's interfaces and their properties, as the object manager gives them): the
+ * properties of org.bluealsa.PCM1 into props; 0 when the object is no PCM */
+static int pcm_iface(DBusMessageIter *ifaces, DBusMessageIter *props) {
+    DBusMessageIter e;
+    for (; dbus_message_iter_get_arg_type(ifaces) == T_DICT; dbus_message_iter_next(ifaces)) {
+        const char *name;
+        dbus_message_iter_recurse(ifaces, &e);
+        dbus_message_iter_get_basic(&e, &name);
+        if (strcmp(name, PCM_IFACE)) continue;
+        dbus_message_iter_next(&e);
+        dbus_message_iter_recurse(&e, props);
+        return 1;
+    }
+    return 0;
+}
+
+/* Every PCM srv has: org.freedesktop.DBus.ObjectManager's GetManagedObjects on /org/bluealsa, which stock's
+ * bluealsa 4.0.0 and Vamp's 5.0.0 both answer (4.0.0's GetPCMs is gone from 5.0.0). */
 static void pcms_list(const char *srv) {
-    DBusMessage *r = call(srv, "/org/bluealsa", "org.bluealsa.Manager1", "GetPCMs", T_END);
-    DBusMessageIter it, objs, ent, dict;
+    DBusMessage *r = call(srv, "/org/bluealsa", OBJECT_MANAGER, "GetManagedObjects", T_END);
+    DBusMessageIter it, objs, ent, ifaces, dict;
     if (r && dbus_message_iter_init(r, &it) && dbus_message_iter_get_arg_type(&it) == T_ARRAY) {
         dbus_message_iter_recurse(&it, &objs);
         for (; dbus_message_iter_get_arg_type(&objs) == T_DICT; dbus_message_iter_next(&objs)) {
@@ -1215,8 +1235,8 @@ static void pcms_list(const char *srv) {
             dbus_message_iter_recurse(&objs, &ent);
             dbus_message_iter_get_basic(&ent, &path);
             dbus_message_iter_next(&ent);
-            dbus_message_iter_recurse(&ent, &dict);
-            pcm_added(path, &dict, !strcmp(srv, SINK_SRV) ? qg.sink_owner : "");
+            dbus_message_iter_recurse(&ent, &ifaces);
+            if (pcm_iface(&ifaces, &dict)) pcm_added(path, &dict, !strcmp(srv, SINK_SRV) ? qg.sink_owner : "");
         }
     }
     if (r) dbus_message_unref(r);
@@ -1420,19 +1440,33 @@ static int filter(DBusConnection *c, DBusMessage *m, void *u) {
         }
         return DBUS_NOT_YET_HANDLED;
     }
-    if (dbus_message_is_signal(m, "org.bluealsa.Manager1", "PCMAdded")) {
+    /* bluealsa's PCMs come and go as its object manager's InterfacesAdded and InterfacesRemoved on /org/bluealsa,
+     * which both stock's 4.0.0 and 5.0.0 send (4.0.0 sends PCMAdded and PCMRemoved too; 5.0.0 has neither) */
+    if (path && !strcmp(path, "/org/bluealsa") && dbus_message_is_signal(m, OBJECT_MANAGER, "InterfacesAdded")) {
         const char *p;
-        DBusMessageIter dict;
+        DBusMessageIter ifaces, dict;
         if (dbus_message_iter_init(m, &it) && dbus_message_iter_get_arg_type(&it) == T_PATH) {
             dbus_message_iter_get_basic(&it, &p);
             dbus_message_iter_next(&it);
-            dbus_message_iter_recurse(&it, &dict);
-            pcm_added(p, &dict, dbus_message_get_sender(m));
+            dbus_message_iter_recurse(&it, &ifaces);
+            if (pcm_iface(&ifaces, &dict)) pcm_added(p, &dict, dbus_message_get_sender(m));
         }
-    } else if (dbus_message_is_signal(m, "org.bluealsa.Manager1", "PCMRemoved")) {
-        const char *p;
-        if (dbus_message_iter_init(m, &it) && dbus_message_iter_get_arg_type(&it) == T_PATH)
-            dbus_message_iter_get_basic(&it, &p), pcm_removed(p);
+    } else if (path && !strcmp(path, "/org/bluealsa") &&
+               dbus_message_is_signal(m, OBJECT_MANAGER, "InterfacesRemoved")) {
+        const char *p, *name;
+        DBusMessageIter names;
+        if (dbus_message_iter_init(m, &it) && dbus_message_iter_get_arg_type(&it) == T_PATH) {
+            dbus_message_iter_get_basic(&it, &p);
+            dbus_message_iter_next(&it);
+            dbus_message_iter_recurse(&it, &names);
+            for (; dbus_message_iter_get_arg_type(&names) == T_STR; dbus_message_iter_next(&names)) {
+                dbus_message_iter_get_basic(&names, &name);
+                if (!strcmp(name, PCM_IFACE)) {
+                    pcm_removed(p);
+                    break;
+                }
+            }
+        }
     } else if (qg.playing &&
                dbus_message_is_signal(m, "org.freedesktop.DBus.Properties", "PropertiesChanged") &&
                under(path, qg.guest.mac)) {
@@ -1530,7 +1564,7 @@ int main(void) {
     dbus_connection_add_filter(qg.bus, filter, 0, 0);
     static const char *const match[] = {
         "type='signal',sender='org.freedesktop.DBus',member='NameOwnerChanged'",
-        "type='signal',interface='org.bluealsa.Manager1'",
+        "type='signal',interface='org.freedesktop.DBus.ObjectManager',path='/org/bluealsa'",
         "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.Properties',member='"
         "PropertiesChanged'",
         "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.ObjectManager',member='"

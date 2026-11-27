@@ -6,6 +6,11 @@ shanling.bluez (NotifyChanged) and org.bluealsa (the main daemon's PCMs). `fake_
 org.bluealsa.sink, as the guest's daemon (`bluealsa -B sink`), which q2-guest starts itself. Each reads commands
 a line at a time from the FIFO CTL and appends what is called on it to LOG, a line each.
 
+The bluealsa daemons answer as stock's 4.0.0 (Q2_FAKE_BLUEALSA=stock, the default: GetPCMs, PCMAdded and
+PCMRemoved, and the same PCMs through org.freedesktop.DBus.ObjectManager, each rate as Sampling) or Vamp's 5.0.0
+(Q2_FAKE_BLUEALSA=own: the object manager alone, the rate as Rate), as test/bluealsa_own.py measured each
+(docs/bluealsa.md#the-callers).
+
 Run by the system python3 (dbus-python and PyGObject); the helper under test talks libdbus to it."""
 import os
 import sys
@@ -136,14 +141,34 @@ class Shanling(dbus.service.Object):
         log('NOTIFY', hex(event), bytes(data).hex())
 
 
+OWN = os.environ.get('Q2_FAKE_BLUEALSA') == 'own'
+OM = 'org.freedesktop.DBus.ObjectManager'
+
+
 class Alsa(dbus.service.Object):
-    """org.bluealsa.Manager1 of one daemon."""
+    """One bluealsa daemon's /org/bluealsa: its object manager, and 4.0.0's Manager1 unless OWN."""
     def __init__(self):
         super().__init__(bus, '/org/bluealsa')
         self.pcms = {}
 
+    @dbus.service.method(OM, out_signature='a{oa{sa{sv}}}')
+    def GetManagedObjects(self):
+        log('BLUEALSA GetManagedObjects')
+        return {path: {'org.bluealsa.PCM1': props} for path, props in self.pcms.items()}
+
+    @dbus.service.signal(OM, signature='oa{sa{sv}}')
+    def InterfacesAdded(self, path, ifaces):
+        pass
+
+    @dbus.service.signal(OM, signature='oas')
+    def InterfacesRemoved(self, path, ifaces):
+        pass
+
     @dbus.service.method('org.bluealsa.Manager1', out_signature='a{oa{sv}}')
     def GetPCMs(self):
+        if OWN:
+            raise dbus.exceptions.DBusException('no such method in 5.0.0', name='org.freedesktop.DBus.Error.UnknownMethod')
+        log('BLUEALSA GetPCMs')
         return self.pcms
 
     @dbus.service.signal('org.bluealsa.Manager1', signature='oa{sv}')
@@ -157,15 +182,19 @@ class Alsa(dbus.service.Object):
     def add(self, mac, sink, codec, rate, cfg):
         path = '/org/bluealsa/hci0/dev_%s/%s' % (mac.replace(':', '_'), 'a2dpsnk/source' if sink else 'a2dpsrc/sink')
         props = {'Device': dbus.ObjectPath(dev_path(mac)), 'Transport': 'A2DP-sink' if sink else 'A2DP-source',
-                 'Mode': 'source' if sink else 'sink', 'Codec': codec, 'Sampling': dbus.UInt32(int(rate)),
+                 'Mode': 'source' if sink else 'sink', 'Codec': codec, 'Rate' if OWN else 'Sampling': dbus.UInt32(int(rate)),
                  'CodecConfiguration': dbus.ByteArray(bytes.fromhex(cfg))}
         self.pcms[path] = props
-        self.PCMAdded(path, props)
+        self.InterfacesAdded(path, {'org.bluealsa.PCM1': props})
+        if not OWN:
+            self.PCMAdded(path, props)
 
     def remove(self, mac):
         for path in [p for p in self.pcms if dev_path(mac).split('/')[-1] in p]:
             del self.pcms[path]
-            self.PCMRemoved(path)
+            self.InterfacesRemoved(path, ['org.bluealsa.PCM1'])
+            if not OWN:
+                self.PCMRemoved(path)
 
 
 objs = {}

@@ -215,6 +215,8 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/aic_build.py': ['{stockfs}'],  # no builds: it checks the guard, the module's ABI and its packaging
     'test/alsa.py': ['{build}', '{qemu}'],
     'test/bluealsa.py': ['{build}'],
+    'test/bluealsa_own.py': "needs the own bluealsa built first (tools/thirdparty.py build bluealsa, minutes) and its path; a spike's "
+                             'check, run by hand (docs/bluealsa.md#what-the-emulator-shows)',
     'test/bluetoothd.py': ['{build}'],
     'test/bluez_own.py': ['{build}'],  # the own bluetoothd beside stock's under qemu-mipsel; it builds bluez when the cache has none
     'test/build.py': ['--build', '{build}'],
