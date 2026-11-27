@@ -919,8 +919,8 @@ static int serve(void) {
 
 /* An API 0 app as today's Vamp starts it, as root (it has no user): its run script, which starts the app's loop in the
  * background, leaves the loop's pid in /tmp/q2-<id> and returns; then that loop waited for until it ends, so runsv sees
- * the app running while it lives. This process is the loop's subreaper, so the loop, orphaned when its launcher
- * returns, is its child to reap. A TERM (sv down, Q2PKG/1's stop) goes on to the loop, as today's Stop. */
+ * the app running while it lives. This process is the loop's subreaper where the kernel allows, so the loop, orphaned
+ * when its launcher returns, is its child to reap. A TERM (sv down, Q2PKG/1's stop) goes on to the loop, as today's Stop. */
 static volatile sig_atomic_t run0_term;
 static void on_run0_term(int s) { (void)s, run0_term = 1; }
 static int app_run0(const char *dir, const char *id) {
@@ -929,7 +929,9 @@ static int app_run0(const char *dir, const char *id) {
     struct sigaction sa = {.sa_handler = on_run0_term}; /* no SA_RESTART: a TERM ends the wait below */
     sigaction(SIGTERM, &sa, 0);
     signal(SIGCHLD, SIG_DFL);
-    if (prctl(PR_SET_CHILD_SUBREAPER, 1)) return fail("%s: %s", id, strerror(errno));
+    /* Linux 3.4's, so the Q2's 5.10 has it; QEMU's user mode refuses it (EINVAL), and then the loop, not this
+     * process's child, is watched by its pid alone (the ECHILD case below) and init reaps it */
+    prctl(PR_SET_CHILD_SUBREAPER, 1);
     pid_t p = fork();
     if (p < 0) return fail("%s: %s", id, strerror(errno));
     if (!p) {
