@@ -12,7 +12,8 @@
  *   its own, which wakes the UI loop for each), or from the single file /tmp/coda-rc.cmd that a sender with no
  *   queue writes: play a list of song ids from one of them, or shuffled (ids in
  *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, scan (Car Audio's held Next or Previous: seek.c seek_car), set the volume, set shuffle and
- *   repeat, rate the playing song, play a song of the queue, start or stop a radio (song_radio.c); and
+ *   repeat, rate the playing song, like it or not (its heart), play a song of the queue, start or stop a radio
+ *   (song_radio.c); and
  *   answers each in /tmp/coda-rc.ack (the last CR_ACKS answers, newest first), a Pause or Play once the player
  *   shows it;
  * - starts a card app the daemon named in /tmp/coda-rc.wake, for a cover the car asked for (addon_cover_wake);
@@ -84,6 +85,7 @@ static struct {
     char pair_name[32]; /* the phone asking, for the toast */
     int toast_what;
     int hearts; /* the playing song's stars, as rate_now; read at hearts_at for hearts_id */
+    int liked;  /* its like, the heart, as rate_now_liked; read with the stars */
     unsigned hearts_at, hearts_id;
     char note[96]; /* the toast shown last, for the car, until note_at + CR_NOTE_MS; note_n counts them */
     unsigned note_at, note_n;
@@ -396,13 +398,13 @@ static void cr_queue(void *q, unsigned pos) {
     free(b);
 }
 
-/* The playing song's stars (the protocol's hearts): again on a new song, after a Rate from here or
- * every CR_HEARTS_MS, as the rating page and the server change them without telling. The heart, the
- * like, is not the rating and is not sent. */
+/* The playing song's stars (the protocol's hearts) and its like (liked, the heart, which is not the rating): again
+ * on a new song, after a Rate or a Like from here or every CR_HEARTS_MS, as the rating page and the server change
+ * them without telling. */
 static int cr_hearts(unsigned id) {
     unsigned now = time_now_ms();
     if (!cr.hearts_at || id != cr.hearts_id || now - cr.hearts_at >= CR_HEARTS_MS)
-        cr.hearts = rate_now(), cr.hearts_id = id, cr.hearts_at = now | 1;
+        cr.hearts = rate_now(), cr.liked = rate_now_liked(), cr.hearts_id = id, cr.hearts_at = now | 1;
     return cr.hearts;
 }
 
@@ -445,6 +447,7 @@ static void cr_now(void) {
     put_int(b, sizeof b, &n, "repeat", rep);
     put_int(b, sizeof b, &n, "volume", g_volume);
     put_int(b, sizeof b, &n, "hearts", now.pressed || other ? -1 : cr_hearts((unsigned)now.id));
+    put_int(b, sizeof b, &n, "liked", now.pressed || other ? -1 : cr.liked); /* read with the stars just now */
     /* a shuffle's: the playing song's line in the listing and its lines (cr_queue), as the car lists them */
     int listing = cr.q_rows && !now.pressed && !other;
     put_int(b, sizeof b, &n, "qpos", listing ? (int)cr.q_place : (int)now.qpos);
@@ -713,6 +716,15 @@ static void cr_run(const char *raw) {
         cr.hearts_at = 0; /* the new stars: read them now */
         cr_now();
         cr_ack(seq, ok < 0 ? 3 : !ok);
+    } else if (verb && __isoc99_sscanf(verb, " like %d", &w) == 1) {
+        /* the heart's like flipped, as Now Playing's heart flips it (ratings.c rate_now_like): q2ui's ring heart */
+        unsigned at, n;
+        void *r = queue_now(&at, &n);
+        int now_liked = r && I(r, REC_ID) == w ? rate_now_like() : -3;
+        cr_said(seq, verb + 1, media_status(), now_liked == -3 ? "not the song playing" : now_liked < 0 ? "refused" : now_liked ? "liked" : "unliked");
+        cr.hearts_at = 0; /* the new like: read it now */
+        cr_now();
+        cr_ack(seq, now_liked == -3 ? 3 : now_liked < 0);
     } else if (verb && __isoc99_sscanf(verb, " jump %d %d", &v, &w) == 2 && v >= 0) {
         int before = media_status(), code = cr_jump((unsigned)v, w);
         cr_said(seq, verb + 1, before, code == 3 ? "not that song now" : code ? "refused" : 0);

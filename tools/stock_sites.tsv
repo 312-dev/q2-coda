@@ -1,7 +1,7 @@
 # How to find each stock code address our files name again, at stock V1.36's addresses. docs/rebasing.md
 binary	address	size	function	where in it; what uses it
-demo	0x47b25c	0x4	sub_47b06c	`addiu $4, $4, -0x60e4, forming "kb_default_t9"`, the delay slot of the only call to navigator_close, after "label_record_%d"; tools/build.py KB_NAME_READS
-demo	0x47b540	0x4	sub_47b3b4	`addiu $4, $4, -0x60e4, forming "kb_default_t9"`, the delay slot of the only call to navigator_close, after "search_edit"; tools/build.py KB_NAME_READS
+demo	0x47b25c	0x4	tidal_quality_record_click	`addiu $4, $4, -0x60e4, forming "kb_default_t9"`, the delay slot of the only call to navigator_close, after "label_record_%d"; tools/build.py KB_NAME_READS
+demo	0x47b540	0x4	tidal_quality_search_close	`addiu $4, $4, -0x60e4, forming "kb_default_t9"`, the delay slot of the only call to navigator_close, after "search_edit"; tools/build.py KB_NAME_READS
 demo	0x4805b8	0x4	baidu_pthread_playurl	the only call to usleep; tools/build.py STREAM_POLL_CALLS
 demo	0x481ad8	0x4	baidu_curl_download_file	1st of 15 calls to curl_easy_setopt, after "ab+"; tools/build.py STOCK_TLS_CALLS
 demo	0x481af4	0x4	baidu_curl_download_file	2nd of 15 calls to curl_easy_setopt, after "ab+"; tools/build.py STOCK_TLS_CALLS
@@ -29,11 +29,11 @@ demo	0x49a698	0x4	dialog_editwifi_dialog_init	`sw $17, -0x4f90($18)`, the delay 
 demo	0x49a6b4	0x4	dialog_editwifi_dialog_init	`beqz $2, +32 words` (1st of 2 such), before the only call to memset, after "edit"; patch/offsets.inc EDITWIFI_PASSWORD
 demo	0x49a6d4	0x4	dialog_editwifi_dialog_init	`addiu $4, $4, -0x347c, forming "keyboard_password"` (1st of 2 such), before the only call to getFormatString, after "edit"; tools/build.py KB_NAME_READS
 demo	0x49a750	0x4	dialog_editwifi_dialog_init	`addiu $4, $4, -0x3468, forming "keyboard_netname"` (2nd of 2 such), after "keyboard_password"; tools/build.py KB_NAME_READS
-demo	0x49a854	0x4	sub_49a760	`addiu $4, $4, -0x3468, forming "keyboard_netname"` (1st of 2 such), before the only call to getFormatString, after "edit_wifiname"; tools/build.py KB_NAME_READS
-demo	0x49a8b8	0x4	sub_49a760	`addiu $4, $4, -0x347c, forming "keyboard_password"` (2nd of 2 such), before 5th of 5 calls to strcmp, after "edit_passwd"; tools/build.py KB_NAME_READS
+demo	0x49a854	0x4	editwifi_dialog_bind_edits	`addiu $4, $4, -0x3468, forming "keyboard_netname"` (1st of 2 such), before the only call to getFormatString, after "edit_wifiname"; tools/build.py KB_NAME_READS
+demo	0x49a8b8	0x4	editwifi_dialog_bind_edits	`addiu $4, $4, -0x347c, forming "keyboard_password"` (2nd of 2 such), before 5th of 5 calls to strcmp, after "edit_passwd"; tools/build.py KB_NAME_READS
 demo	0x49abb8	0x4	kbwifiadd_name_row_on_click	`move $5, $zero` (3rd of 3 such), before the only call to navigator_to_with_context, after "edit_wifiname"; patch/offsets.inc EDITWIFI_PASSWORD
 demo	0x49ae08	0x4	kbwifiadd_password_row_on_click	`addiu $5, $zero, 0x1`, before the only call to navigator_to_with_context, after "edit_passwd"; patch/offsets.inc EDITWIFI_PASSWORD
-demo	0x49b0e4	0x4	sub_49b028	`addiu $4, $4, -0x347c, forming "keyboard_password"`, the delay slot of the only call to getFormatString, after "img_return"; tools/build.py KB_NAME_READS
+demo	0x49b0e4	0x4	kbwifiadd_dialog_bind_edit	`addiu $4, $4, -0x347c, forming "keyboard_password"`, the delay slot of the only call to getFormatString, after "img_return"; tools/build.py KB_NAME_READS
 demo	0x49cdd8	0x4	search_row_image_create	`addiu $2, $zero, 0x46`; patch/ipod.json immediates search_body (Search's rows: the button and its full-height children)
 demo	0x49cde0	0x4	search_row_image_create	`addiu $7, $zero, 0x32`; patch/ipod.json immediates search_art (Search's rows: the artwork's width; 0 makes two lines of text, as Songs')
 demo	0x49cec4	0x4	list_into_icon_create	`addiu $2, $zero, 0x46`, before the only call to image_create; patch/ipod.json immediates search_body (Search's rows: the button and its full-height children)
@@ -197,8 +197,8 @@ demo	0x4c1eb0	0x4	systemset_timezone_list_build	the load of $25 for the only cal
 demo	0x4c1ed8	0x4	systemset_timezone_list_build	`addiu $2, $zero, 0x1c`, after "list_view"; tools/build.py patch_timezones
 demo	0x4c23f4	0x4	systemset_timezone_row_on_click	`addiu $2, $zero, 0x1c`, after "select"; tools/build.py patch_timezones
 demo	0x4c3f94	0x4	btmenu_rows	the load of $25 for the only call to widget_move_resize, after "list_view_bluetooth"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
-demo	0x4c44b8	0x4	btmenu_item_on_click	the load of $25 for the only call to handleBluetoothPair, after "dialog/confirminfo_dialog"; patch/bt_detail.c forget
-demo	0x4c45b4	0x4	btmenu_item_on_click	`move $4, $17`, the delay slot of the only call to btmenu_rows, after "dialog/msginfo_dialog"; patch/bt_detail.c forget
+demo	0x4c44b8	0x4	btmenu_item_on_click	the load of $25 for the only call to handleBluetoothPair, after "dialog/confirminfo_dialog"; patch/bt_detail.c bt_forget
+demo	0x4c45b4	0x4	btmenu_item_on_click	`move $4, $17`, the delay slot of the only call to btmenu_rows, after "dialog/msginfo_dialog"; patch/bt_detail.c bt_forget
 demo	0x4c4848	0x4	btmenu_page_on_timer	`lw $gp, 0x10($sp)` (4th of 4 such), before 2nd of 2 calls to btmenu_rows; patch/bt_ui.c page_poll
 demo	0x4c556c	0x4	btquality_item_on_click	`lbu $2, 0x0($22), forming bt_linkstatus`; tools/build.py BT_QUALITY
 demo	0x4c5570	0x4	btquality_item_on_click	`andi $2, $2, 0xff`; tools/build.py BT_QUALITY
@@ -222,6 +222,7 @@ demo	0x4d3530	0x4	systemset_sysset_item_on_click	`lw $2, GOT[a page]` (2nd of 2 
 demo	0x4d3600	0x4	systemset_sysset_row_build	the load of $25 for the only call to widget_move_resize, after "list_view_sysset"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x4d4390	0x4	systemset_system_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_system"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x4d5364	0x4	systemset_wheelmode_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_wheelmode"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
+demo	0x4d570c	0x4	wifimenu_scan_timer_add	`addiu $6, $zero, 0xc8`, before the only call to widget_add_timer, after "timer_idex"; patch/wifi_flows.c SCAN_TICK_MS
 demo	0x4d59f4	0x4	wifimenu_rows_build	the load of $25 for the only call to widget_move_resize, after "list_view_wifi"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x4d7550	0x4	systemset_wifiset_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_wifiset"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x4e0d28	0x4	tidal_albuminfo_bind_widget	`lw $25, GOT[widget_move_resize]` (19th of 21 such), after "view_play"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
@@ -322,7 +323,7 @@ demo	0x51f6c0	0x4	player_get_id3info	`lw $4, 0x28($16)` (2nd of 4 such), before 
 demo	0x52077c	0x4	player_save_stop	2nd of 2 calls to usleep; patch/usb_otg.c otg_stock, tools/build.py OTG_STOP_SLEEP_CALL
 demo	0x5264c4	0x4	startPlayFolderSong	`addiu $18, $zero, 0x1`, before 2nd of 2 calls to getFormatString, after "stSongInfo"; patch/playback.c has_server_row
 demo	0x5266b4	0x4	startPlayClassSong	`addiu $18, $zero, 0x1`, before 2nd of 2 calls to getFormatString, after "stSongInfo"; patch/playback.c has_server_row
-demo	0x52c7c8	0x4	sub_52c660	the only call to player_set_coverinfo; patch/cover_wake.c
+demo	0x52c7c8	0x4	airplay_cover_set	the only call to player_set_coverinfo; patch/cover_wake.c
 demo	0x531f60	0x4	folder_refresh	the load of $25 for the only call to widget_move_resize, after "tableview_folder"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x532000	0x4	folder_refresh	`addiu $5, $zero, 0x4e`, before the only call to table_client_set_row_height, after "tableclient_folder"; patch/ipod.json immediates folder_pitch (Folder view: row creation, reset and artwork offset divisors (art_pitch unless the set gives its own))
 demo	0x532308	0x4	folder_page_go_up	`addiu $3, $zero, 0x4e`, after "sync"; patch/ipod.json immediates folder_pitch (Folder view: row creation, reset and artwork offset divisors (art_pitch unless the set gives its own))
@@ -455,8 +456,8 @@ demo	0x5ddd14	0x4	table_view_on_event	1st of 2 calls to table_client_scroll_to; 
 demo	0x5dde50	0x4	table_view_on_event	2nd of 2 calls to table_client_scroll_to; tools/build.py TABLE_SCROLL_CALLS
 demo	0x5ddf04	0x4	table_view_on_event	the only call to table_client_set_yoffset; tools/build.py TABLE_DRAG_CALL
 demo	0x5de094	0x4	table_view_on_event	`addiu $2, $zero, 0x107`, before 1st of 2 calls to widget_dispatch_event_to_target_recursive, after "table_view"; patch/ipod.json event_abi_words
-demo	0x5e0850	0x4	sub_5e06ec	1st of 2 calls to window_open_and_close, after "name != NULL not satisfied."; tools/build.py WINDOW_OPENS
-demo	0x5e0874	0x4	sub_5e06ec	the only call to window_open, after "name != NULL not satisfied."; tools/build.py WINDOW_OPENS
+demo	0x5e0850	0x4	widget_open_action	1st of 2 calls to window_open_and_close, after "name != NULL not satisfied."; tools/build.py WINDOW_OPENS
+demo	0x5e0874	0x4	widget_open_action	the only call to window_open_stubs, after "name != NULL not satisfied."; tools/build.py WINDOW_OPENS
 demo	0x5fb23c	0x4	hscroll_label_text_edge_x	`addiu $6, $zero, 0x2` (2nd of 2 such), before 2nd of 2 calls to style_get_int, after "margin_left"; patch/nav/row_paint.c marq_stop
 demo	0x5fb394	0x4	hscroll_label_step	`lwc1 $f0, 0x8c($16)` (1st of 2 such); patch/offsets.inc HSCROLL_SPEED
 demo	0x5fb78c	0x4	hscroll_label_on_timer_tick	`lbu $2, 0xac($2)`; patch/offsets.inc HSCROLL_PAUSED
@@ -475,8 +476,8 @@ demo	0x5fc1a0	0x4	hscroll_label_on_paint_self	`lbu $2, 0x98($18)` (3rd of 3 such
 demo	0x5fd234	0x4	children_layouter_list_view_layout	`lw $25, GOT[scroll_view_set_yslidable]` (21st of 54 such), before the only call to scroll_view_set_yslidable, after "animate:animating_time"; tools/ipod.py home_list
 demo	0x5fd484	0x4	children_layouter_list_view_layout	`bgtz $21, +5 words`, before the only call to widget_resize, after "animate:animating_time"; patch/peq_ui.c render_rows
 demo	0x6028ec	0x4	scroll_view_on_scroll	`lw $25, 0x100($4)`, before the only call to a pointer; patch/offsets.inc VIEW_ON_SCROLL
-demo	0x6183d0	0x4	file_chooser_choose	the only call to window_open; tools/build.py WINDOW_OPENS
-demo	0x61c8f8	0x4	sub_61c894	the only call to window_open; tools/build.py WINDOW_OPENS
+demo	0x6183d0	0x4	file_chooser_choose	the only call to window_open_stubs; tools/build.py WINDOW_OPENS
+demo	0x61c8f8	0x4	combo_box_open_popup	the only call to window_open_stubs; tools/build.py WINDOW_OPENS
 demo	0x627028	0x4	edit_set_text_from_value	the load of $25 for the only call to text_edit_set_cursor; patch/peq_ui.c render_rows
 demo	0x62dd14	0x4	slider_paint_bar	`sltiu $2, $2, 0x4`, after "fg_image_draw_type"; patch/np_bar.c np_theme
 demo	0x638a4c	0x4	slidebar_run	the only call to ts_read, after "slidebar_run"; tools/build.py WHEEL_TS_READ
@@ -488,7 +489,7 @@ demo	0x653898	0x4	pointer_event_init	`sw $2, 0x1c($16)` (2nd of 3 such); patch/i
 demo	0x658cc8	0x4	input_method_request	`lw $2, 0x4($4)` (2nd of 2 such), before the only call to window_manager; patch/ipod.json event_abi_words, patch/offsets.inc IM_WIDGET
 demo	0x65d558	0x4	style_get_color	the only call to style_get_gradient; patch/offsets.inc STYLE_COLOR_GRADIENT_RET
 demo	0x65d560	0x4	style_get_color	`lw $gp, 0x10($sp)`, before the only call to gradient_get_first_color; patch/offsets.inc STYLE_COLOR_GRADIENT_RET
-demo	0x665374	0x4	text_edit_show_context_menu	the only call to window_open; tools/build.py WINDOW_OPENS
+demo	0x665374	0x4	text_edit_show_context_menu	the only call to window_open_stubs; tools/build.py WINDOW_OPENS
 demo	0x6716a8	0x4	widget_dispatch	`lw $2, 0x10($18)`, before the only call to widget_vtable_on_event; patch/ipod.json event_abi_words
 demo	0x6717a0	0x4	widget_update_style	`lw $2, 0x64($16)`; patch/offsets.inc W_ASTYLE
 demo	0x672848	0x4	widget_paint	`lbu $3, 0x34($4)`; patch/ui_kit.h OVM_PAINT_MIN
@@ -499,16 +500,16 @@ demo	0x675d34	0x4	widget_on_keydown	`addiu $3, $zero, 0x110`; patch/offsets.inc 
 demo	0x6766e0	0x4	widget_on_pointer_down	`addiu $2, $zero, 0x100`, before the only call to emitter_dispatch; patch/ipod.json event_abi_words
 demo	0x676b68	0x4	widget_on_pointer_move	`addiu $2, $zero, 0x102`, before the only call to emitter_dispatch; patch/ipod.json event_abi_words
 demo	0x676df8	0x4	widget_on_pointer_up	`addiu $2, $zero, 0x104`, before the only call to emitter_dispatch; patch/ipod.json event_abi_words
-demo	0x68323c	0x4	window_open	`b -52 words`; tools/build.py WINDOW_OPENS
-demo	0x683254	0x4	sub_68322c	`1000fff5` (2nd of 2 such); tools/build.py WINDOW_OPENS
+demo	0x68323c	0x4	window_open_stubs	`b -52 words` (1st of 2 such); tools/build.py WINDOW_OPENS
+demo	0x683254	0x4	window_open_stubs	`b -10 words` (2nd of 2 such); tools/build.py WINDOW_OPENS
 demo	0x69997c	0x4	window_manager_default_layout_child	`beqz $2, +28 words` (2nd of 3 such); tools/build.py FULL_BLEED
 demo	0x69d218	0x4	window_manager_default_close_window	`lw $5, GOT[a page]` (1st of 2 such), before 1st of 2 calls to widget_get_prop_int; patch/offsets.inc WINDOW_STAGE_OPENED
 demo	0x69f19c	0x4	input_method_default_on_win_close	`sw $zero, 0xc($16)`, the delay slot of the only call to sub_69efdc; patch/offsets.inc IM_KEYBOARD
-demo	0x69f650	0x4	sub_69f638	`addiu $sp, $sp, -0xd8`; tools/build.py KB_REQUEST
-demo	0x69fb5c	0x4	sub_69f638	1st of 2 calls to window_open, after "kb_phone"; tools/build.py KB_OPEN_SITES
-demo	0x69fbd0	0x4	sub_69f638	2nd of 2 calls to window_open, after "kb_phone"; tools/build.py KB_OPEN_SITES
-demo	0x69fef4	0x4	sub_69f638	3rd of 4 calls to widget_set_prop, after "popup"; tools/build.py KB_OPEN_HINT
-demo	0x6a0234	0x4	sub_69f638	`addiu $sp, $sp, -0x20`, after "input_method_default_request"; tools/build.py KB_REQUEST
+demo	0x69f650	0x4	input_method_default_request	`addiu $sp, $sp, -0xd8`; tools/build.py KB_REQUEST
+demo	0x69fb5c	0x4	input_method_default_request	1st of 2 calls to window_open_stubs, after "kb_phone"; tools/build.py KB_OPEN_SITES
+demo	0x69fbd0	0x4	input_method_default_request	2nd of 2 calls to window_open_stubs, after "kb_phone"; tools/build.py KB_OPEN_SITES
+demo	0x69fef4	0x4	input_method_default_request	3rd of 4 calls to widget_set_prop, after "popup"; tools/build.py KB_OPEN_HINT
+demo	0x6a0234	0x4	input_method_default_request	`addiu $sp, $sp, -0x20`, after "input_method_default_request"; tools/build.py KB_REQUEST
 demo	0x6b2bb4	0x4	glyph_cache_lookup	the load of $25 for the only call to time_now_ms; tools/build.py GLYPH_STAMP
 demo	0x6b2bb8	0x4	glyph_cache_lookup	the only call to time_now_ms; tools/build.py GLYPH_STAMP
 demo	0x6b3514	0x4	input_device_status_handle_event	`sb $zero, 0xc($17)` (2nd of 2 such), after "double clicked"; patch/nav/hold_menu.c STALE_NOTES

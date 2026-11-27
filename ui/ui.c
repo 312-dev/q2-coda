@@ -235,6 +235,8 @@ int ui_frame(const input_t *in, int n) {
         if (in[i].type == IN_TICK) ++ui_stats.ticks;
         /* every press clicks as it goes down, as stock's keys do (on_wm_keydown) */
         if (in[i].type == IN_KEY_DOWN && (in[i].value == KEY_UI_CENTRE || in[i].value == KEY_UI_RETURN)) ui_click(1);
+        if (notice_event(&in[i])) /* a question on the card takes every input while it asks (notice.c) */
+            continue;
         if (in[i].type == IN_KEY_HOLD && hold_fn && in[i].value == hold_key)
             hold_fn();
         else if (stack[depth - 1].page->event)
@@ -242,6 +244,7 @@ int ui_frame(const input_t *in, int n) {
     }
     if (!depth || quit) return 0;
     status_step();
+    notice_step();
     if (stack[depth - 1].page->step) stack[depth - 1].page->step(stack[depth - 1].st);
     if (slide.dir) {
         float ms = (float)(ui_time() - slide.t0) / 1000.0f + (float)fb_refresh_us() / 1000.0f;
@@ -262,12 +265,14 @@ int ui_frame(const input_t *in, int n) {
         clip_set(all);
         slide_draw();
         status_draw(all);
+        notice_draw(all);
     } else
         for (int i = 0; i < marks.n; ++i) {
             clip_set(marks.r[i]);
             stack[depth - 1].page->draw(stack[depth - 1].st, marks.r[i]);
             clip_set(marks.r[i]);
             status_draw(marks.r[i]);
+            notice_draw(marks.r[i]); /* a toast and the card over the page and its status row */
         }
     ui_painting = 0;
     for (int i = 0; i < marks.n; ++i) dmg_add(marks.r[i]);
@@ -287,7 +292,7 @@ int ui_frame(const input_t *in, int n) {
  * reads the same keys, so it drops what arrives while the light is off. No backlight to read (a
  * host run, the emulator) is a lit screen. */
 const char *ui_backlight = "/sys/class/backlight";
-static int dark(void) {
+int ui_dark(void) {
     static char power[160], level[160];
     static int found = -1;
     if (found < 0) {
@@ -315,14 +320,25 @@ static int dark(void) {
     return off;
 }
 
-#define WATCHES 4
+/* a slot given up (ui_unwatch) keeps fd -1, which poll passes over, until ui_watch takes it again: the loop's
+ * slots never move under it while it calls them */
+#define WATCHES 16
 static int watches;
 static struct {
     int fd;
     void (*fn)(void);
 } watch[WATCHES];
 void ui_watch(int fd, void (*fn)(void)) {
+    for (int k = 0; k < watches; ++k)
+        if (watch[k].fd < 0) {
+            watch[k].fd = fd, watch[k].fn = fn;
+            return;
+        }
     if (watches < WATCHES) watch[watches].fd = fd, watch[watches++].fn = fn;
+}
+void ui_unwatch(int fd) {
+    for (int k = 0; k < watches; ++k)
+        if (watch[k].fd == fd) watch[k].fd = -1;
 }
 
 /* SIGHUP: q2ui starts itself again in place (ui_restart, set by main.c: the same program file run
@@ -373,12 +389,12 @@ int ui_run(void) {
         struct timespec ts = { wait / 1000, (long)(wait % 1000) * 1000000L };
         ppoll(fds, (nfds_t)n, wait >= 0 ? &ts : 0, &open_mask);
         for (int k = 0; k < watches; ++k)
-            if (fds[nfds + k].revents) watch[k].fn();
+            if (fds[nfds + k].revents && fds[nfds + k].fd == watch[k].fd && watch[k].fd >= 0) watch[k].fn();
         input_t in[64];
         int got = input_read(in, 64);
         /* the press that wakes the screen is only that, its release included */
         static uint64_t quiet_until, last_input;
-        if (got && dark()) quiet_until = mono_us() + 400000;
+        if (got && ui_dark()) quiet_until = mono_us() + 400000;
         if (got && mono_us() < quiet_until) got = 0;
         /* a panel set up again on waking is back at 16 bits a pixel (panel.c): told again when the
          * screen was dark, and at the first input after a pause long enough for it to have been */

@@ -321,6 +321,47 @@ static int rate_fav_click(void *ctx, void *event) {
     return 0;
 }
 
+/* The playing song's like, the heart: an app's streamed song's from its queue (isFav_playing, app_fav), a song
+ * on the card's or a server song's Stream Cache copy's from My Fav (rate_fav). 1 liked, 0 not, -1 nothing playing
+ * that has a heart here (a stream of the player's own, the radio, a Tidal song). */
+int rate_now_liked(void) {
+    unsigned type = (unsigned)mclGetPlayType();
+    if (type == 2 || type == 3 || type == 0xf2) return -1; /* the types stock's heart click refuses */
+    void *r = rate_track();
+    if (type == 0xf1) return r && tk_str_start_with(P(r, REC_TIDAL_ID), "app:") ? isFav_playing != 0 : -1;
+    return r ? rate_fav(r) != 0 : -1;
+}
+
+/* The playing song's like flipped with no page of demo's open, as the heart's click flips it (rate_fav_click):
+ * q2ui's Now Playing ring heart, down Car Remote's queue ("like ID", coda_rc_shim.c). An app's streamed song is
+ * the app's heart (app_fav); a Tidal song is left alone (stock's click would reach Tidal's API); any other song's
+ * My Fav is flipped as stock's click flips it, manage_myfav for the queue's playing song (My Fav's own list read
+ * again when that is the page under, g_delete_flag) and then its notifyFavor, or a server row's like taken out
+ * where the row filled the heart; then the app and the server are told. 1 liked, 0 not, -1 nothing with a heart
+ * here (rate_now_liked), -2 an app that refused it. */
+int rate_now_like(void) {
+    if (rate_now_liked() < 0) return -1;
+    if ((unsigned)mclGetPlayType() == 0xf1) {
+        int app = app_fav();
+        if (app == -2) toast("Favorite not saved");
+        if (app == -3) toast("This app has no favorites");
+        return app >= 0 ? app : -2;
+    }
+    void *r = rate_track();
+    int row = catalogue_row_fav(r) > 0;
+    if (!row || checkFavExist(r)) {
+        if (manage_myfav() != 1 && I(g_class_type, 0) == 0xf00a) g_delete_flag = 1;
+        notifyFavor();
+    }
+    ratings_copy_due();
+    int fav = checkFavExist(r) != 0;
+    if (row && !fav) catalogue_row_unfav(r);
+    fav_told(r, fav);
+    catalogue_liked(r, fav);
+    rate_heart(); /* demo's own page, if it is open under */
+    return fav;
+}
+
 static int rate_gone(void *win, void *event) {
     if (win != st.rate_win) return 0;
     stop_timer(&ra.rate_tick);

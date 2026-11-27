@@ -1070,6 +1070,8 @@ unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_fav(void *r);           /* My Fav, a server song's offline copy by its row */
 int rate_now_set(int n);         /* n stars for the playing track; 1 kept */
 int rate_now(void);              /* the playing track's 0-5 stars, -1 when it can't be rated */
+int rate_now_liked(void);        /* the playing song's like: 1, 0, -1 when it has no heart here */
+int rate_now_like(void);         /* ... flipped with no page open: the new like, -1 none, -2 an app refused */
 int rate_saved(int k);
 void rate_album_favs(void *album, int on);
 int fav_told(void *r, int on); /* ratings: a My Fav change told to the song's card app */

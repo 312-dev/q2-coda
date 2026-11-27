@@ -2065,6 +2065,8 @@ FUNCTIONS = {
  'taglib_file_audioproperties': ('void *', 'void *'),
  'taglib_file_free': ('void', 'void *'),
  'deleteMusicFromFav': ('int', 'void *'),
+ 'manage_myfav': ('int', 'void'),  # Now Playing's heart click's: My Fav flipped for the playing song, 1 added (ratings.c rate_now_like)
+ 'notifyFavor': ('int', 'void'),  # ... and what it calls after
  'batch_init_selectrecord': ('int', 'int'),
  'batch_set_selectitem': ('int', 'int'),
  'batch_get_selectitem': ('int', 'int'),

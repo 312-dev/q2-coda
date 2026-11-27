@@ -83,7 +83,9 @@ def test_the_devices_are_told_paired_first_with_their_state_and_a_found_one_once
     assert SEEN_FILE in ' '.join(q.p.commands)
     ask = [c for c in q.p.commands if SEEN_FILE in c][-1]
     import re
-    q.p.files.files[SEEN_FILE] = (re.search(r"echo '(#\d+)'", ask)[1] + f'\n{SPEAKER} seen\n').encode()
+    mark = re.search(r"echo '(#\d+)'", ask)
+    assert mark, ask
+    q.p.files.files[SEEN_FILE] = (mark[1] + f'\n{SPEAKER} seen\n').encode()
     q.ticks(5)
     assert q.told() == f'scan 1\n1 2 {HEAD} WH-1000XM5\n1 0 {CAR} BMW 6R81\n0 0 {SPEAKER} JBL Flip 6\n'
     fw.var('g_bluetoothflag', C.c_ubyte).value = 0

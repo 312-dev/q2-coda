@@ -7,7 +7,8 @@
  * every SCRUB_SEEK_MS); the next ends it there and rings Shuffle; the wheel walks the ring over
  * Shuffle, Repeat and the heart (Shuffle and Repeat not while a radio plays: its order is the
  * radio's); Centre steps the ringed one, shuffle on or off, repeat Off, All, One (down the command
- * queue, "mode SHUFFLE REPEAT", as Car Remote sets them); STAGE_US without a key, or Return, ends
+ * queue, "mode SHUFFLE REPEAT", as Car Remote sets them), or flips the heart's like ("like ID",
+ * patch/ratings.c rate_now_like; the heart drawn is the like, not the stars); STAGE_US without a key, or Return, ends
  * either. Play and pause are the Play/Pause key's, which stays demo's. While the volume changes, by
  * the wheel here or the side buttons, its level takes the bar's place for VOLUME_SHOW_US, white on
  * the same track, and the times stand aside (demo shows its own volume window then, which q2ui's
@@ -81,7 +82,7 @@ struct now_st {
     uint64_t mq_at; /* when the title's turn began, 0: it fits */
     float mq_x;
     char title_s[160], artist_s[160], album_s[160];
-    int marks_s; /* the modes, the hearts and whether a song is loaded, as last drawn */
+    int marks_s; /* the modes, the like and whether a song is loaded, as last drawn */
     /* the Centre cycle: scrubbing, its place (s), whether the wheel moved it, the song it began on;
      * the ring's stage; when either last had a key (their timeout); the spin's run (ramp) and the
      * last seek sent */
@@ -186,9 +187,11 @@ static void centre(struct now_st *s) {
             snprintf(verb, sizeof verb, "mode -1 %d", n->repeat == 0 ? 2 : n->repeat == 2 ? 1 : 0);
         player_send(verb);
         stage_set(s, s->stage); /* its timeout from this press */
-    } else
-        stage_set(s, s->stage); /* ponytail: the heart's like needs a verb of demo's (ratings.c
-                                   rate_fav_click) */
+    } else { /* the heart: its like flipped as demo's heart flips it (patch/ratings.c rate_now_like) */
+        snprintf(verb, sizeof verb, "like %d", n->id);
+        player_send(verb);
+        stage_set(s, s->stage);
+    }
 }
 static void n_event(void *st, const input_t *e) {
     struct now_st *s = st;
@@ -266,7 +269,7 @@ static void n_step(void *st) {
         ui_mark((rect_t){ 0, BAR_Y - 2, SCREEN_W, 40 });
         /* the modes and the heart, set from elsewhere too (the car, the phone, demo's own page) */
         int marks =
-            (n->shuffle > 0) | (n->repeat & 3) << 1 | (n->hearts + 1) << 3 | !*n->title << 12;
+            (n->shuffle > 0) | (n->repeat & 3) << 1 | (n->liked + 1) << 3 | !*n->title << 12;
         if (marks != s->marks_s) {
             s->marks_s = marks;
             ui_mark((rect_t){ 0, MODE_Y - 20, SCREEN_W, SCREEN_H - (MODE_Y - 20) });
@@ -434,7 +437,7 @@ static void n_draw(void *st, rect_t r) {
     }
     /* liked, and not: the image's box at y 146 puts its ink's top on demo's, y 155
      * (ui/tools/compare.py on the emulator's shots of the same song, m17c-04 and -09) */
-    const image_t *heart = icon(n->hearts > 0 ? "np_fav_d." : "np_unfav_d.");
+    const image_t *heart = icon(n->liked > 0 ? "np_fav_d." : "np_unfav_d."); /* the like; the stars are the rating page's */
     if (heart && *n->title && s->stage == STAGE_HEART) { /* its ring, as demo's heart_ring */
         rectf_t ink = { 194, 146, (float)heart->w, (float)heart->h };
         ink_box(heart, &ink);

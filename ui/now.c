@@ -41,6 +41,7 @@ void now_read(void) {
     ui_now was = now;
     FILE *f = fopen(now_file, "r");
     memset(&now, 0, sizeof now);
+    now.liked = -1;
     while (f && fgets(line, sizeof line, f)) {
         *num = 0;
         field(line, "title", now.title, sizeof now.title);
@@ -63,6 +64,8 @@ void now_read(void) {
         if (*num) now.repeat = atoi(num);
         *num = 0, field(line, "hearts", num, sizeof num);
         if (*num) now.hearts = atoi(num);
+        *num = 0, field(line, "liked", num, sizeof num);
+        if (*num) now.liked = atoi(num);
         *num = 0, field(line, "radio", num, sizeof num);
         if (*num) now.radio = atoi(num);
     }
