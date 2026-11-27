@@ -7,7 +7,9 @@
  *     the file systems unmounted).
  *   - The screen: off is the backlight's bl_power 4 (FB_BLANK_POWERDOWN) and the touchscreen's gesture mode on, as
  *     stock's screen_action does (docs/internals.md#screen-off-and-wake); on is bl_power 0 and gestures off. q2ui
- *     reads the same bl_power and drops input while it is dark (ui/ui.c dark).
+ *     reads the same bl_power and drops input while it is dark (ui/ui.c dark). Lit, it goes off once nothing has
+ *     used the Q2 for stock's Screen Off Time ([SYSSET] LIGHTTIME, docs/sysd.md#the-screen-off-time): any input
+ *     device's key, touch or wheel, or Q2SYS/1 awake.
  *   - The battery: the CW2015's level and voltage, the charger's state, read every BATTERY_S and at each change of
  *     the screen, written to /run/vamp/battery and told to watchers.
  *
@@ -57,7 +59,8 @@
 #define CHARGE_STOP 80   /* Charge Limit's stop and resume levels (the payload's CHARGE_STOP, CHARGE_RESUME) */
 #define CHARGE_RESUME 75
 #define PE22 150         /* the charger's active-low enable: port E (gpiochip4, base 128) line 22 */
-#define CABLE_MS 1000    /* ac/online read this often: the cable's in and out (no event reaches userspace, docs/usb.md) */
+#define CABLE_MS 1000    /* ac/online read this often: the cable's in and out (no event reaches userspace, docs/usb.md);
+                          * config.ini's Screen Off Time and the idle time looked at as often */
 
 static char root[256], poweroff_cmd[256] = "/sbin/poweroff";
 
@@ -112,6 +115,7 @@ static int write_text(const char *p, const char *text) {
 
 static char backlight[300]; /* the first /sys/class/backlight device, "" with none */
 static int screen_on = 1;
+static unsigned long long used_at; /* the last use: an input event, Q2SYS/1 awake, the screen lit, the setting changed */
 
 static void find_backlight(void) {
     DIR *d = opendir(path("/sys/class/backlight"));
@@ -136,6 +140,7 @@ static int set_screen(int on) {
     /* the touchscreen's gestures (a double tap as KEY_POWER) while dark, as stock's double_onclick_wake */
     write_text(path("/sys/hynitron_debug/hyngescontrol"), on ? "0" : "1");
     screen_on = on;
+    if (on) used_at = now_ms();
     say("screen %s", on ? "on" : "off");
     tell("screen %s", on ? "on" : "off");
     return 0;
@@ -248,6 +253,26 @@ static int config_int(const char *section, const char *key, int fallback) {
     }
     if (f) fclose(f);
     return v;
+}
+
+/* ---- the screen off time (docs/sysd.md#the-screen-off-time) ----
+ * Stock's Screen Off Time, [SYSSET] LIGHTTIME: its six choices are setlight_time's table in demo, 15 s, 30 s, 1, 2, 5
+ * and 30 minutes; any other value gives 0 there, never off. Stock's file says 1; a file without the key reads as
+ * that. Read again when config.ini changes, and a change starts the time again, as config_lighttime does. */
+static const int LIGHT_S[] = {15, 30, 60, 120, 300, 1800};
+static int light_s = 30;
+static long long light_stamp = -1;
+
+static void light_poll(void) {
+    struct stat st;
+    long long stamp = stat(path("/mnt/data/config.ini"), &st) ? 0 : (long long)st.st_mtime * 1000003 + (long long)st.st_size;
+    if (stamp == light_stamp) return;
+    light_stamp = stamp;
+    int v = config_int("SYSSET", "LIGHTTIME", 1);
+    light_s = v >= 0 && v < (int)(sizeof LIGHT_S / sizeof *LIGHT_S) ? LIGHT_S[v] : 0;
+    used_at = now_ms();
+    if (light_s) say("screen off time %d s", light_s);
+    else say("screen off time: never");
 }
 
 /* the charger on (allow) or held off, through PE22 (active low: 1 holds it off) as the kernel's GPIO class gives it */
@@ -550,7 +575,7 @@ static int standby(void) {
 
 /* ---- the power key ---- */
 
-static int in_fd[INPUTS], n_in;
+static int in_fd[INPUTS], n_in, n_power; /* every input device (its use holds the screen lit); n_power of them have the power key */
 static unsigned long long pressed_at; /* 0: not held */
 
 static int has_power_key(int fd) {
@@ -561,7 +586,7 @@ static int has_power_key(int fd) {
 
 static void open_inputs(void) {
     for (int i = 0; i < n_in; ++i) close(in_fd[i]);
-    n_in = 0;
+    n_in = n_power = 0;
     DIR *d = opendir(path("/dev/input"));
     for (struct dirent *e; d && (e = readdir(d)) && n_in < INPUTS;) {
         if (strncmp(e->d_name, "event", 5)) continue;
@@ -570,8 +595,8 @@ static void open_inputs(void) {
         int fd = open(p, O_RDWR | O_NONBLOCK | O_CLOEXEC); /* RDWR: a test's FIFO stays open */
         if (fd < 0) fd = open(p, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) continue;
-        if (has_power_key(fd)) in_fd[n_in++] = fd;
-        else close(fd);
+        n_power += has_power_key(fd);
+        in_fd[n_in++] = fd;
     }
     if (d) closedir(d);
 }
@@ -593,6 +618,7 @@ static void read_input(int fd) {
     ssize_t got;
     while ((got = read(fd, e, sizeof e)) > 0)
         for (unsigned i = 0; i < (size_t)got / sizeof *e; ++i) {
+            if (e[i].type == EV_KEY || e[i].type == EV_ABS || e[i].type == EV_REL) used_at = now_ms(); /* any use */
             if (e[i].type != EV_KEY || e[i].code != KEY_POWER) continue;
             if (e[i].value == 1) pressed_at = now_ms() | 1;
             else if (e[i].value == 0 && pressed_at) {
@@ -644,7 +670,7 @@ static void client_line(struct client *c, const char *line) {
         c->hello = 1;
         client_say(c, "Q2SYS/1 ok");
     } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps screen brightness usb usb-dac usb-car standby battery watch");
+        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby battery watch");
     } else if (!strcmp(line, "battery")) {
         char text[160];
         read_battery();
@@ -655,6 +681,9 @@ static void client_line(struct client *c, const char *line) {
     } else if (!strcmp(line, "screen on") || !strcmp(line, "screen off") || !strcmp(line, "screen toggle")) {
         int on = line[7] == 't' ? !screen_on : line[8] == 'n';
         client_say(c, on == screen_on || !set_screen(on) ? "ok" : "err screen");
+    } else if (!strcmp(line, "awake")) { /* a use, as a key is: the screen off time starts again */
+        used_at = now_ms();
+        client_say(c, "ok");
     } else if (sscanf(line, "brightness %d", &v) == 1) {
         client_say(c, set_brightness(v) ? "err brightness" : "ok");
     } else if (!strcmp(line, "usb")) {
@@ -716,7 +745,9 @@ int main(int argc, char **argv) {
     find_backlight();
     open_inputs();
     read_battery();
-    say("%d input device(s) with the power key, backlight %s, screen %s", n_in, backlight[0] ? backlight : "none", screen_on ? "on" : "off");
+    light_poll();
+    say("%d input device(s), %d with the power key, backlight %s, screen %s", n_in, n_power, backlight[0] ? backlight : "none",
+        screen_on ? "on" : "off");
     cable_poll();
     unsigned long long battery_at = now_ms(), scanned_at = now_ms(), cable_at = now_ms();
     while (!stopping) {
@@ -731,7 +762,7 @@ int main(int argc, char **argv) {
             long long hold = (long long)(pressed_at + HOLD_MS) - (long long)t;
             if (hold < wait) wait = hold;
         }
-        if (!n_in && (long long)(scanned_at + RESCAN_MS) - (long long)t < wait) wait = (long long)(scanned_at + RESCAN_MS) - (long long)t;
+        if (!n_power && (long long)(scanned_at + RESCAN_MS) - (long long)t < wait) wait = (long long)(scanned_at + RESCAN_MS) - (long long)t;
         if ((long long)(cable_at + CABLE_MS) - (long long)t < wait) wait = (long long)(cable_at + CABLE_MS) - (long long)t;
         if (usb_mode == USB_CAR && wait > 500) wait = 500;
         if (wait < 0) wait = 0;
@@ -749,8 +780,16 @@ int main(int argc, char **argv) {
         t = now_ms();
         if (pressed_at && t >= pressed_at + HOLD_MS) power_off();
         if (t >= battery_at + BATTERY_S * 1000ull) read_battery(), battery_at = t;
-        if (!n_in && t >= scanned_at + RESCAN_MS) open_inputs(), scanned_at = t;
-        if (t >= cable_at + CABLE_MS) cable_poll(), cable_at = t;
+        if (!n_power && t >= scanned_at + RESCAN_MS) open_inputs(), scanned_at = t;
+        if (t >= cable_at + CABLE_MS) {
+            cable_poll(), cable_at = t;
+            light_poll();
+            if (screen_on && light_s && t >= used_at + (unsigned long long)light_s * 1000) {
+                say("unused %d s: the screen off", light_s);
+                used_at = t; /* a screen that cannot go off is tried again a whole time later */
+                set_screen(0);
+            }
+        }
         if (usb_mode == USB_CAR) car_poll();
     }
     unlink(path("/run/vamp/sys.sock"));

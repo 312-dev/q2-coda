@@ -160,6 +160,54 @@ def test_the_battery_file(run):
     assert text == {'level': '73', 'mv': '3912', 'status': 'Discharging', 'cable': '0'}
 
 
+
+# ---- the screen's idle timeout (docs/sysd.md#the-screen-off-time) ----
+
+def lit(root):
+    return read(root, '/sys/class/backlight/lcd/bl_power') == '0'
+
+
+def until_dark(root, secs):
+    end = time.monotonic() + secs
+    while lit(root) and time.monotonic() < end:
+        time.sleep(0.1)
+    return not lit(root)
+
+
+def test_the_screen_goes_off_after_screen_off_time_and_input_or_awake_holds_it(run):
+    """[SYSSET] LIGHTTIME 0 is stock's 15 s (setlight_time's table: 15, 30, 60, 120, 300, 1800 s)"""
+    root, keys = run
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nLANGUAGE=2\nLIGHTTIME=0\n')
+    time.sleep(10)
+    assert lit(root)
+    press(keys, KEY_VOLUMEUP)  # any input is use, as any key resets stock's timer
+    time.sleep(10)
+    assert lit(root), 'a key at 10 s: not dark at 20 s'
+    a = Api(root)
+    assert a.line() == 'Q2SYS/1 ok'
+    a.say('awake')
+    assert a.line() == 'ok'
+    time.sleep(12)
+    assert lit(root), 'awake at 20 s: not dark at 32 s'
+    a.say('watch')
+    assert a.line() == 'ok'
+    assert until_dark(root, 5), 'dark 15 s after the last use'
+    assert a.line() == 'screen off' and read(root, '/sys/hynitron_debug/hyngescontrol') == '1', 'as a press turns it off'
+    press(keys)
+    assert lit(root), 'the power key lights it again'
+
+
+def test_a_screen_off_time_past_stock_s_list_never_turns_it_off_and_a_change_starts_it_again(run):
+    root, _ = run
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nLIGHTTIME=6\n')
+    time.sleep(17)
+    assert lit(root), 'past the six choices: never (setlight_time gives 0)'
+    put(root, '/mnt/data/config.ini', '[SYSSET]\nLIGHTTIME=0\n')
+    time.sleep(13)
+    assert lit(root), 'a change starts the time again, as stock\'s config_lighttime resets it'
+    assert until_dark(root, 5)
+
+
 class Api:
     def __init__(self, root, hello='Q2SYS/1'):
         self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

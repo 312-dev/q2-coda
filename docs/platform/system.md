@@ -6,6 +6,7 @@
 | --- | --- |
 | `screen` | `screen on` or `screen off` |
 | `screen on`, `screen off`, `screen toggle` | `ok` |
+| `awake` | `ok`: a use, as a key press is, so the screen's off time starts again ([q2sysd: The screen off time](../sysd.md#the-screen-off-time)); for an app that shows something with no key pressed (a video, a game); capability word `awake` |
 | `brightness P` | `ok` for 0 to 100 percent, else `err brightness` |
 | `battery` | `battery level=PERCENT mv=MILLIVOLTS status=TEXT cable=0\|1`; `status` is the kernel's text, percent-encoded (`Not%20charging`) |
 | `usb` | `usb adb`, `usb storage`, `usb dac` or `usb car` |
@@ -14,15 +15,17 @@
 | `usb car` | `ok`, or `err usb`: Car Audio, the Q2 shown to the host as an iPhone until q2-iap decides; a car stays (a `car` event), anything else ends in `usb adb` ([Car Audio on Vamp OS](../car-audio-os.md)); capability word `usb-car`. q2sysd also changes the mode itself at a cable in and out ([q2sysd: The cable](../sysd.md#the-cable)), each change told as below |
 | `standby` | `ok`, before the Q2 suspends |
 | `watch` | `ok`; then `screen on`, `screen off`, `battery ...`, `charge held level=N`, `charge allowed level=N`, `usb adb`, `usb storage`, `usb dac`, `usb car`, `car`, `usb ask` (a cable in on Ask Every Time: the chooser's to draw), `standby`, `resumed` and `power off` lines as they happen |
-| `caps` | `caps screen brightness usb usb-dac usb-car standby battery watch` |
+| `caps` | `caps screen awake brightness usb usb-dac usb-car standby battery watch` |
 
 ```conformance
 > Q2SYS/1
 < Q2SYS/1 ok
 > caps
-< caps screen brightness usb usb-dac usb-car standby battery watch
+< caps screen awake brightness usb usb-dac usb-car standby battery watch
 > screen
 < screen on
+> awake
+< ok
 > screen off
 < ok
 > screen
