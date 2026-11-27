@@ -329,7 +329,7 @@ typedef struct ui_list ui_list;
 /* A picture a row was given (ui_row.art) may have changed or been freed: every list asks its rows
  * with art again before it draws them. Whoever owns the pictures calls it (ui/art.c). */
 void list_pictures_changed(void);
-void list_rows_changed(void); /* any row's words or marks may have changed: every row is asked again */
+void list_rows_changed(void); /* any row's words or marks may have changed: every row is asked again, a switch slides */
 void control_push(void);      /* Control Center (page_control.c) */
 /* ---- config.c: the settings q2ui reads from demo's config.ini ---- */
 extern const char *config_file;

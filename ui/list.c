@@ -97,6 +97,7 @@ struct ui_list {
     rect_t box;
     int row_h, rows, y0; /* whole scrolling rows in sight; where the first of them rests */
     spring_t scroll, bar, lean, press, knob;
+    unsigned everything_seen; /* list_rows_changed's count when this list last read its rows again */
     float tug;
     int pressed, moving;
     uint64_t t, press_at, sb_at, mq_at;
@@ -181,6 +182,9 @@ static void forget(ui_list *l) {
     l->mq_row = -1;
 }
 
+/* Bumped by list_pictures_changed and list_rows_changed (below) */
+static unsigned pictures, everything;
+
 ui_list *list_new(const ui_source *src) {
     ui_list *l = calloc(1, sizeof *l);
     l->src = *src;
@@ -195,6 +199,7 @@ ui_list *list_new(const ui_source *src) {
     while (l->sel < l->n - 1 && !selectable(l, l->sel)) ++l->sel;
     retarget(l);
     if (l->n) l->knob.to = row_text_flags(l, l->sel) & ROW_ON ? 1 : 0;
+    l->everything_seen = everything;
     settle(l);
     l->focus_was = focus_rect(l);
     ui_mark(frame_rect(l));
@@ -234,7 +239,6 @@ void list_changed(ui_list *l) {
  * is dropped; a value keeps its width at the right column and the title is cut to leave it. */
 /* Bumped by list_pictures_changed: a row's art is asked for again, as the picture it was given
  * may have been replaced (a cover read) or freed. */
-static unsigned pictures, everything;
 void list_pictures_changed(void) { ++pictures; }
 void list_rows_changed(void) { ++everything; }
 
@@ -533,6 +537,8 @@ int list_trace(char *out, size_t room) {
 void list_step(ui_list *l) {
     uint64_t now = ui_time();
     traced = l;
+    /* rows changed from outside (list_rows_changed): read again, the selected switch sliding over */
+    if (l->everything_seen != everything) l->everything_seen = everything, list_reload(l);
     float dt = now > l->t ? (float)(now - l->t) / 1e6f : 0;
     l->t = now;
     double scroll = l->scroll.x;

@@ -539,9 +539,10 @@ def control_center(binary, work, home):
     told = pathlib.Path(tempfile.mkdtemp(dir=work))/'told'
     told.write_text('out=other\nwifi=1\nbton=0\ncar=0\nsmart=0\neq=1\nusb=Automatic\n')
     lines = ['rest', 'tick 2', 'rest', 'hold return', 'rest', 'key centre', 'run 100', 'key centre', 'run 100', 'tick 2', 'rest',
-             'key centre', 'run 100']
-    _, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--told', told, queue=True)
+             'key centre', 'run 600']
+    trace, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--told', told, queue=True)
     verbs = [line.split(' ', 1)[1] for line in sent]
+    good &= check("the selected switch's knob slides over with it, before demo has said so", trace[-1]['knob'] > 0.99, str(trace[-1]['knob']))
     good &= check('Return held opens Control Center on any page; Wi-Fi, on by demo, goes off, then on again before demo says '
                   'so, and Car Remote, off, goes on', verbs == ['set wifi 0', 'set wifi 1', 'set car 1'], str(verbs))
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'hold return', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'],
