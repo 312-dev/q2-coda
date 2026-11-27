@@ -20,7 +20,7 @@ RUN sed -i 's/^Components:.*/&\nArchitectures: arm64/' /etc/apt/sources.list.d/u
         dbus file gcc-i686-linux-gnu libc6-dev-i386-cross git golang-go imagemagick jq lame ffmpeg \
         libavcodec-dev libavformat-dev libavutil-dev libcapstone-dev libcurl4-openssl-dev libdbus-1-dev \
         libglib2.0-dev libicu-dev libmad0-dev libssl-dev libtool libusb-1.0-0-dev lld llvm ninja-build \
-        iproute2 nodejs npm patchelf pkg-config qemu-user qemu-user-static squashfs-tools strace unzip wget xz-utils zip \
+        cpio iproute2 nodejs npm patchelf pkg-config qemu-user qemu-user-static squashfs-tools rsync strace unzip wget xz-utils zip \
         python3-dbus python3-gi gir1.2-glib-2.0 \
         libc6:amd64 libc6:i386 \
     && rm -rf /var/lib/apt/lists/*
