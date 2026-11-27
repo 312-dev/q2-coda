@@ -19,8 +19,9 @@
  *  - q2ui asks for a page of demo's it has not got: it names the page in Q2UI_ASK and ends with
  *    Q2UI_ASKED. demo opens that page, and starts q2ui again when the page has been left.
  *  - while q2ui runs, demo says what only it knows for q2ui's status row (where the sound goes,
- *    Bluetooth, Buttons Lock, a card app's sync and server: status_row_state) in Q2UI_STATUS, a
- *    look every Q2UI_STATUS_MS and a write only when something in it changed.
+ *    Bluetooth, Buttons Lock, a card app's sync and server: status_row_state) and Control Center
+ *    (its switches' states: q2ui_cc_state) in Q2UI_STATUS, a look every Q2UI_STATUS_MS and a
+ *    write only when something in it changed.
  *
  * The target is read once, before demo's first paint, so no frame of demo's shows first. With no
  * such file, or no q2ui in the image (any default build), none of this does anything. */
@@ -41,7 +42,8 @@ int coverflow_opening(void); /* coverflow.c: Cover Flow is loading before its pa
 #define Q2UI_STATUS "/tmp/q2ui.status" /* ui/status.c reads it when it changes (inotify) */
 #define Q2UI_STATUS_MS 500
 
-unsigned status_row_state(char *b, unsigned room); /* status_row.c */
+unsigned status_row_state(char *b, unsigned room);  /* status_row.c */
+unsigned q2ui_cc_state(char *b, unsigned room);     /* control_center.c: q2ui's Control Center's */
 
 static struct {
     int pid;           /* q2ui's, Q2UI_DUE, or 0 */
@@ -97,17 +99,21 @@ static void said(const char *what, int n) {
 int tuner_open(void *ctx, void *event), games_open(void *ctx, void *event), era_menu(void *ctx, void *event);
 int ratings_menu(void *ctx, void *event), most_played(void *ctx, void *event);
 int library_search_open(void *ctx, void *event), coverflow_row_open(void *ctx, void *event);
+int carremote_open(void *ctx, void *event), controls_open(void *ctx, void *event), usb_pick_open(void *ctx, void *event);
 
 static const struct {
     const char *name;
     int (*open)(void *ctx, void *event);
 } openers[] = { { "tuner_page", tuner_open },     { "games_page", games_open },         { "era_page", era_menu },
                 { "ratings_page", ratings_menu }, { "mostplayed_page", most_played },
-                { "searchstrip_page", library_search_open }, { "coverflow_page", coverflow_row_open } };
+                { "searchstrip_page", library_search_open }, { "coverflow_page", coverflow_row_open },
+                { "carremote_page", carremote_open }, { "controls_page", controls_open },
+                { "usbpick_page", usb_pick_open } };
 
 /* The page q2ui named as it left, opened: one of the openers' names, else a stock page's name and
- * nothing else (lower case and underscores, ending _page), since what is read here is a file any
- * program can write. */
+ * nothing else (lower case and underscores ending _page, after at most one folder of lower case
+ * letters and a slash: systemset/wifi_page), since what is read here is a file any program can
+ * write. */
 static void open_asked(void) {
     char name[40] = "";
     int fd = open(Q2UI_ASK, 0);
@@ -115,7 +121,16 @@ static void open_asked(void) {
     int n = (int)read(fd, name, sizeof name - 1), ok = n > 5;
     close(fd);
     while (n > 0 && (name[n - 1] == '\n' || name[n - 1] == '\r')) name[--n] = 0;
-    for (int i = 0; i < n; ++i) ok &= (name[i] >= 'a' && name[i] <= 'z') || name[i] == '_';
+    int slash = -1;
+    for (int i = 0; i < n; ++i) {
+        if (name[i] == '/' && slash < 0 && i > 0) {
+            slash = i;
+            continue;
+        }
+        ok &= (name[i] >= 'a' && name[i] <= 'z') || name[i] == '_';
+    }
+    for (int i = 0; i < slash; ++i) ok &= name[i] >= 'a' && name[i] <= 'z'; /* the folder: letters alone */
+    ok &= n - slash - 1 > 5; /* a page's own name after it */
     if (!ok || n < 6 || memcmp(name + n - 5, "_page", 5)) return;
     unsigned k = 0;
     while (k < sizeof openers / sizeof *openers && tk_strcmp(name, openers[k].name)) ++k;
@@ -151,8 +166,10 @@ static void tell(void) {
     unsigned now = (unsigned)time_now_ms();
     if (qu.told_at && now - qu.told_at < Q2UI_STATUS_MS) return;
     qu.told_at = now | !now;
-    char b[200];
-    unsigned n = status_row_state(b, sizeof b), h = hash_bytes(FNV_SEED, (const unsigned char *)b, n);
+    char b[320];
+    unsigned n = status_row_state(b, sizeof b);
+    n += q2ui_cc_state(b + n, sizeof b - n);
+    unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)b, n);
     if (h != qu.told && blob_io(Q2UI_STATUS, Q2UI_STATUS ".tmp", b, n, 1)) qu.told = h;
 }
 

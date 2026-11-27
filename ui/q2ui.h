@@ -112,6 +112,7 @@ void fill_disc(float cx, float cy, float radius, uint32_t rgb, float alpha);
 /* Rows y0..y1 of the clip scaled toward black: a0/255 of the picture left at y0, a1/255 at y1,
  * dithered so the ramp shows no bands. */
 void shade_rows(int y0, int y1, int a0, int a1);
+void fade_rows(int y0, int y1, int a0, int a1);  /* the same toward the page's ground, not black: a list's ends */
 /* the same across columns */
 void shade_cols(int x0, int x1, int a0, int a1);
 void shade_all(rect_t r, unsigned keep); /* keep/255 of the picture left */
@@ -252,6 +253,7 @@ extern int ui_painting; /* 1 while a frame is drawn: marks and state changes are
 int ui_run(void);       /* the loop, until ui_quit; the exit code */
 void ui_on_rest(void (*fn)(void));       /* called once each time the loop comes to rest */
 void ui_on_stack(void (*fn)(void));      /* called when a page has opened or closed */
+void ui_on_hold(int key, void (*fn)(void)); /* a key held, on any page, is fn's and not the page's (Return: Control Center) */
 void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message); four at most */
 extern const char *ui_backlight;         /* the folder of backlights whose state says the screen is dark */
 /* One pass by hand, for the bench and a script: events, the step at the frame's time, the draw,
@@ -288,6 +290,7 @@ void status_clock_fixed(const char *hhmm);
 /* where the battery, Wi-Fi's state and its signal are read (a test's are its own files) */
 extern const char *status_power, *status_wifi, *status_wireless, *status_told;
 void status_told_changed(void); /* demo's file of the states only it knows changed (now.c's watch) */
+int status_told_value(const char *key, char *out, size_t room); /* demo's word on key; 0 when it said nothing */
 
 /* ---- list.c: the list every menu is ---- */
 enum {
@@ -327,6 +330,18 @@ typedef struct ui_list ui_list;
 /* A picture a row was given (ui_row.art) may have changed or been freed: every list asks its rows
  * with art again before it draws them. Whoever owns the pictures calls it (ui/art.c). */
 void list_pictures_changed(void);
+void list_rows_changed(void); /* any row's words or marks may have changed: every row is asked again, a switch slides */
+void control_push(void);      /* Control Center (page_control.c) */
+/* ---- config.c: the settings q2ui reads from demo's config.ini ---- */
+extern const char *config_file;
+extern int config_light_forced, config_motion_forced; /* --light, --reduce-motion */
+int config_int(const char *section, const char *key, int def);
+void config_open(void);      /* read it, and again whenever it is written */
+void config_read(void);
+void config_light_now(void); /* Light Mode's Auto at this hour */
+int config_light_setting(void);  /* [IPOD] LIGHT as the file has it: 0 Off, 1 On, 2 Auto */
+int config_motion_setting(void); /* [IPOD] REDUCEMOTION: 1 on */
+void display_push(void);         /* Settings > Display (page_display.c) */
 ui_list *list_new(const ui_source *src);
 void list_free(ui_list *l);
 void list_event(ui_list *l, const input_t *e);
@@ -358,6 +373,8 @@ int lib_groups(int kind);                             /* how many artists, or al
 const char *lib_group_name(int kind, int g);
 const char *lib_group_artist(int g);                  /* an album's artist (its first song's) */
 const int *lib_group_songs(int kind, int g, int *n);  /* the group's songs, as numbers for lib_title */
+int lib_playlists(int *ids, char (*names)[64], int room); /* the playlists, On-The-Go (100) first while it has songs */
+int lib_playlist_songs(int list, int *songs, int room);    /* a playlist's songs in its order, as numbers for lib_title */
 
 /* ---- now.c: what plays ---- */
 typedef struct {
@@ -396,6 +413,7 @@ extern const ui_page page_home, page_now;
 /* Leave q2ui for a page of demo's it has not got (docs/ui-rewrite.md#cutover): demo opens the page
  * named, takes the screen, and starts q2ui again where it was when the page is left. */
 void ui_demo_page(const char *name);
+void settings_push(void);         /* Settings: its rows open demo's pages for now (page_settings.c) */
 extern const ui_page page_depth; /* the panel's colour depth test card */
 void gallery_push(void);         /* every kind of row, as a list to try them on */
 extern const ui_page page_card;  /* a card of layers the wheel pushes */

@@ -6,7 +6,7 @@
  *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--playlist FILE]
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
- *          [--wireless FILE] [--told FILE] [--art DIR]
+ *          [--wireless FILE] [--told FILE] [--art DIR] [--config FILE]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
@@ -28,8 +28,8 @@
  * (ui/now.c), --ask the file a page of demo's is asked for in (ui_demo_page), --backlight the
  * folder whose state says the screen is dark, --power, --wifi and --wireless where the status
  * row reads the battery and Wi-Fi, --told the file demo says the rest of its states in
- * (ui/status.c), --art the folder of Cover Flow's album thumbnails (ui/art.c); a test names its
- * own.
+ * (ui/status.c), --art the folder of Cover Flow's album thumbnails (ui/art.c), --config demo's
+ * config.ini, read for Light Mode and Reduce Motion (ui/config.c); a test names its own.
  *
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
@@ -113,6 +113,8 @@ static void parse(int argc, char **argv) {
             status_told = v, ++i;
         else if (!strcmp(a, "--art"))
             art_dir = v, ++i;
+        else if (!strcmp(a, "--config"))
+            config_file = v, ++i;
         else if (!strcmp(a, "--limit"))
             opt.limit = atoi(v), ++i;
         else if (!strcmp(a, "--motion"))
@@ -128,9 +130,9 @@ static void parse(int argc, char **argv) {
         else if (!strcmp(a, "--clock"))
             status_clock_fixed(v), ++i;
         else if (!strcmp(a, "--reduce-motion"))
-            ui_reduce_motion = 1;
+            ui_reduce_motion = config_motion_forced = 1;
         else if (!strcmp(a, "--light"))
-            ui_light = 1;
+            ui_light = config_light_forced = 1;
         else if (!strcmp(a, "--bench"))
             opt.bench = 1;
     }
@@ -205,6 +207,10 @@ static void state_restore(void) {
             if (strcmp(seg, opt.page)) break;
         } else if (!strcmp(seg, "now"))
             ui_push(&page_now, 0);
+        else if (!strcmp(seg, "settings"))
+            settings_push();
+        else if (!strcmp(seg, "display"))
+            display_push();
         else if (!library_route(seg))
             break;
         ui_select_top(atoi(colon + 1));
@@ -223,6 +229,14 @@ void ui_demo_page(const char *name) {
 static void at_rest(void) {
     write_stats();
     state_save();
+}
+
+/* Return held, on any page: Control Center, unless it is on top already */
+static void control_center(void) {
+    char route[256];
+    ui_route(route, sizeof route);
+    const char *last = strrchr(route, '/') ? strrchr(route, '/') + 1 : route;
+    if (strncmp(last, "control:", 8)) control_push();
 }
 
 static void first_page(void) {
@@ -424,7 +438,9 @@ int main(int argc, char **argv) {
     panel_24bit();
     open_ms = (unsigned)((mono_us() - t0) / 1000u);
     now_open();
+    config_open();
     art_sync = opt.script || opt.bench; /* covers read in place: a script's pictures and a bench's times repeat */
+    ui_on_hold(KEY_UI_RETURN, control_center);
     if (opt.script) {
         int code = script(opt.script);
         fb_close();

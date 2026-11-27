@@ -85,7 +85,7 @@ int list_motion = 1;
 
 struct rowc {
     int index; /* -1: empty */
-    unsigned pictures; /* list_pictures when a row with art was asked for */
+    unsigned pictures, everything; /* list_pictures and list_rows_changed's count when the row was asked for */
     ui_row row;
     run_t title, detail, value, sub, lead;
     float title_x, detail_x, text_end; /* where the title's column ends */
@@ -97,6 +97,7 @@ struct ui_list {
     rect_t box;
     int row_h, rows, y0; /* whole scrolling rows in sight; where the first of them rests */
     spring_t scroll, bar, lean, press, knob;
+    unsigned everything_seen; /* list_rows_changed's count when this list last read its rows again */
     float tug;
     int pressed, moving;
     uint64_t t, press_at, sb_at, mq_at;
@@ -181,6 +182,9 @@ static void forget(ui_list *l) {
     l->mq_row = -1;
 }
 
+/* Bumped by list_pictures_changed and list_rows_changed (below) */
+static unsigned pictures, everything;
+
 ui_list *list_new(const ui_source *src) {
     ui_list *l = calloc(1, sizeof *l);
     l->src = *src;
@@ -195,6 +199,7 @@ ui_list *list_new(const ui_source *src) {
     while (l->sel < l->n - 1 && !selectable(l, l->sel)) ++l->sel;
     retarget(l);
     if (l->n) l->knob.to = row_text_flags(l, l->sel) & ROW_ON ? 1 : 0;
+    l->everything_seen = everything;
     settle(l);
     l->focus_was = focus_rect(l);
     ui_mark(frame_rect(l));
@@ -234,20 +239,20 @@ void list_changed(ui_list *l) {
  * is dropped; a value keeps its width at the right column and the title is cut to leave it. */
 /* Bumped by list_pictures_changed: a row's art is asked for again, as the picture it was given
  * may have been replaced (a cover read) or freed. */
-static unsigned pictures;
 void list_pictures_changed(void) { ++pictures; }
+void list_rows_changed(void) { ++everything; }
 
 static struct rowc *row_text(ui_list *l, int i) {
     struct rowc *c = &l->rows_c[i & (CACHE - 1)];
     if (c->index == i && !run_stale(&c->title) && !run_stale(&c->detail) && !run_stale(&c->value) &&
-        !run_stale(&c->sub) && !run_stale(&c->lead) && (!c->row.art || c->pictures == pictures))
+        !run_stale(&c->sub) && !run_stale(&c->lead) && (!c->row.art || c->pictures == pictures) && c->everything == everything)
         return c;
     static run_t gap;
     if (!gap.n || run_stale(&gap)) run_make(&gap, FACE_REGULAR, TITLE_PX, "  ", -1);
     ui_row *r = &c->row;
     memset(r, 0, sizeof *r);
     l->src.row(l->src.ctx, i, r);
-    c->index = i, c->pictures = pictures;
+    c->index = i, c->pictures = pictures, c->everything = everything;
     int two = l->row_h > ROW_H && r->sub;
     float x = (float)(l->box.x + TEXT_X + TEXT_MARGIN);
     if (r->icon) x = (float)(l->box.x + ICON_TEXT_X + TEXT_MARGIN);
@@ -394,14 +399,14 @@ void list_draw(ui_list *l, rect_t r) {
         /* the list's ends: rows fade into the screen's foot, and into its top once scrolled */
         if (full || p) {
             int foot = l->box.y + l->box.h;
-            shade_rows(foot, FOOT_END, FOOT_KEEP, 0);
+            fade_rows(foot, FOOT_END, FOOT_KEEP, 0);
             fill((rect_t){ frame.x, FOOT_END, frame.w, SCREEN_H - FOOT_END }, tok(TOK_CANVAS));
         }
         if (p)
-            shade_rows(l->y0, l->y0 + PIN_FADE, 0, 255);
+            fade_rows(l->y0, l->y0 + PIN_FADE, 0, 255);
         else if (full && l->scroll.x > 0) {
             fill((rect_t){ frame.x, 0, frame.w, TOP_BLACK }, tok(TOK_CANVAS));
-            shade_rows(TOP_BLACK, LIST_TOP - TOP_CLEAR, 0, 255);
+            fade_rows(TOP_BLACK, LIST_TOP - TOP_CLEAR, 0, 255);
         }
     }
     clip_set(part);
@@ -532,6 +537,8 @@ int list_trace(char *out, size_t room) {
 void list_step(ui_list *l) {
     uint64_t now = ui_time();
     traced = l;
+    /* rows changed from outside (list_rows_changed): read again, the selected switch sliding over */
+    if (l->everything_seen != everything) l->everything_seen = everything, list_reload(l);
     float dt = now > l->t ? (float)(now - l->t) / 1e6f : 0;
     l->t = now;
     double scroll = l->scroll.x;

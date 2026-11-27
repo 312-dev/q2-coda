@@ -51,6 +51,7 @@ static struct {
     char out[8], bt[12], relay[12];
     int btbatt, lock, sync, syncpm, offline, net;
     int told;         /* status_told changed since it was read */
+    char told_text[512]; /* the file as last read, for status_told_value */
     int spin;         /* the sync arrows' frame shown */
 } S = { .level = -1, .volume = -1, .btbatt = -1, .net = 1, .told = 1 };
 
@@ -110,9 +111,28 @@ static void word_of(const char *line, const char *key, char *out, size_t room) {
     size_t k = strlen(key);
     if (!strncmp(line, key, k) && line[k] == '=') snprintf(out, room, "%.*s", (int)strcspn(line + k + 1, "\r\n"), line + k + 1);
 }
+/* demo's word on key (Control Center's switches too, page_control.c) into out; 0 when it said nothing */
+int status_told_value(const char *key, char *out, size_t room) {
+    size_t k = strlen(key);
+    *out = 0;
+    for (const char *line = S.told_text; *line; line = strchr(line, '\n') ? strchr(line, '\n') + 1 : "")
+        if (!strncmp(line, key, k) && line[k] == '=') {
+            snprintf(out, room, "%.*s", (int)strcspn(line + k + 1, "\r\n"), line + k + 1);
+            return 1;
+        }
+    return 0;
+}
+
 static void read_told(void) {
-    char line[64], num[12];
+    char line[64], num[12], text[sizeof S.told_text];
     FILE *f = fopen(status_told, "r");
+    size_t got = f ? fread(text, 1, sizeof text - 1, f) : 0;
+    text[got] = 0;
+    if (strcmp(text, S.told_text)) { /* a page may show it (Control Center's switches): every row asked again */
+        memcpy(S.told_text, text, sizeof text);
+        list_rows_changed(), ui_mark_all();
+    }
+    if (f) rewind(f);
     char out[8] = "", bt[12] = "", relay[12] = "";
     int v[6] = { -1, 0, 0, 0, 0, 1 }; /* btbatt lock sync syncpm offline net */
     static const char *const keys[] = { "btbatt", "lock", "sync", "syncpm", "offline", "net" };
@@ -189,6 +209,7 @@ void status_step(void) {
     S.run.n = 0;
     ui_mark((rect_t){ INSET, CLOCK_Y, CLOCK_W, 18 });
     read_glyphs(); /* the minute turned: the loop is awake anyway */
+    config_light_now(); /* Light Mode's Auto turns on the hour */
 }
 
 /* Wi-Fi's fan: a quarter circle standing on its point, cut into a dot and two bands, the lit ones

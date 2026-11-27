@@ -7,7 +7,7 @@
 
 #include "q2ui.h"
 
-/* ---- a group's songs ---- */
+/* ---- a group's songs, or a playlist's (kind -1) ---- */
 struct songs_st {
     char name[32];
     int kind, group, n;
@@ -24,7 +24,8 @@ static void s_row(void *ctx, int i, ui_row *out) {
         int track = lib_track(s->songs[i]);
         snprintf(s->lead, sizeof s->lead, "%d", track > 0 ? track : i + 1);
         out->lead = s->lead;
-    }
+    } else if (s->kind < 0)
+        out->value = lib_artist(s->songs[i]); /* a playlist's: its artist on the right column */
 }
 static void s_chosen(void *ctx, int i) {
     struct songs_st *s = ctx;
@@ -40,6 +41,46 @@ static void group_songs_push(int kind, int group) {
     for (int i = 0; i < s->n; ++i) s->ids[i] = lib_ids()[s->songs[i]];
     snprintf(s->name, sizeof s->name, "group.%d.%d", kind, group);
     ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .ctx = s, .name = s->name };
+    ui_push(&list_page, &src);
+}
+
+/* ---- Playlists, and a playlist's songs ---- */
+#define PLAYLISTS_MAX 101 /* stock's ids 1 to 100, and On-The-Go */
+#define PLAYLIST_SONGS 5000
+static void playlist_push(int list) {
+    struct songs_st *s = calloc(1, sizeof *s);
+    int *songs = malloc(PLAYLIST_SONGS * sizeof *songs);
+    s->kind = -1, s->group = list;
+    s->n = lib_playlist_songs(list, songs, PLAYLIST_SONGS);
+    s->songs = songs;
+    s->ids = malloc((size_t)(s->n ? s->n : 1) * sizeof *s->ids);
+    for (int i = 0; i < s->n; ++i) s->ids[i] = lib_ids()[songs[i]];
+    snprintf(s->name, sizeof s->name, "playlist.%d", list);
+    ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .ctx = s, .name = s->name };
+    ui_push(&list_page, &src);
+}
+static struct {
+    int n, ids[PLAYLISTS_MAX];
+    char names[PLAYLISTS_MAX][64];
+} pls;
+/* with none, one greyed row says so (demo's empty state, docs/oled-design.md#empty-and-offline, is a
+ * glyph and words over the page: ponytail) */
+static int p_count(void *ctx) {
+    (void)ctx;
+    return pls.n ? pls.n : 1;
+}
+static void p_row(void *ctx, int i, ui_row *out) {
+    (void)ctx;
+    if (!pls.n) out->title = "No Playlists", out->flags = ROW_GREY;
+    else out->title = pls.names[i], out->flags = ROW_CHEVRON;
+}
+static void p_chosen(void *ctx, int i) {
+    (void)ctx;
+    if (pls.n) playlist_push(pls.ids[i]);
+}
+static void playlists_push(void) {
+    pls.n = lib_playlists(pls.ids, pls.names, PLAYLISTS_MAX); /* read again each time: demo edits them */
+    ui_source src = { .count = p_count, .row = p_row, .chosen = p_chosen, .name = "playlists" };
     ui_push(&list_page, &src);
 }
 
@@ -76,13 +117,13 @@ static void groups_push(int kind) {
 /* ---- the Library's own list ---- */
 static const struct {
     const char *title, *demo;
-} lib_rows[] = { { "Songs", 0 },          { "Artists", 0 },               { "Albums", 0 },
-                 { "Years", "era_page" }, { "Ratings", "ratings_page" }, { "Most Played", "mostplayed_page" } };
+} lib_rows[] = { { "Songs", 0 },          { "Artists", 0 },  { "Albums", 0 },
+                 { "Playlists", 0 },      { "Years", "era_page" }, { "Ratings", "ratings_page" },
+                 { "Most Played", "mostplayed_page" } };
 /* Years, Ratings and Most Played are demo's pages, opened through the gate (page_home.c).
- * ponytail: Playlists, Genres, Composers, Recently Added and Long Songs are reached through Home's
- * Old Menus until each has a page here or an opener the gate is seen to run. Playlists was tried
- * by its stock name in the emulator on 2026-11-27 and no page came up: stock builds it another
- * way. */
+ * Playlists is q2ui's own, read from stock's table: no stock page name opens demo's.
+ * ponytail: Genres, Composers, Recently Added and Long Songs are reached through Home's Old Menus
+ * until each has a page here or an opener the gate is seen to run. */
 static int l_count(void *ctx) {
     (void)ctx;
     return (int)(sizeof lib_rows / sizeof *lib_rows);
@@ -97,6 +138,8 @@ static void l_chosen(void *ctx, int i) {
         ui_demo_page(lib_rows[i].demo);
     else if (i == 0)
         songs_push();
+    else if (i == 3)
+        playlists_push();
     else
         groups_push(i == 1 ? LIB_ARTIST : LIB_ALBUM);
 }
@@ -114,6 +157,10 @@ int library_route(const char *name) {
         songs_push();
     else if (!strcmp(name, "artists") || !strcmp(name, "albums"))
         groups_push(name[1] == 'r' ? LIB_ARTIST : LIB_ALBUM);
+    else if (!strcmp(name, "playlists"))
+        playlists_push();
+    else if (sscanf(name, "playlist.%d", &group) == 1 && group >= 0 && group <= 100)
+        playlist_push(group);
     else if (sscanf(name, "group.%d.%d", &kind, &group) == 2 && kind >= 0 && kind < LIB_KINDS && group >= 0 &&
              group < lib_groups(kind))
         group_songs_push(kind, group);

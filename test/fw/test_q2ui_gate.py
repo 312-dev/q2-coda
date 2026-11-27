@@ -175,6 +175,16 @@ def test_a_page_q2ui_asks_for_is_opened_and_q2ui_comes_back_when_it_is_left(fw):
     assert g.forks == 2 and g.on() == CHILD
 
 
+@pytest.mark.parametrize('ask', [b'systemset/wifi_page', b'playset/playset_page'])
+def test_a_stock_page_in_a_folder_is_opened_by_its_path(fw, ask):
+    """q2ui's Settings rows name stock's settings pages as stock's own rows open them: their folder, a slash, the page."""
+    g = Gate(fw)
+    g.poll()
+    g.ask, g.status, g.ended = ask, ASKED, 1
+    g.poll()
+    assert g.opened == [ask.decode()] and g.on() == 0
+
+
 def test_a_page_that_never_comes_up_does_not_keep_q2ui_away(fw):
     g = Gate(fw)
     g.poll()
@@ -190,7 +200,9 @@ def test_a_page_that_never_comes_up_does_not_keep_q2ui_away(fw):
     assert g.forks == 2
 
 
-@pytest.mark.parametrize('ask', [b'../etc/passwd', b'games', b'Games_page', b'games_page; reboot', b'_page', None])
+@pytest.mark.parametrize('ask', [b'../etc/passwd', b'games', b'Games_page', b'games_page; reboot', b'_page', None,
+                                 b'/wifi_page', b'a/b/wifi_page', b'system_set/wifi_page', b'systemset/_page',
+                                 b'Systemset/wifi_page', b'systemset/../wifi_page'])
 def test_only_a_stock_pages_name_is_opened(fw, ask):
     g = Gate(fw)
     g.poll()
@@ -259,7 +271,7 @@ def test_every_start_and_end_is_a_line_in_demos_log(fw):
 
 
 @pytest.mark.parametrize('name', ['tuner_page', 'games_page', 'era_page', 'ratings_page', 'mostplayed_page', 'searchstrip_page',
-                                  'coverflow_page'])
+                                  'coverflow_page', 'carremote_page'])
 def test_a_page_the_payload_builds_is_not_opened_by_its_name(fw, name):
     """Those are built by openers of the payload's own (the click of the row that leads to each), which the gate
     calls; a stock page's name would open nothing for them. That each opener then puts its page up is the emulator's
@@ -306,3 +318,53 @@ def test_while_q2ui_runs_demo_tells_it_the_status_rows_states_when_they_change(f
     g.ms += 1000
     g.poll()
     assert len(writes) == 2
+
+
+def test_controls_is_opened_as_homes_controls_row_opens_it(fw):
+    """Settings > Controls is the Display page opened on its Controls part (settings_display.c display_open), not a
+    page of its own name."""
+    g = Gate(fw)
+    g.poll()
+    g.ask, g.status, g.ended = b'controls_page', ASKED, 1
+    g.poll()
+    assert g.opened == ['systemset/display_page'] and g.on() == 0
+
+
+def test_q2ui_is_told_its_control_centers_switches(fw):
+    """q2ui's Control Center shows demo's settings as demo has them (control_center.c q2ui_cc_state)."""
+    from conftest import Files
+    files = Files(fw)
+    g = Gate(fw)
+    fw.var('g_wififlag', C.c_ubyte).value = 1
+    g.poll()
+    g.poll()
+    said = dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines())
+    assert said['wifi'] == '1' and said['bton'] == '0' and said['car'] == '0' and said['smart'] == '0' and 'usb' in said
+    fw.var('g_wififlag', C.c_ubyte).value = 0
+    g.ms += 600
+    g.poll()
+    assert 'wifi=0\n' in files.files['/tmp/q2ui.status'].decode()
+
+
+def test_q2uis_switches_flip_only_what_differs(fw):
+    """control_center.c q2ui_cc_set, which "set NAME 0|1" from q2ui's queue runs: Wi-Fi through stock's own switch,
+    only when it is not already so; Smart Wi-Fi saved; a name it has not is refused."""
+    flips, saved = [], []
+    fw.mock('wifi_switch', lambda v, *_: flips.append(v) or 0)
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append((C.string_at(key).decode(), v)) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    fw.var('g_wififlag', C.c_ubyte).value = 1
+    assert cc(b'wifi', 1) == 0 and flips == []
+    assert cc(b'wifi', 0) == 0 and flips == [1]
+    assert cc(b'smart', 1) == 0 and saved[-1] == ('SMARTWIFI', 1)
+    assert cc(b'reboot', 1) == -1
+
+
+def test_q2uis_display_page_sets_light_mode_and_reduce_motion_through_demo(fw):
+    """q2ui's Settings > Display: demo writes [IPOD] LIGHT (0 to 2 only) and REDUCEMOTION, which q2ui reads back."""
+    saved = []
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append((C.string_at(sec).decode(), C.string_at(key).decode(), v)) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    assert cc(b'light', 2) == 0 and saved[-1] == ('IPOD', 'LIGHT', 2)
+    assert cc(b'light', 3) == -1 and len(saved) == 1
+    assert cc(b'motion', 1) == 0 and saved[-1] == ('IPOD', 'REDUCEMOTION', 1)

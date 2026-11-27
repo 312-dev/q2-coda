@@ -58,6 +58,9 @@ extern uint64_t fb_panned_us; /* fb.c: when the last frame's pan was made */
 
 static void (*rest_hook)(void), (*stack_hook)(void);
 void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
+static int hold_key;
+static void (*hold_fn)(void);
+void ui_on_hold(int key, void (*fn)(void)) { hold_key = key, hold_fn = fn; }
 void ui_on_stack(void (*fn)(void)) { stack_hook = fn; }
 
 void ui_mark(rect_t r) {
@@ -221,7 +224,10 @@ int ui_frame(const input_t *in, int n) {
     if (wake_at && ui_time() >= wake_at) wake_at = 0;
     for (int i = 0; i < n && depth && !quit; ++i) {
         if (in[i].type == IN_TICK) ++ui_stats.ticks;
-        if (stack[depth - 1].page->event) stack[depth - 1].page->event(stack[depth - 1].st, &in[i]);
+        if (in[i].type == IN_KEY_HOLD && hold_fn && in[i].value == hold_key)
+            hold_fn();
+        else if (stack[depth - 1].page->event)
+            stack[depth - 1].page->event(stack[depth - 1].st, &in[i]);
     }
     if (!depth || quit) return 0;
     status_step();

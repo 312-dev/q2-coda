@@ -62,7 +62,7 @@ def base_args(binary, d):
     return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
-            '--wireless', d/'wireless', '--told', d/'told']
+            '--wireless', d/'wireless', '--told', d/'told', '--config', d/'config.ini']
 
 
 class Picture:
@@ -315,6 +315,11 @@ def scripts(binary, work):
     trace, _, _ = script(binary, work, 300, to_foot + ['tug 1', 'run 300', 'tick 1', 'run 600'], '--reduce-motion')
     glide = [t['scroll'] for t in trace]
     good &= check('Reduce Motion leans nothing and still glides', all(t['lean'] == 0 for t in trace) and len([s for s in glide if 0 < s < ROW_H]) >= 8)
+    # ... and demo's setting for it, [IPOD] REDUCEMOTION in config.ini (ui/config.c), the same
+    ini = pathlib.Path(tempfile.mkdtemp(dir=work))/'config.ini'
+    ini.write_text('[SYSSET]\nVOLUME=20\n[IPOD]\nACCENT=0\nREDUCEMOTION=1\n')
+    trace, _, _ = script(binary, work, 300, to_foot + ['tug 1', 'run 300', 'tick 1', 'run 600'], '--config', ini)
+    good &= check("demo's Reduce Motion setting leans nothing", all(t['lean'] == 0 for t in trace))
     trace, _, _ = script(binary, work, 300, to_foot + ['tick 1', 'run 100'], '--motion', '0')
     good &= check('--motion 0 is at its end at once', all(t['scroll'] in (0, ROW_H) for t in trace) and trace[-1]['scroll'] == ROW_H)
 
@@ -350,6 +355,15 @@ def scripts(binary, work):
     # Light Mode: paper under the same list
     _, pics, _ = script(binary, work, 30, ['rest', 'shot @light.ppm'], '--light')
     good &= check('Light Mode is black on white, the platter still blue', pics['light'].at(5, 200) == (255, 255, 255) and pics['light'].blue(200, BAR_H + ROW_H + 3))
+    foot = [pics['light'].at(5, y) for y in (290, 300, 310)]
+    good &= check("in Light Mode the list's foot fades to the paper, not to black", all(p == (255, 255, 255) for p in foot), str(foot))
+    ini = pathlib.Path(tempfile.mkdtemp(dir=work))/'config.ini'
+    ini.write_text('[IPOD]\nLIGHT=1\n')
+    _, pics, _ = script(binary, work, 30, ['rest', 'shot @light.ppm'], '--config', ini)
+    good &= check("demo's Light Mode setting, [IPOD] LIGHT=1 in config.ini, is Light Mode", pics['light'].at(5, 200) == (255, 255, 255))
+    ini.write_text('[IPOD]\nLIGHT=0\n[OTHER]\nLIGHT=1\n')
+    _, pics, _ = script(binary, work, 30, ['rest', 'shot @light.ppm'], '--config', ini)
+    good &= check('another section of the same key is not it', pics['light'].at(5, 200) == (0, 0, 0))
     return good
 
 
@@ -361,7 +375,7 @@ def pages(binary, work):
     trace, pics, _ = script(binary, work, 60, ['rest', 'shot @idle.ppm', 'tick 9', 'rest'], *home)
     idle_rows = trace[-1]['sel'] + 1
     trace, pics2, _ = script(binary, work, 60, ['rest', 'shot @playing.ppm', 'tick 9', 'rest'], *home, now=NOW)
-    good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (7, 8), f"{idle_rows} and {trace[-1]['sel'] + 1}")
+    good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (8, 9), f"{idle_rows} and {trace[-1]['sel'] + 1}")
     good &= check("Home's platter keeps to the list's side and the pane is drawn beside it",
                   pics['idle'].blue(100, 40 + 3) and not pics['idle'].blue(250, 40 + 3) and pics['idle'].at(280, 160) != (0, 0, 0))
     good &= check('the two Homes differ where the first row is', pics['idle'].rgb != pics2['playing'].rgb)
@@ -438,16 +452,24 @@ def pages(binary, work):
     good &= check("an album's songs are its tracks in order", len(sent) == 1 and ids == want, f'{ids} for {want}')
     # Library > Albums: two-line rows, each led by its cover from Cover Flow's thumbnails, else the placeholder
     good &= album_covers(binary, work, home)
+    good &= playlists(binary, work, home)
+    good &= control_center(binary, work, home)
     # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check('Centre on Radio asks demo for its page and ends with code 3', asked == 'tuner_page\n' and sent == [], repr(asked))
-    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 4', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("and Ratings, in the Library, for demo's Ratings", asked == 'ratings_page\n', repr(asked))
     # the last row leaves q2ui for demo's menus: the program ends, with the code of a plain end
     trace, _, _ = script(binary, work, 60, ['rest', 'tick 9', 'rest', 'key centre', 'run 100', 'tick -1', 'run 100'], *home, code=0)
-    good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 6, str(trace[-1]['sel']))
+    good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 7, str(trace[-1]['sel']))
+    # Settings is q2ui's list, in demo's order; its rows ask for demo's pages, a stock one by its path
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'],
+                                   *home, code=3, queue=True)
+    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
+    good &= check("Home > Settings > Car Remote asks demo for its page by the payload's opener", asked == 'carremote_page\n', repr(asked))
+    good &= display(binary, work, home)
     return good
 
 
@@ -458,6 +480,78 @@ def art_key(artist, album):
             h = (h ^ b) * 16777619 & 0xffffffff
         return h * 16777619 & 0xffffffff
     return fnv(fnv(2166136261, artist), album)
+
+
+def playlists(binary, work, home):
+    """Library > Playlists (ui/page_library.c): stock's table playlist, On-The-Go first while it has songs, then the
+    lists in the order made; a list's songs in its own order, and Centre plays them from the row."""
+    def made(d):
+        db = sqlite3.connect(d/'library.db')
+        songs = db.execute('select id, fileurl from songtable order by name collate nocase desc limit 3').fetchall()
+        db.execute("insert into playlist(id, filename) values (1, 'Road')")
+        for k, (_, url) in enumerate(songs):  # the songs in reverse title order: not the library's
+            db.execute('insert into playlist(id, cd_num, fileurl) values (?, 1, ?)', (101 + k, url))
+        db.execute('insert into playlist(id, cd_num, fileurl) values (110, 100, ?)', (songs[0][1],))
+        db.commit()
+        return [str(i) for i, _ in songs]
+    # script() makes its own folder: its library is made-up the same every time, so the ids are known from a probe
+    want = made(folder(work, 60))
+    lines = ['rest', 'key centre', 'rest', 'tick 3', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest',
+             'tick 1', 'rest', 'key centre', 'run 200']
+    d = folder(work, 60)
+    made(d)
+    _, _, _, (sent, ids, _) = script(binary, work, 60, lines, *home, '--db', d/'library.db', queue=True)
+    return check("Playlists lists On-The-Go and then Road; Centre on Road's second song plays Road's songs in its order from it",
+                 len(sent) == 1 and sent[0].split()[1:3] == ['play', '1'] and ids == want, f'{sent} {ids} for {want}')
+
+
+def display(binary, work, home):
+    """Settings > Display, q2ui's own (ui/page_display.c): Light Mode and Reduce Motion as config.ini has them, set
+    through demo, and applied when demo writes the file; the rest of demo's Display page by its path."""
+    good = True
+    ini = pathlib.Path(tempfile.mkdtemp(dir=work))/'config.ini'
+    ini.write_text('[IPOD]\nLIGHT=0\nREDUCEMOTION=0\n')
+    to = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 6', 'rest', 'key centre', 'rest']  # Home > Settings > Display
+    lines = to + ['key centre', 'run 100', 'key centre', 'run 100', 'tick 1', 'rest', 'key centre', 'run 100']
+    _, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--config', ini, queue=True)
+    verbs = [line.split(' ', 1)[1] for line in sent]
+    good &= check('Light Mode goes Off to On, then on to Auto before demo has written it; Reduce Motion goes on',
+                  verbs == ['set light 1', 'set light 2', 'set motion 1'], str(verbs))
+    _, _, _, (sent, _, d) = script(binary, work, 60, to + ['tick 2', 'rest', 'key centre', 'run 100'], *home, '--config', ini, code=3, queue=True)
+    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
+    good &= check("its last row opens the rest of demo's Display page", asked == 'systemset/display_page\n', repr(asked))
+    run = Run(binary, work, 60, '--config', ini, '--clock', '12:00')
+    try:
+        run.rest()
+        dark = shot.pixel(run.picture(), 5, 200)
+        (ini.parent/'config.tmp').write_text('[IPOD]\nLIGHT=1\n')
+        (ini.parent/'config.tmp').rename(ini)
+        run.rest()
+        light = shot.pixel(run.picture(), 5, 200)
+        good &= check('demo writing Light Mode on turns q2ui light as the file lands', dark == (0, 0, 0) and light == (255, 255, 255), f'{dark} {light}')
+    finally:
+        run.end()
+    return good
+
+
+def control_center(binary, work, home):
+    """Control Center (ui/page_control.c): Return held on any page; its switches stand as demo says (the told file,
+    patch/control_center.c q2ui_cc_state) and are flipped through the queue, turning at once; USB opens demo's picker."""
+    good = True
+    told = pathlib.Path(tempfile.mkdtemp(dir=work))/'told'
+    told.write_text('out=other\nwifi=1\nbton=0\ncar=0\nsmart=0\neq=1\nusb=Automatic\n')
+    lines = ['rest', 'tick 2', 'rest', 'hold return', 'rest', 'key centre', 'run 100', 'key centre', 'run 100', 'tick 2', 'rest',
+             'key centre', 'run 600']
+    trace, _, _, (sent, _, _) = script(binary, work, 60, lines, *home, '--told', told, queue=True)
+    verbs = [line.split(' ', 1)[1] for line in sent]
+    good &= check("the selected switch's knob slides over with it, before demo has said so", trace[-1]['knob'] > 0.99, str(trace[-1]['knob']))
+    good &= check('Return held opens Control Center on any page; Wi-Fi, on by demo, goes off, then on again before demo says '
+                  'so, and Car Remote, off, goes on', verbs == ['set wifi 0', 'set wifi 1', 'set car 1'], str(verbs))
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'hold return', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'],
+                                   *home, '--told', told, code=3, queue=True)
+    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
+    good &= check("its USB row opens demo's USB picker", asked == 'usbpick_page\n' and sent == [], repr(asked))
+    return good
 
 
 def album_covers(binary, work, home):

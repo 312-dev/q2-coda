@@ -723,6 +723,12 @@ static void cr_run(const char *raw) {
         cr_said(seq, verb + 1, media_status(), ok ? 0 : "no buzzer");
         cr_now(); /* find= before the ack, as cr_settle */
         cr_ack(seq, ok ? 0 : 2);
+    } else if (verb && q2ui_on() > 0 && __isoc99_sscanf(verb, " set %11s %d", word, &v) == 2) {
+        /* q2ui's Control Center's switches (control_center.c q2ui_cc_set), taken only while q2ui has
+         * the screen: the phone's app has no such command */
+        int code = q2ui_cc_set(word, v);
+        cr_said(seq, verb + 1, media_status(), code ? "not known" : 0);
+        cr_ack(seq, code ? 1 : 0);
     } else if (verb && __isoc99_sscanf(verb, " volume %d", &v) == 1 && v >= 0 && v <= 100) {
         /* as the AirPlay app sets it (airplay.c): up to vol_cap (Max Volume and a Bluetooth
          * device's Volume Limit, bt_vol_limit.c), saved for the output in use */

@@ -788,3 +788,46 @@ int cc_key(void *win, unsigned key) {
     widget_invalidate_force(win, (void *)0);
     return 1;
 }
+
+/* ---- q2ui's Control Center (docs/ui-rewrite.md#cutover): what it shows, and its switches ----
+ * q2ui draws a Control Center of its own while it has the screen. The states it shows are added to
+ * the status row's in its file (q2ui_gate.c tell): wifi and bt (the switches stock's own pages
+ * show), car (Car Remote), smart (Smart Wi-Fi), eq (on in any mode), usb (the USB setting's value).
+ * Its switches come back through Car Remote's command queue as "set NAME 0|1" (coda_rc_shim.c
+ * cr_run, q2ui_cc_set), each flipped as this page's circle flips it; q2ui's Display page sets
+ * Light Mode ("set light 0|1|2") and Reduce Motion ("set motion 0|1") the same way, and reads them
+ * back from config.ini itself (ui/config.c). Bluetooth is not one of them:
+ * stock flips it only from its page's row, so q2ui opens that page. */
+unsigned q2ui_cc_state(char *b, unsigned room) {
+    eq_state s;
+    eq_load(&s);
+    int n = tk_snprintf(b, room, "wifi=%d\nbton=%d\ncar=%d\nsmart=%d\neq=%d\nusb=%s\n", !!g_wififlag, !!g_bluetoothflag,
+                        !!coda_rc_enabled(), !!st.smart_wifi, s.mode != EQ_OFF, usb_ui_value());
+    return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
+}
+/* A switch of q2ui's set to on (1) or off: 0 when done or already so, -1 for a name it has not. */
+int q2ui_cc_set(const char *name, int on) {
+    eq_state s;
+    if (!tk_strcmp(name, "wifi")) {
+        wifi_flows_cancel_join(); /* as the circle: stock's switch ignores a join that is trying */
+        if (!g_wififlag != !on) wifi_switch(1);
+    } else if (!tk_strcmp(name, "car")) {
+        if (!coda_rc_enabled() != !on) coda_rc_toggle();
+    } else if (!tk_strcmp(name, "eq")) {
+        eq_load(&s);
+        if ((s.mode != EQ_OFF) != !!on) eq_toggle();
+    } else if (!tk_strcmp(name, "smart")) {
+        st.smart_wifi = !!on;
+        write_int_config(st.smart_wifi, "Q2POD", "SMARTWIFI");
+    } else if (!tk_strcmp(name, "light") && on >= 0 && on <= 2) { /* q2ui's Display: Off, On, Auto */
+        int buf[11];
+        st.light = on;
+        write_int_config(on, "IPOD", "LIGHT");
+        st.light_day = light_day(clock_now(buf)); /* Auto applies from this choice, as Display's row */
+    } else if (!tk_strcmp(name, "motion")) { /* q2ui's Display: Reduce Motion */
+        st.reduce_motion = !!on;
+        write_int_config(st.reduce_motion, "IPOD", "REDUCEMOTION");
+    } else
+        return -1;
+    return 0;
+}
