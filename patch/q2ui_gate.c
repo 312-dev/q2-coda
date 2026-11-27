@@ -256,7 +256,8 @@ static void unescape(const char *s, char *out) {
  * order sent, or "click 0" (a wheel tick's) or "click 1" (a press's), demo's key click for the wheel
  * and keys q2ui reads itself, at most one of each a pass (the buzzer is busy for a click's length
  * anyway), or its Wi-Fi page's "scan" or "join NAME" (wifi_flows.c), or its Bluetooth page's
- * "btscan", "btlink MAC" or "btforget MAC" (bt_ui.c); another verb, a MAC that is not one, or a line
+ * "btscan", "btlink MAC" or "btforget MAC" (bt_ui.c), or "wake", a question of its notice socket's
+ * lighting the dark screen as a press would (awake_screen; ui/notice.c); another verb, a MAC that is not one, or a line
  * too long, is dropped. Read every pass while it runs and after it
  * ends, so a setting sent just before leaving for a page of demo's is not lost; at most CTL_READS
  * reads a pass, so a q2ui that writes without end cannot hold demo's loop (the rest waits in the pipe). */
@@ -292,6 +293,10 @@ static void ctl(void) {
                 said(bt_q2ui_link(word2) ? "btlink refused," : "btlink", 0);
             else if (__isoc99_sscanf(qu.line + from, "btforget %17s", word2) == 1 && bt_mac_ok(word2))
                 said(bt_q2ui_forget(word2) ? "btforget refused," : "btforget", 0);
+            else if (!tk_strcmp(qu.line + from, "wake")) {
+                said("wake, dark", !g_backlight_status);
+                if (!g_backlight_status) awake_screen();
+            }
             from = i + 1;
         }
         qu.carry = end - from;

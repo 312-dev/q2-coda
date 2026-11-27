@@ -263,8 +263,10 @@ void ui_on_hold(int key, void (*fn)(void)); /* a key held, on any page, is fn's 
  * demo's click, down its pipe (ui/player.c player_click). */
 void ui_click(int button);
 extern void (*ui_clicker)(int button);
-void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message); four at most */
+void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message); sixteen at most */
+void ui_unwatch(int fd);                 /* fd is no longer waited on (a connection that ended) */
 extern const char *ui_backlight;         /* the folder of backlights whose state says the screen is dark */
+int ui_dark(void);                       /* the screen is dark (demo's backlight is off) */
 /* One pass by hand, for the bench and a script: events, the step at the frame's time, the draw,
  * the frame. Returns whether a frame went out. */
 int ui_frame(const input_t *in, int n);
@@ -291,7 +293,23 @@ uint32_t tok(int token);     /* the token's colour in the half in use */
  * takes: Inter's line is 1.21 em. */
 #define TYPE(px) ((int)((px) * 1.21f + 0.5f))
 
-/* ---- status.c: the status row, an overlay every page draws last ---- */
+/* ---- notice.c: Q2UI/1, toasts and questions from other programs (docs/ui-rewrite.md#notices) ---- */
+extern const char *notice_socket; /* where it is served (/run/vamp/ui.sock; "" none) */
+extern const char *notice_apps;   /* q2pkgd's apps file, "<id> <uid> <permissions>" a line: who asks */
+extern const char *notice_card;   /* the card the apps' folders (.<id>/q2app) are on */
+extern void (*notice_said)(const char *line); /* a script's own lines' answers (notice_line) */
+extern void (*notice_wake)(void);             /* light the dark screen for a question */
+extern void (*notice_changed)(void);          /* a card or a toast came or went (the stats file written again) */
+int notice_open(void);
+void notice_close(void);
+void notice_line(const char *line); /* a command as a connection's, its answers to notice_said (a script) */
+int notice_event(const input_t *e); /* 1: the card took it */
+void notice_step(void);
+void notice_draw(rect_t r);         /* over the page and the status row */
+int notice_up(void);                /* a question is on the card */
+int notice_trace(char *out, size_t room); /* "notice card=ID lit=N level=X toast=on|leaving|- waiting=N"; 0 with none up */
+void notice_stats(char *out, size_t room); /* the stats file's "card", "card_from", "toast", "toasts_waiting" */
+/* ---- status.c: the status row, an overlay drawn over every page ---- */
 void status_draw(rect_t r);
 void status_step(void);
 rect_t status_rect(void);

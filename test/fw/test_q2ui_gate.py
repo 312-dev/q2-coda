@@ -616,3 +616,26 @@ def test_q2uis_clicks_down_its_pipe_are_demos_key_tone_one_a_pass(fw):
     assert clicks[2:] == [(1, 0), (1, 2)]
     g.poll()
     assert len(clicks) == 4
+
+
+def test_q2uis_wake_lights_the_dark_screen_as_a_press_would(fw):
+    """A question on q2ui's notice socket asked with the screen dark (ui/notice.c) sends "wake": demo lights the screen
+    as a press would (awake_screen, as findmy.c does), and leaves a lit one alone; "wake" with more on its line is
+    another verb, dropped."""
+    lit = fw.var('g_backlight_status', C.c_ubyte)
+    woke = []
+    fw.mock('awake_screen', lambda *_: woke.append(lit.value) or 0)
+    g = Piped(fw)
+    g.poll()
+    assert g.on() == CHILD
+    lit.value = 0
+    g.sent = b'wake\n'
+    g.poll()
+    assert woke == [0]
+    lit.value = 1
+    g.sent = b'wake\n'
+    g.poll()
+    lit.value = 0
+    g.sent = b'wake up\nwak\n'
+    g.poll()
+    assert woke == [0]

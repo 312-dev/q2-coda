@@ -275,6 +275,48 @@ Kept short on purpose, and each with what removes it, so q2ui can move to a base
 | `demo`'s word on the status row's states (`/tmp/q2ui.status`) | `ui/status.c`, `patch/q2ui_gate.c`            | Vamp OS's services (`q2sysd`, `q2btd`) sending the same states as events                                              |
 | `demo`'s command queue and its files in `/tmp`       | `ui/player.c`                                     | q2ui owning the player's socket (step 5); the one file to change                                                      |
 | The kernel's `jzfb` and input drivers                | `ui/fb.c`, `ui/input.c`                           | Stays: the kernel is Shanling's in Vamp OS too. The interfaces used are the stock Linux ones (fbdev, evdev)           |
+| `demo` to light the dark screen for a question (`wake` down its pipe) | `ui/notice.c`, `patch/q2ui_gate.c`  | Q2SYS/1's `screen on` on Vamp OS                                                                                       |
+
+## Notices
+
+`ui/notice.c` serves Vamp OS's Q2UI/1 (`docs/platform/notices.md` on `feat/vamp-os-base`, the protocol's page; this section is how q2ui serves it): another program puts a toast over the page or asks the owner a question on the [confirmation card](oled-design.md#confirmation-card), and is answered on the same connection. LocalSend's receive side (`q2sendd`) and Bluetooth pairing (`q2btd`) ask through it.
+
+- **The socket** is `--notices` (`/run/vamp/ui.sock`, its folder made when missing; `""` serves none), in the common shape: the hello `Q2UI/1`, a line at most 512 bytes (a longer one is answered `err line` and read past), 8 connections (a ninth is closed). Commands: `caps`, `toast TEXT`, `ask ID TITLE BODY C1 [C2 [C3]]`, `withdraw ID`, `watch`; anything else is `err` and its first word. Free text is percent-encoded.
+- **A toast** is the pill of [Dialogs and toasts](oled-design.md#dialogs-and-toasts) for 2.5 s, queued behind one showing (four at most, `err busy` past them); one sent while a question is on the card waits for the card to go. A toast never lights the screen.
+- **A question** is answered `ok` and goes on the card when no other is there: one card at a time, in the order asked, four waiting at most (the one on the card among them; `err busy` past them). The card is the confirmation card's: the scrim over the page and the status row, the asker's name in 13 px Text Tertiary over the title, the title, the body wrapped at words to four lines, the choices stacked with the first lit. The wheel moves the bar, Centre answers `answer ID N` (the lit choice, from 1), Return `answer ID 0`; nothing else reaches the page while it asks (a held Return opens no Control Center), but the release of a key pressed before the card came is the page's, never an answer. It also answers `0` after 60 s and when the screen goes dark with it open (looked at each second while it is up); `withdraw ID` closes it with `answer ID gone`; a connection that ends takes its questions with it, unanswered. `err text` for a title over 40 bytes, a body over 160 or a choice over 16 (after decoding), `err id` for an id not of `a-z0-9-` or over 32 bytes, or one this connection is already asking.
+- **The screen.** A question asked with the screen dark lights it: q2ui sends `wake` down `demo`'s settings pipe and the gate calls `awake_screen` as a press would (`patch/q2ui_gate.c`). The card answers `0` for the screen going off only once it has been seen lit.
+- **Who asks.** The card names the caller by its uid (`SO_PEERCRED`, taken when it connects): an app's package user from `q2pkgd`'s apps file (`--apps`, `/mnt/data/vamp/apps`, `<id> <uid> <permissions>` a line) is named by its manifest's `name=` (`--app-card`, `/mnt/mmc`, `.<id>/q2app`), the system's uids (under 10000) "Vamp", and any other uid "Unknown app"; so an app cannot pose as the system.
+- **`watch`** answers `ok`, then `front PAGE` at once and whenever the page in front changes, by its route name (`songs`, `wifi`, `now`).
+- **Limits** (`ponytail:`): the `notices` and `ask` permissions are not checked (the socket is mode 0666 until Vamp OS's groups are on the image); today, while `demo` has the screen for a window of its own, q2ui is not running and the socket is not served (a client's connect fails or its connection ends, which it reads as "no"); a long title is cut with an ellipsis rather than scrolled; the bar moves between choices without a glide.
+- **Tests.** `test/ui.py notices`: the transcripts below and the protocol page's own (read from `feat/vamp-os-base` when the repository has it) replayed against a live q2ui, and the card, the toast, the wake, the attribution and the answers checked by its socket, its stats file and its frames.
+
+```conformance
+> Q2UI/1
+< Q2UI/1 ok
+> caps
+< caps toast ask watch
+> toast Saved
+< ok
+> ask recv-1 Receive%20files? Pixel%208%20sends%203%20files Accept Decline
+< ok
+> withdraw recv-1
+< ok
+< answer recv-1 gone
+> watch
+< ok
+< ~ front [a-z]+
+> withdraw recv-1
+< err id
+> ask Recv-2 Receive%20files? Pixel%208%20sends%203%20files Accept Decline
+< err id
+> nonsense
+< err nonsense
+```
+
+```conformance
+> Q2UI/2
+< err version
+```
 
 ## Cutover
 

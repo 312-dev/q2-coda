@@ -21,6 +21,7 @@ import pathlib
 import re
 import shutil
 import signal
+import socket
 import sqlite3
 import struct
 import subprocess
@@ -64,7 +65,7 @@ def base_args(binary, d):
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
             '--wireless', d/'wireless', '--told', d/'told', '--networks', d/'networks', '--bt-devices', d/'bt', '--config', d/'config.ini',
-            '--library-order', d/'library-order']
+            '--library-order', d/'library-order', '--notices', d/'ui.sock', '--apps', d/'apps', '--app-card', d]
 
 
 class Picture:
@@ -1561,6 +1562,317 @@ def live(binary, work):
 def main():
     try:  # the build's inputs; a compile that fails with them all there is a failure, not a skip
         ui.stb(), ui.stb_image(), ui.sqlite_include()
+class Client:
+    """A connection to q2ui's Q2UI/1 socket (ui/notice.c), its lines read with a time limit."""
+
+    def __init__(self, path, hello=True):
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.s.connect(str(path))
+        self.buf = b''
+        if hello:
+            self.say('Q2UI/1')
+            assert self.line() == 'Q2UI/1 ok'
+
+    def say(self, line):
+        self.s.sendall(line.encode() + b'\n')
+
+    def line(self, timeout=3.0):
+        """The next line; None when none came in timeout, '' when the connection ended."""
+        self.s.settimeout(timeout)
+        while b'\n' not in self.buf:
+            try:
+                got = self.s.recv(4096)
+            except socket.timeout:
+                return None
+            if not got:
+                return ''
+            self.buf += got
+        line, self.buf = self.buf.split(b'\n', 1)
+        return line.decode()
+
+    def ask(self, line):
+        self.say(line)
+        return self.line()
+
+    def close(self):
+        self.s.close()
+
+
+def transcripts(text):
+    """A page's conformance blocks (```conformance, or the protocol page's unnamed block under its Conformance
+    heading), each a list of (kind, text): '>' sent, '<' the next answer exactly, '<~' the next answer matching."""
+    out, cur, under = [], None, False
+    for line in text.splitlines():
+        if line.startswith('## '):
+            under = line.startswith('## Conformance')
+        if cur is None and (line.strip() == '```conformance' or (under and line.strip() == '```')):
+            cur = []
+        elif cur is not None and line.strip() == '```':
+            out.append(cur)
+            cur = None
+        elif cur is not None and line:
+            kind, _, rest = line.partition(' ')
+            if kind == '<' and rest.startswith('~ '):
+                kind, rest = '<~', rest[2:]
+            assert kind in ('>', '<', '<~'), line
+            cur.append((kind, rest))
+    return out
+
+
+def replay(path, block):
+    """One transcript against the socket at path; '' when it held, else the step that differed."""
+    c = Client(path, hello=False)
+    try:
+        for n, (kind, text) in enumerate(block, 1):
+            if kind == '>':
+                c.say(text)
+                continue
+            got = c.line()
+            if (got != text) if kind == '<' else (got is None or not re.fullmatch(text, got)):
+                return f'step {n}: expected {text!r}, said {got!r}'
+        return ''
+    finally:
+        c.close()
+
+
+def lit_folder(work, n):
+    """A live run's folder made ahead (Run at=), so the backlight it reads is there from its start, lit."""
+    d = folder(work, n)
+    (d/'input').mkdir()
+    for k in (1, 3):
+        os.mkfifo(d/'input'/f'event{k}')
+    os.mkfifo(d/'cmdq')
+    (d/'backlight/panel').mkdir(parents=True)
+    (d/'backlight/panel/bl_power').write_text('0\n')
+    (d/'backlight/panel/brightness').write_text('80\n')
+    return d
+
+
+def notice_lines(trace_text):
+    return [line.split(' ', 1)[1] for line in trace_text.splitlines() if ' said ' in line or ' notice ' in line]
+
+
+def notices(binary, work):
+    """Q2UI/1 (ui/notice.c, docs/ui-rewrite.md#notices): the protocol's transcripts against a live q2ui, then the
+    card and the toast as the owner sees and answers them."""
+    good = True
+    d = lit_folder(work, 20)
+    pipe = os.pipe()
+    os.set_blocking(pipe[0], False)
+    r = Run(binary, work, 20, '--ctl', str(pipe[1]), at=d, fds=pipe[1:])
+    os.close(pipe[1])
+    sock = d/'ui.sock'
+
+    def wakes():
+        try:
+            return [x for x in os.read(pipe[0], 4096).decode().splitlines() if x == 'wake']
+        except BlockingIOError:
+            return []
+    r.rest()
+    blocks = transcripts((ROOT/'docs/ui-rewrite.md').read_text())
+    spec = subprocess.run(['git', '-C', str(ROOT), 'show', 'feat/vamp-os-base:docs/platform/notices.md'], capture_output=True, text=True)
+    if spec.returncode == 0:
+        blocks += transcripts(spec.stdout)
+    failed = [f'block {k}: {why}' for k, b in enumerate(blocks) if (why := replay(sock, b))]
+    good &= check(f'the conformance transcripts hold against q2ui ({len(blocks)} blocks, the protocol page\'s '
+                  f'{"among them" if spec.returncode == 0 else "not in this repository"})', len(blocks) >= 2 and not failed, '; '.join(failed))
+    for _ in range(80):  # the transcripts' toasts gone, one after another
+        time.sleep(0.1)
+        if not r.stats()['toast'] and not r.stats()['toasts_waiting']:
+            break
+    r.rest()
+    wakes()
+    before = r.picture()
+    a = Client(sock)
+    said = a.ask('ask q-1 Receive%20files? Pixel%208%20sends%203%20files Accept Decline')
+    r.rest()
+    st, card = r.stats(), r.picture()
+    scrim = shot.pixel(before, 30, 93), shot.pixel(card, 30, 93)
+    halved = all(abs(b // 2 - c) <= 2 for b, c in zip(*scrim))
+    good &= check('an ask is answered ok and its card comes up: the page under black at half, the card, the first choice lit',
+                  said == 'ok' and st['card'] == 'q-1' and halved and shot.pixel(card, 46, 168) == (0x1c, 0x1c, 0x1e) and
+                  shot.pixel(card, 55, 196) == ACCENT and shot.pixel(card, 55, 228) == (0x1c, 0x1c, 0x1e),
+                  f"said {said!r}, card {st['card']!r}, platter {scrim}, card {shot.pixel(card, 46, 168)}, "
+                  f"first {shot.pixel(card, 55, 196)}, second {shot.pixel(card, 55, 228)}")
+    good &= check('a question asked with the screen lit sends no wake', wakes() == [])
+    r.ticks(1)
+    r.rest()
+    moved = shot.pixel(r.picture(), 55, 228) == ACCENT and shot.pixel(r.picture(), 55, 196) == (0x1c, 0x1c, 0x1e)
+    r.key(KEY_CENTRE)
+    got = a.line()
+    r.rest()
+    after = r.picture()
+    same = all(shot.pixel(before, x, y) == shot.pixel(after, x, y) for y in range(BAR_H, 320, 7) for x in range(0, 375, 7))
+    if not same and os.environ.get('Q2UI_DEBUG'):
+        print([(x, y, shot.pixel(before, x, y), shot.pixel(after, x, y)) for y in range(BAR_H, 320, 7) for x in range(0, 375, 7)
+               if shot.pixel(before, x, y) != shot.pixel(after, x, y)][:20])
+    good &= check('the wheel moves the bar to the second choice and Centre answers it, from 1; the card goes and the page is '
+                  'as it was, its list not moved', moved and got == 'answer q-1 2' and r.stats()['card'] == '' and same,
+                  f'moved {moved}, said {got!r}, page back {same}')
+    a.ask('ask q-2 Title Body Yes No')
+    r.rest()
+    r.key(KEY_RETURN)
+    got = a.line()
+    r.rest()
+    good &= check('Return dismisses the card: answer 0, and Return does not end q2ui under it', got == 'answer q-2 0' and r.proc.poll() is None,
+                  f'{got!r}, exit {r.proc.poll()}')
+    a.ask('ask q-3 Title Body Yes No')
+    r.rest()
+    asking = r.picture()
+    r.hold(KEY_RETURN)
+    r.rest()
+    held = r.picture()
+    got = a.line(timeout=0.5)
+    if got is None:
+        r.key(KEY_RETURN)
+        got = a.line()
+    r.rest()
+    under = all(shot.pixel(asking, x, y) == shot.pixel(held, x, y) for y in range(0, 320, 5) for x in range(0, 40, 3))
+    good &= check('a held Return opens no Control Center while the card asks: the page under the scrim stays', under and
+                  got == 'answer q-3 0', f'page under kept {under}, said {got!r}')
+    # one card at a time, each answer to its own connection; a connection that ends takes its question
+    b = Client(sock)
+    first, second = a.ask('ask a-1 First Body One'), b.ask('ask b-1 Second Body Two')
+    r.rest()
+    on1 = r.stats()['card']
+    r.key(KEY_CENTRE)
+    got_a, got_b = a.line(), b.line(timeout=0.5)
+    r.rest()
+    on2 = r.stats()['card']
+    good &= check('two questions are one card at a time in the order asked, and each answer reaches only its asker',
+                  (first, second, on1, got_a, got_b, on2) == ('ok', 'ok', 'a-1', 'answer a-1 1', None, 'b-1'),
+                  str((first, second, on1, got_a, got_b, on2)))
+    b.close()
+    time.sleep(0.3)
+    r.rest()
+    good &= check('a connection that ends takes its question off the card', r.stats()['card'] == '', r.stats()['card'])
+    # the answers that refuse
+    asked = [a.ask(f'ask w-{k} T B Yes') for k in range(5)]
+    withdrawn = [(a.ask(f'withdraw w-{k}'), a.line()) for k in range(4)]
+    good &= check('four questions wait at most: the fifth is err busy; each withdrawn is ok, then answer gone',
+                  asked == ['ok'] * 4 + ['err busy'] and withdrawn == [('ok', f'answer w-{k} gone') for k in range(4)],
+                  f'{asked} {withdrawn}')
+    refused = [a.ask('ask x-1 ' + 'T' * 41 + ' B Yes'), a.ask('ask x-1 T ' + 'B' * 161 + ' Yes'), a.ask('ask x-1 T B ' + 'Y' * 17),
+               a.ask('ask x-1 T B A B C D'), a.ask('ask Bad_id T B Yes'), a.ask('ask x-1 T%2 B Yes'), a.ask('toast')]
+    fits = a.ask('ask x-2 ' + 'T' * 40 + ' ' + 'B' * 160 + ' ' + 'Y' * 16)
+    a.ask('withdraw x-2'), a.line()
+    good &= check('a title over 40 bytes, a body over 160, a choice over 16 are err text; five choices err ask; a bad id err id; '
+                  'a broken % err text; and the limits themselves fit',
+                  refused == ['err text', 'err text', 'err text', 'err ask', 'err id', 'err text', 'err toast'] and fits == 'ok',
+                  f'{refused} {fits}')
+    c = Client(sock, hello=False)
+    c.say('x' * 600)
+    long_line = c.line()
+    c.say('Q2UI/1')
+    hello_after = c.line()
+    c.close()
+    good &= check('a line over 512 bytes is err line and read past; the next line is taken', long_line == 'err line' and hello_after == 'Q2UI/1 ok',
+                  f'{long_line!r} {hello_after!r}')
+    # the screen
+    light = d/'backlight/panel/bl_power'
+    light.write_text('4\n')
+    time.sleep(0.2)
+    a.ask('toast Dark')
+    time.sleep(0.5)
+    toast_woke = wakes()
+    a.ask('ask s-1 T B Yes')
+    time.sleep(1.5)
+    ask_woke = wakes()
+    held_dark = r.stats()['card'] == 's-1'
+    light.write_text('0\n')
+    time.sleep(1.5)
+    light.write_text('4\n')
+    got = a.line(timeout=3)
+    good &= check('a question asked with the screen dark lights it (wake down demo\'s pipe) and a toast does not; it waits while '
+                  'dark until seen lit, then the screen going off answers 0',
+                  toast_woke == [] and ask_woke == ['wake'] and held_dark and got == 'answer s-1 0',
+                  f'toast {toast_woke}, ask {ask_woke}, held while dark {held_dark}, then {got!r}')
+    light.write_text('0\n')
+    time.sleep(3)
+    # who asks: an app by its package's name, the system's uids as Vamp
+    uid = os.getuid()
+    names = []
+    for apps in ('', f'radio {uid} notices,ask\n', f'radio {uid} -\n'):
+        (d/'apps').write_text(apps)
+        (d/'.radio').mkdir(exist_ok=True)
+        (d/'.radio/q2app').write_text('name=Radio\napi=1\n')
+        e = Client(sock)
+        e.ask('ask n-1 T B Yes')
+        time.sleep(0.4)
+        names.append(r.stats()['card_from'])
+        e.close()
+        time.sleep(0.4)
+    system = 'Vamp' if uid < 10000 else 'Unknown app'
+    good &= check('the card names who asks: the app its uid is the package user of, by its q2app name=; else the system',
+                  names == [system, 'Radio', system], str(names))
+    # watch: the page in front, now and as it changes
+    w = Client(sock)
+    w.say('watch')
+    now = w.line(), w.line()
+    r.key(KEY_RETURN)  # Songs is the first page here: its Return ends q2ui, so the change is watched on its way out
+    later = w.line()
+    good &= check('watch: ok, the page in front at once, and the connection ends with q2ui', now == ('ok', 'front songs') and later == '',
+                  f'{now} {later!r}')
+    r.proc.wait(timeout=5)
+    good &= check('q2ui ending takes its socket with it', not sock.exists())
+    os.close(r.queue)
+    os.close(pipe[0])
+
+    # a watched page change, Home to the Library
+    d2 = lit_folder(work, 20)
+    r = Run(binary, work, 20, '--page', 'home', at=d2)
+    r.rest()
+    w = Client(d2/'ui.sock')
+    w.say('watch')
+    first = w.line(), w.line()
+    r.key(KEY_CENTRE)
+    r.rest()
+    nxt = w.line()
+    good &= check('watch tells the page in front as it changes, by its route name', first == ('ok', 'front home') and nxt == 'front library',
+                  f'{first} {nxt!r}')
+    r.proc.terminate()
+    r.proc.wait(timeout=5)
+    os.close(r.queue)
+
+    # on the program's own clock: the toast's time and queue, the timeout, a press begun before the card
+    trace_lines = []
+    for lines in (['notice toast One', 'notice toast Two', 'run 2400', 'run 400', 'run 2300', 'run 500'],
+                  ['notice ask t-1 T B Yes', 'run 59000', 'run 2000'],
+                  ['notice ask p-1 T B Yes', 'notice toast Later', 'run 500', 'key return', 'run 600'],
+                  ['down centre', 'notice ask d-1 T B Yes', 'run 300', 'up centre', 'run 300', 'key return', 'run 300']):
+        dd = folder(work, 20)
+        text = '\n'.join(lines) + '\n'
+        (dd/'script').write_text(text)
+        subprocess.run(base_args(binary, dd) + ['--script', dd/'script', '--trace', dd/'trace', '--clock', '12:00'], timeout=120)
+        trace_lines.append((dd/'trace').read_text())
+    tl = trace_lines[0].splitlines()
+
+    shown = [(int(x.split()[0][2:]) - 1016667, x.split(' toast=')[1]) for x in tl if ' notice ' in x]
+
+    def toast_at(ms):
+        rows = [v for t, v in shown if t <= ms * 1000]
+        return rows[-1] if rows else '-'
+    gone = shown[-1][0] / 1000 if shown else 0
+    good &= check('a toast lasts 2.5 s and the next waits behind it, shown as the first has gone (150 ms): both gone by 5.3 s',
+                  toast_at(2450) == 'on waiting=1' and toast_at(2550) == 'leaving waiting=1' and toast_at(2700) == 'on waiting=0' and
+                  toast_at(5100) == 'on waiting=0' and 5250 <= gone <= 5300,
+                  f'{toast_at(2450)} | {toast_at(2550)} | {toast_at(2700)} | {toast_at(5100)} | last at {gone} ms')
+    t2 = notice_lines(trace_lines[1])
+    good &= check('an unanswered question answers 0 after 60 s, not before',
+                  [x for x in t2 if 'answer' in x] == ['said answer t-1 0'] and
+                  int(next(x for x in trace_lines[1].splitlines() if 'answer' in x).split()[0][2:]) >= 1000000 + 60000000,
+                  str([x for x in trace_lines[1].splitlines() if 'said' in x]))
+    t3 = trace_lines[2].splitlines()
+    waited = all('toast=-' in x for x in t3 if ' card=p-1 ' in x and 'level=1.000' in x)
+    shown_after = any('toast=on' in x and ' card=- ' in x for x in t3)
+    good &= check('a toast sent while a question is on the card waits for the card to go', waited and shown_after,
+                  f'waited {waited}, shown after {shown_after}')
+    t4 = [x for x in notice_lines(trace_lines[3]) if 'answer' in x]
+    good &= check('the release of a Centre pressed before the card came answers nothing; Return then answers 0',
+                  t4 == ['said answer d-1 0'], str(t4))
+    return good
+
+
         if not ui.HOST_SQLITE.exists():
             raise SystemExit(f'no {ui.HOST_SQLITE}')
     except (SystemExit, OSError) as e:
@@ -1589,6 +1901,8 @@ def main():
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
     return 0 if good else 1
 
+        if not only or 'notices' in only:
+            good &= notices(binary, work)
 
 if __name__ == '__main__':
     sys.exit(main())

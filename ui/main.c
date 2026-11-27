@@ -8,6 +8,7 @@
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
  *          [--wireless FILE] [--told FILE] [--networks FILE]
  *          [--bt-devices FILE] [--art DIR] [--config FILE] [--card DIR]
+ *          [--notices SOCKET] [--apps FILE] [--app-card DIR]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
@@ -34,7 +35,8 @@
  * (ui/page_wifi.c, ui/page_bluetooth.c), --art the folder of Cover Flow's album thumbnails (ui/art.c), --config demo's
  * config.ini, read for Light Mode and Reduce Motion (ui/config.c), --card the card About measures
  * (ui/page_general.c), --library-order the Library's order from demo's Edit Library
- * (ui/page_library.c); a test names its own.
+ * (ui/page_library.c), --notices where Q2UI/1 is served ("" for nowhere) and --apps and --app-card
+ * where a caller's app is found to name it on the card (ui/notice.c); a test names its own.
  *
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
@@ -128,6 +130,12 @@ static void parse(int argc, char **argv) {
             config_file = v, ++i;
         else if (!strcmp(a, "--library-order"))
             library_order_file = v, ++i;
+        else if (!strcmp(a, "--notices"))
+            notice_socket = v, ++i;
+        else if (!strcmp(a, "--apps"))
+            notice_apps = v, ++i;
+        else if (!strcmp(a, "--app-card"))
+            notice_card = v, ++i;
         else if (!strcmp(a, "--card"))
             general_card = v, ++i;
         else if (!strcmp(a, "--limit"))
@@ -170,6 +178,8 @@ static void write_stats(void) {
     FILE *f = fopen(opt.stats, "w");
     const struct ui_stats *s = &ui_stats;
     if (!f) return;
+    char notices[200];
+    notice_stats(notices, sizeof notices);
     double frames = s->frames ? (double)s->frames : 1;
     fprintf(f,
             "{\"rows\": %d, \"open_ms\": %u, \"first_frame_ms\": %u, \"frames\": %u, \"ticks\": %u,\n"
@@ -181,14 +191,14 @@ static void write_stats(void) {
             "\"lt16_7\": %u, \"lt33\": %u, \"more\": %u},\n"
             " \"glyphs\": %u, \"glyph_bytes\": %u, \"glyphs_made\": %u, \"glyph_evictions\": %u, "
             "\"motion\": %d, \"panel_bits\": %d, \"page\": %d,\n"
-            " \"now_seq\": %u, \"now_watched\": %d, \"playing\": %d, \"paused\": %d, \"cover\": %d, \"top\": \"%s\"%s%s}\n",
+            " \"now_seq\": %u, \"now_watched\": %d, \"playing\": %d, \"paused\": %d, \"cover\": %d, \"top\": \"%s\",\n %s%s%s}\n",
             lib_songs(), open_ms, first_ms, s->frames, s->ticks, (double)s->draw_ns / frames / 1e3,
             (double)s->show_ns / frames / 1e3, (double)s->draw_max_ns / 1e3, (unsigned)(s->px / frames),
             (double)s->work_us / frames, (unsigned long long)s->work_max_us, s->over_budget, s->cpu_over, s->dropped,
             s->late, s->streak_max, fb_refresh_us(), s->deferred, s->hist[0], s->hist[1], s->hist[2], s->hist[3],
             s->hist[4], s->hist[5], s->hist[6], s->hist[7], text_stats.glyphs, text_stats.bytes,
             text_stats.made, text_stats.evictions, list_motion, fb_bits, fb_page(), now_seq(), now_watched(),
-            now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(),
+            now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(), notices,
             *bench_json ? ",\n \"bench\": " : "", bench_json);
     fclose(f);
 }
@@ -242,6 +252,9 @@ static void at_rest(void) {
     write_stats();
     state_save();
 }
+
+/* a question asked with the screen dark lights it, as a wake would: demo's, down its pipe (patch/q2ui_gate.c) */
+static void wake_screen(void) { player_line("wake", 0); }
 
 /* Return held, on any page: Control Center, unless it is on top already */
 static void control_center(void) {
@@ -346,6 +359,7 @@ static void script_frame(const input_t *in, int n) {
         char line[160];
         ui_trace(line, sizeof line);
         fprintf(trace, "t=%llu shown=%d %s\n", (unsigned long long)fake_us, shown, line);
+        if (notice_trace(line, sizeof line)) fprintf(trace, "t=%llu %s\n", (unsigned long long)fake_us, line);
     }
     if (shown && *record_dir) {
         char path[320];
@@ -363,8 +377,12 @@ static int key_code(const char *name) {
 }
 /* Lines: tick N | tug SHARE | key NAME | down NAME | up NAME | hold NAME | run MS | rest |
  * shot FILE | rows FILE | record DIR | record off | plays FILE (what plays is read from FILE from here on) |
- * networks FILE and btdevices FILE (the same for demo's Wi-Fi networks and Bluetooth devices).
+ * networks FILE and btdevices FILE (the same for demo's Wi-Fi networks and Bluetooth devices) |
+ * notice COMMAND (a Q2UI/1 command, as a connection's: its answers go to the trace, "said ...").
  * Each input goes in with the next frame. */
+static void script_said(const char *line) {
+    if (trace) fprintf(trace, "t=%llu said %s\n", (unsigned long long)fake_us, line);
+}
 static int script(const char *path) {
     FILE *f = fopen(path, "r");
     char line[400], arg[320];
@@ -372,8 +390,11 @@ static int script(const char *path) {
     fb_vsync = 0;
     if (opt.trace) trace = fopen(opt.trace, "w");
     ui_clock_fake(fake_us);
+    notice_said = script_said;
     first_page();
     state_restore(); /* as a start does: a --state another run left is come back to */
+    notice_socket = ""; /* a script's commands are its own lines (notice COMMAND): no socket */
+    notice_open();
     script_frame(0, 0);
     while (fgets(line, sizeof line, f)) {
         unsigned ms = (unsigned)(fake_us / 1000u);
@@ -408,6 +429,8 @@ static int script(const char *path) {
         } else if (sscanf(line, "btdevices %319s", arg) == 1) {
             bt_devices_file = strdup(arg); /* the same for its Bluetooth devices */
             bt_devices_changed();
+        } else if (!strncmp(line, "notice ", 7)) {
+            notice_line(line + 7);
         } else if (sscanf(line, "shot %319s", arg) == 1) {
             ppm(arg);
         } else if (sscanf(line, "rows %319s", arg) == 1) {
@@ -486,9 +509,13 @@ int main(int argc, char **argv) {
     state_restore();
     ui_frame(0, 0);
     first_ms = (unsigned)((mono_us() - t0) / 1000u);
+    notice_open();
+    notice_wake = wake_screen;
+    notice_changed = write_stats; /* the card's state is seen in the stats file while the loop is not at rest */
     ui_on_rest(at_rest);
     ui_on_stack(state_save); /* a page that never rests (Now Playing while a song plays) is still come back to */
     int code = ui_run();
+    notice_close();
     write_stats();
     fb_close();
     return code;

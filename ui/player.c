@@ -46,7 +46,8 @@ void player_click(int button) {
 
 /* A verb and its word down the same pipe (patch/q2ui_gate.c ctl), one write, whole: the Wi-Fi page's search ("scan")
  * and join of a network by its name ("join NAME", its backslashes and newlines as \\ and \n; patch/wifi_flows.c), the
- * Bluetooth page's scan ("btscan"), connect or disconnect ("btlink MAC") and forget ("btforget MAC"; patch/bt_ui.c). */
+ * Bluetooth page's scan ("btscan"), connect or disconnect ("btlink MAC") and forget ("btforget MAC"; patch/bt_ui.c), and
+ * a question's wake of the dark screen ("wake"; ui/notice.c). */
 int player_line(const char *verb, const char *ssid) {
     char line[80]; /* patch/q2ui_gate.c Q2UI_CTL_LINE */
     int n = snprintf(line, sizeof line, "%s", verb);
