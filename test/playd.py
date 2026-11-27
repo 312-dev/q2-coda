@@ -129,7 +129,13 @@ def config():
 
 
 @pytest.fixture
-def run(binary, shim, tmp_path, config):
+def prepare():
+    """files a test needs before q2playd starts: a function of the root, or None"""
+    return None
+
+
+@pytest.fixture
+def run(binary, shim, tmp_path, config, prepare):
     for d in ('tmp', 'run', 'mnt/data', 'dev'):
         (tmp_path/d).mkdir(parents=True)
     (tmp_path/'dev/shanling_dac').write_text('')
@@ -140,6 +146,8 @@ def run(binary, shim, tmp_path, config):
     db.executemany('insert into songtable values (?, ?, ?, ?, ?, 0)', SONGS)
     db.commit()
     db.close()
+    if prepare:
+        prepare(tmp_path)
     env = dict(os.environ, LD_PRELOAD=str(shim), Q2_IOCTL_LOG=str(tmp_path/'dac.log'))
     p = subprocess.Popen([str(binary), '--root', str(tmp_path)], stderr=subprocess.PIPE, env=env)
     player = Player(tmp_path)
@@ -1616,24 +1624,20 @@ def test_like_flips_the_heart_apart_from_the_stars(run):
     assert text.index('\nhearts=') < text.index('\nliked='), text
 
 
-def test_stock_s_favorites_are_taken_as_likes_once(run):
-    """going to Vamp OS loses nothing: stock's and today's Vamp's My Fav (database.db's myfav) seeds likes.db when it
-    is made, read only; database.db is not written"""
+def test_stock_s_favorites_are_the_likes_and_an_unlike_takes_one_out_of_them(run):
+    """a switch either way loses nothing: stock's and today's Vamp's My Fav (database.db's myfav) are the likes at the
+    start, and an unlike under Vamp OS takes the song out of it too"""
     root, pl = run
-    db = sqlite3.connect(root/'mnt/data/database.db')
-    db.execute('create table myfav(id integer primary key, filename, fileurl, album, songer, name)')
-    db.execute("insert into myfav(fileurl) values ('/mnt/mmc/Music/b.mp3')")
-    db.commit()
-    db.close()
-    before = (root/'mnt/data/database.db').read_bytes()
+    stock_myfav(root, ['/mnt/mmc/Music/b.mp3'])
     play_list(root, [2, 1], 0)
     pl.pump()
-    assert now(root)['liked'] == '1'
-    assert likes(root) == ['/mnt/mmc/Music/b.mp3']
+    assert now(root)['liked'] == '0', 'myfav made after the start: taken at the next one'
     send(root, '94 like 2')
     assert wait_for_value(lambda: acks(root)[:1], [(94, 0)])
-    assert likes(root) == [] and now(root)['liked'] == '0', 'not seeded again'
-    assert (root/'mnt/data/database.db').read_bytes() == before
+    assert now(root)['liked'] == '1' and [f[0] for f in stock_favs(root)] == ['/mnt/mmc/Music/b.mp3']
+    send(root, '95 like 2')
+    assert wait_for_value(lambda: acks(root)[:1], [(95, 0)])
+    assert likes(root) == [] and stock_favs(root) == [], 'out of both'
 
 
 def test_a_source_s_url_has_no_stars_and_refuses_rate_and_like(run):
@@ -1784,4 +1788,305 @@ def test_podcasts_audiobooks_and_m4b_files_are_not_counted(run):
     pl.pump()
     heard(root, pl, 62, range(0, 33))
     assert plays(root)[0] == (listen_key('/mnt/mmc/Music/a.flac'), 1)
+
+
+# ---- Memory Playback (docs/playd.md#memory-playback) ----
+
+MEMORY = CONFIG.replace('GAPLESS=1\n', 'GAPLESS=1\nMEMORYPLAY=2\n')
+TRACK = CONFIG.replace('GAPLESS=1\n', 'GAPLESS=1\nMEMORYPLAY=1\n')
+CAR = CONFIG.replace('LANGUAGE=2\n', 'LANGUAGE=2\nCARMODE=1\n')
+
+
+def fnv_bytes(b, h=2166136261):
+    for x in b:
+        h = ((h ^ x) * 16777619) & 0xffffffff
+    return h
+
+
+def snapshot(paths, pos, elapsed=0, version=4, kind=0xf001):
+    """playback.c playback_save's plain snapshot (version 4): the header, the queue's order twice and n zeros, each
+    song's identity (path length with its NUL, CUE start and end) and path; the checksum FNV-1a over it all with
+    its own word 0"""
+    n = len(paths)
+    idx = list(range(n)) * 2 + [0] * n
+    recs = b''.join(struct.pack('<3I', len(q.encode()) + 1, 0, 0) + q.encode() + b'\0' for q in paths)
+    size = 56 + len(idx) * 4 + len(recs)
+    buf = struct.pack('<14I', 0x5132524e, version, size, 0, n, pos, elapsed, 0, 2, 0, pos, 0, 0, kind)
+    buf += struct.pack(f'<{len(idx)}I', *idx) + recs
+    total = fnv_bytes(buf)
+    return buf[:12] + struct.pack('<I', total) + buf[16:], total
+
+
+def checkpoint(total, pos, elapsed):
+    c = struct.pack('<3I', total, pos, elapsed)
+    return struct.pack('<I', fnv_bytes(c)) + c
+
+
+def read_snapshot(root):
+    buf = (root/'mnt/mmc/.q2pod/ringnav-queue').read_bytes()
+    h = struct.unpack('<14I', buf[:56])
+    assert h[0] == 0x5132524e and h[2] == len(buf), h
+    assert fnv_bytes(buf[:12] + b'\0' * 4 + buf[16:]) == h[3], 'its checksum'
+    n = h[4]
+    idx = list(struct.unpack(f'<{3 * n}I', buf[56:56 + 12 * n]))
+    p, paths = 56 + 12 * n, []
+    for _ in range(n):
+        length, start, end = struct.unpack('<3I', buf[p:p + 12])
+        paths.append(buf[p + 12:p + 12 + length - 1].decode())
+        assert (start, end, buf[p + 11 + length]) == (0, 0, 0)
+        p += 12 + length
+    assert p == len(buf)
+    return {'version': h[1], 'n': n, 'pos': h[5], 'elapsed': h[6], 'shuffle': h[7], 'repeat': h[8], 'folder': h[9],
+            'cursor': h[10], 'hn': h[11], 'npend': h[12], 'type': h[13], 'idx': idx, 'paths': paths, 'sum': h[3]}
+
+
+def read_checkpoint(root):
+    c = (root/'mnt/mmc/.q2pod/ringnav-queue-elapsed').read_bytes()
+    w = struct.unpack('<4I', c)
+    assert fnv_bytes(c[4:]) == w[0], 'its checksum'
+    return w[1:]
+
+
+@pytest.mark.parametrize('config', [MEMORY])
+def test_memory_playback_keeps_the_queue_in_today_s_plain_snapshot_and_its_second_beside(run):
+    """playback.c playback_save, version 4 (a queue without advanced play): written as the queue or its place changes,
+    the second in ringnav-queue-elapsed (checkpoint: the snapshot's checksum, the place, the second) at a pause"""
+    root, pl = run
+    card_in(root)
+    play_list(root, [1, 2, 3], 1)
+    pl.pump()
+    assert wait_for(root/'mnt/mmc/.q2pod/ringnav-queue', 3)
+    h = read_snapshot(root)
+    assert (h['version'], h['n'], h['pos'], h['cursor'], h['shuffle'], h['repeat'], h['folder'], h['hn'], h['npend'],
+            h['type']) == (4, 3, 1, 1, 0, 2, 0, 0, 0, 0xf001), h
+    assert h['idx'] == [0, 1, 2, 0, 1, 2, 0, 0, 0]
+    assert h['paths'] == ['/mnt/mmc/Music/a.flac', '/mnt/mmc/Music/b.mp3', '/mnt/mmc/Music/c}d.flac']
+    pl.info = '900000|44100|200|42|FLAC|16'
+    pl.pump(1.5)
+    fifo(root, 'pause')
+    pl.pump()
+    assert wait_for_value(lambda: (root/'mnt/mmc/.q2pod/ringnav-queue-elapsed').exists() and read_checkpoint(root),
+                          (h['sum'], 1, 42)), 'paused at 42 s'
+    fifo(root, 'next')
+    pl.pump()
+    assert wait_for_value(lambda: read_snapshot(root)['pos'], 2), 'the place moved'
+
+
+@pytest.mark.parametrize('config', [CONFIG])
+def test_with_memory_playback_off_no_queue_is_kept(run):
+    root, pl = run
+    card_in(root)
+    play_list(root, [1, 2], 0)
+    pl.pump(1.5)
+    assert not (root/'mnt/mmc/.q2pod/ringnav-queue').exists()
+
+
+def kept(paths, pos, elapsed, cp=None, version=4):
+    def prep(root):
+        card_in(root)
+        (root/'mnt/mmc/.q2pod').mkdir(parents=True, exist_ok=True)
+        buf, total = snapshot(paths, pos, 0, version)
+        (root/'mnt/mmc/.q2pod/ringnav-queue').write_bytes(buf)
+        (root/'mnt/mmc/.q2pod/ringnav-queue-elapsed').write_bytes(checkpoint(*cp) if cp else checkpoint(total, pos, elapsed))
+    return prep
+
+
+THREE = ['/mnt/mmc/Music/a.flac', '/mnt/mmc/Music/b.mp3', '/mnt/mmc/Music/c}d.flac']
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, kept(THREE, 2, 77))])
+def test_memory_playback_s_location_brings_the_queue_back_paused_at_its_second(run):
+    """stock's memeory_startplayer and ringnav_boot: the queue and song back paused, Location at its second"""
+    root, pl = run
+    n = now(root, 0.3)
+    assert (n['id'], n['state'], n['pos'], n['qlen']) == ('3', '2', '77000', '3'), n
+    assert pl.songs() == [], 'nothing loaded'
+    fifo(root, 'resume')
+    pl.pump()
+    assert pl.got[-1] == ('set-songurl', '/mnt/mmc/Music/c%0x7dd.flac|ss=77|1024|20|0|17|90'), pl.got
+
+
+@pytest.mark.parametrize('config, prepare', [(TRACK, kept(THREE, 1, 77))])
+def test_memory_playback_s_track_brings_the_song_back_from_its_start(run):
+    root, pl = run
+    n = now(root, 0.3)
+    assert (n['id'], n['state'], n['pos']) == ('2', '2', '0'), n
+
+
+@pytest.mark.parametrize('config, prepare', [(CAR, kept(THREE, 1, 33))])
+def test_in_vehicle_mode_brings_the_queue_back_playing_at_its_second(run):
+    """car mode: memeory_startplayer's seek and a start that is not paused (ringnav_boot's stock call)"""
+    root, pl = run
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/b.mp3')] and pl.got[-1][1].split('|')[1] == 'ss=33', pl.got
+    assert now(root, 0.3)['state'] == '1'
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, kept(['/mnt/mmc/Music/a.flac', '/mnt/mmc/gone.flac', '/mnt/mmc/Music/b.mp3'], 2, 5))])
+def test_a_kept_song_no_longer_in_the_library_is_left_out(run):
+    root, pl = run
+    n = now(root, 0.3)
+    assert (n['id'], n['qpos'], n['qlen'], n['pos']) == ('2', '1', '2', '5000'), n
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, kept(THREE, 1, 50, cp=(0, 1, 50)))])
+def test_a_checkpoint_of_another_snapshot_is_not_its_second(run):
+    """ringnav_memory: the checkpoint counts only for the snapshot whose checksum it names, at its place"""
+    root, pl = run
+    n = now(root, 0.3)
+    assert (n['id'], n['pos']) == ('2', '0'), n
+
+
+def damaged(root):
+    kept(THREE, 1, 9)(root)
+    p = root/'mnt/mmc/.q2pod/ringnav-queue'
+    b = bytearray(p.read_bytes())
+    b[-3] ^= 1
+    p.write_bytes(bytes(b))
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, damaged)])
+def test_a_damaged_snapshot_brings_nothing_back(run):
+    root, pl = run
+    n = now(root, 0.3)
+    assert (n['qlen'], n['state']) == ('0', '0'), n
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, kept(THREE, 1, 12, version=3))])
+def test_a_snapshot_with_advanced_play_comes_back_in_its_queue_order(run):
+    """version 3, today's with advanced play: the queue's rows and place; its own order is not q2playd's"""
+    root, pl = run
+    n = now(root, 0.3)
+    assert (n['id'], n['qlen'], n['pos']) == ('2', '3', '12000'), n
+
+
+def flash_only(root):
+    card_in(root)
+    buf, total = snapshot(THREE, 0, 0)
+    (root/'mnt/data/ringnav-queue').write_bytes(buf)
+    (root/'mnt/data/ringnav-queue-elapsed').write_bytes(checkpoint(total, 0, 21))
+
+
+@pytest.mark.parametrize('config, prepare', [(MEMORY, flash_only)])
+def test_the_flash_snapshot_of_a_release_before_is_read_when_the_card_has_none(run):
+    root, pl = run
+    n = now(root, 0.3)
+    assert (n['id'], n['pos']) == ('1', '21000'), n
+
+
+@pytest.mark.parametrize('config', [MEMORY])
+def test_a_queue_past_999_songs_is_not_kept(run):
+    """playback.c SAVE_LIMIT: past it the kept queue is dropped"""
+    root, pl = run
+    card_in(root)
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    assert wait_for(root/'mnt/mmc/.q2pod/ringnav-queue', 3)
+    play_list(root, [1, 2] * 500, 0)
+    pl.pump(1.5)
+    assert not (root/'mnt/mmc/.q2pod/ringnav-queue').exists()
+
+
+# ---- likes both ways (docs/playd.md#ratings-and-likes) ----
+
+def stock_myfav(root, rows=()):
+    """stock's myfav in database.db (today's Vamp's My Fav), some of its columns, with rows' fileurls"""
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    db.execute('create table myfav(id integer primary key, filename, fileurl, album, songer, name)')
+    db.executemany('insert into myfav(fileurl) values (?)', [(r,) for r in rows])
+    db.commit()
+    db.close()
+
+
+def stock_favs(root):
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    try:
+        return sorted(db.execute('select fileurl, name, songer, album from myfav'))
+    finally:
+        db.close()
+
+
+def test_a_like_under_vamp_os_is_written_through_to_stock_s_my_fav(run):
+    """catalogue.c fav_set_on: the song's row copied into stock's myfav (its columns that the library has), taken
+    out at an unlike, so today's Vamp finds it"""
+    root, pl = run
+    stock_myfav(root)
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    send(root, '97 like 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(97, 0)])
+    assert stock_favs(root) == [('/mnt/mmc/Music/a.flac', 'Alpha', 'Ann', 'First')]
+    send(root, '98 like 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(98, 0)])
+    assert stock_favs(root) == []
+
+
+def back_from_today(root):
+    """likes.db as Vamp OS left it (a.flac liked), then today's Vamp's My Fav changed: a.flac out, b.mp3 in"""
+    (root/'mnt/data/vamp').mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(root/'mnt/data/vamp/likes.db')
+    db.execute('create table myfav(fileurl text primary key)')
+    db.execute("insert into myfav values ('/mnt/mmc/Music/a.flac')")
+    db.commit()
+    db.close()
+    stock_myfav(root, ['/mnt/mmc/Music/b.mp3'])
+
+
+@pytest.mark.parametrize('prepare', [back_from_today])
+def test_likes_changed_under_today_s_vamp_are_taken_at_the_next_start(run):
+    root, pl = run
+    assert likes(root) == ['/mnt/mmc/Music/b.mp3']
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    assert now(root)['liked'] == '0'
+    fifo(root, 'next')
+    pl.pump()
+    assert now(root)['liked'] == '1'
+
+
+def test_a_like_stock_cannot_take_yet_waits_and_is_written_once_it_can(run):
+    """no myfav to write (stock's database.db without it yet, or the song's row on a card that is away): the like is
+    kept as waiting in likes.db and written through once it can be"""
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    send(root, '99 like 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(99, 0)])
+    assert now(root)['liked'] == '1'
+    stock_myfav(root)
+    assert wait_for_value(lambda: stock_favs(root), [('/mnt/mmc/Music/a.flac', 'Alpha', 'Ann', 'First')], 6)
+
+
+def test_a_server_song_s_like_is_written_through_from_its_catalogue_row(run):
+    """a server song (here by its offline copy) is its server row in stock's myfav, copied from the catalogue's
+    servertable as today's fav_set_on copies it"""
+    root, pl = run
+    stock_myfav(root)
+    sock = catalogue(root, copies={SERVER + 1: COPY1})
+    (root/'tmp/q2-navi.state').write_text('status=idle\nserver=down\n')
+    play_list(root, [SERVER + 1, 2], 0)
+    pl.pump(1.0)
+    send(root, f'60 like {SERVER + 1}')
+    assert wait_for_value(lambda: acks(root)[:1], [(60, 0)])
+    assert stock_favs(root) == [('/mnt/mmc/.navi/cat/al1/s1.flac', 'Cloud One', 'Sky', 'Up')]
+    sock.close()
+
+
+def test_a_like_whose_row_is_on_a_card_away_waits_for_the_card(run):
+    """the catalogue (on the card) gone when the like is made: nothing to copy, so it waits and is written once the
+    catalogue is back"""
+    root, pl = run
+    stock_myfav(root)
+    sock = catalogue(root, copies={SERVER + 1: COPY1})
+    (root/'tmp/q2-navi.state').write_text('status=idle\nserver=down\n')
+    play_list(root, [SERVER + 1, 2], 0)
+    pl.pump(1.0)
+    cat = root/'mnt/mmc/.vamp/catalogue.db'
+    cat.rename(root/'catalogue.away')
+    send(root, f'61 like {SERVER + 1}')
+    assert wait_for_value(lambda: acks(root)[:1], [(61, 0)])
+    assert stock_favs(root) == []
+    (root/'catalogue.away').rename(cat)
+    assert wait_for_value(lambda: stock_favs(root), [('/mnt/mmc/.navi/cat/al1/s1.flac', 'Cloud One', 'Sky', 'Up')], 6)
+    sock.close()
 

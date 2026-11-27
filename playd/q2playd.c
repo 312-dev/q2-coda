@@ -1039,9 +1039,10 @@ static int pending_ids[QUEUE_MAX];
  * RATE_MIN words to start, doubled whenever a new rating would put more than three quarters of the slots in use, up
  * to RATE_SLOTS; the last two words the layout mark and the slots in use, written whole on each change. An older file,
  * its ratings from the first slot, is laid out at its first use and kept once as it was, ringnav-ratings.v1. The like
- * (the heart) is apart from the stars, as today's is stock's My Fav: q2libd's library has no myfav and stock's
- * database.db is not written, so likes are /mnt/data/vamp/likes.db's myfav (stock's table's fileurl column alone),
- * seeded from stock's myfav when it is made. A song is keyed by its path, a server song playing from its offline copy
+ * (the heart) is apart from the stars and is stock's My Fav, as today's is: q2libd's library has no myfav, so a like
+ * is kept in /mnt/data/vamp/likes.db's myfav (stock's table's fileurl column alone, what coda-rc lists) and written
+ * through to stock's myfav in /mnt/data/database.db in stock's form (fav_flush), waiting there when it cannot be yet;
+ * at each start the likes are taken again from stock's myfav, which today's Vamp may have changed. A song is keyed by its path, a server song playing from its offline copy
  * by its server row's fileurl (catalogue.c catalogue_song_key). A source's URL has neither. */
 #define RATE_GONE 7u
 #define RATE_MIN 4096
@@ -1175,30 +1176,122 @@ static unsigned listen_key(const char *p) { /* listen_key's: the path's FNV-1a a
 }
 static int playing_id(void) { return q.n && !q.paths ? q.ids[q.order[q.at]] : 0; } /* the now file's id= */
 
-/* likes.db, made with stock's favorites in it the first time; 0 when it cannot be opened */
+/* likes.db: myfav, the likes as coda-rc lists them, and waiting, likes not yet written through to stock's myfav
+ * (fav_flush); 0 when it cannot be opened */
 static sqlite3 *likes_open(void) {
     sqlite3 *db;
-    char dir[640], attach[760];
+    char dir[640];
     snprintf(dir, sizeof dir, "%s/mnt/data/vamp", root);
     mkdir(dir, 0755);
-    int fresh = access(path(likes_rel), F_OK) != 0;
     if (sqlite3_open_v2(path(likes_rel), &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI, 0) != SQLITE_OK ||
-        sqlite3_exec(db, "create table if not exists myfav(fileurl text primary key)", 0, 0, 0) != SQLITE_OK) {
+        sqlite3_exec(db, "create table if not exists myfav(fileurl text primary key);"
+                         "create table if not exists waiting(fileurl text primary key, on_ int)", 0, 0, 0) != SQLITE_OK) {
         logf_("cannot open %s", path(likes_rel));
         sqlite3_close(db);
         return 0;
     }
     sqlite3_busy_timeout(db, 500);
-    if (fresh && access(path(stock_db_rel), R_OK) == 0) {
-        snprintf(attach, sizeof attach, "file:%s?mode=ro", path(stock_db_rel));
-        char *u = sqlite3_mprintf("attach %Q as stock;"
-                            "insert or ignore into myfav select fileurl from stock.myfav where fileurl is not null;"
-                            "detach stock",
-                            attach);
+    return db;
+}
+
+#define LIKES_LOOK_MS 2000 /* likes waiting for stock's myfav: fav_flush tried again this often */
+static int fav_waiting;
+static unsigned long long fav_looked;
+
+/* The waiting likes written through to stock's myfav in /mnt/data/database.db, as today's Vamp writes it
+ * (catalogue.c fav_set_on): the song's row out, and for a like its row copied in from the library's songtable, else
+ * the catalogue's servertable, the columns stock's myfav has; a like whose row cannot be had (no myfav yet, the
+ * catalogue's card away) waits. 1 when stock's myfav is there. */
+static int fav_flush(sqlite3 *db) {
+    char *u;
+    int same = !strcmp(db_path, path(stock_db_rel)), cat = access(cat_path, R_OK) == 0, there = 0;
+    if (access(path(stock_db_rel), W_OK)) return fav_waiting = 0, 0;
+    u = sqlite3_mprintf("attach %Q as stock", path(stock_db_rel));
+    int ok = sqlite3_exec(db, u, 0, 0, 0) == SQLITE_OK;
+    sqlite3_free(u);
+    if (!ok) return 0;
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(db, "select 1 from stock.sqlite_master where type = 'table' and name = 'myfav'", -1, &st, 0) == SQLITE_OK)
+        there = sqlite3_step(st) == SQLITE_ROW, sqlite3_finalize(st);
+    if (there && !same) {
+        u = sqlite3_mprintf("attach %Q as lib", db_path);
+        if (sqlite3_exec(db, u, 0, 0, 0) != SQLITE_OK) there = 0;
+        sqlite3_free(u);
+    }
+    if (there && cat) {
+        u = sqlite3_mprintf("attach %Q as cat", cat_path);
+        if (sqlite3_exec(db, u, 0, 0, 0) != SQLITE_OK) cat = 0;
+        sqlite3_free(u);
+    }
+    char cols[2][700] = {"", ""};
+    for (int k = 0; there && k < 1 + cat; ++k) { /* the columns both have, stock's id its own */
+        u = sqlite3_mprintf("select group_concat(name) from pragma_table_info('myfav', 'stock') where name != 'id' and "
+                            "name in (select name from pragma_table_info(%Q, %Q))", k ? "servertable" : "songtable",
+                            k ? "cat" : same ? "stock" : "lib");
+        if (sqlite3_prepare_v2(db, u, -1, &st, 0) == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0))
+            snprintf(cols[k], sizeof cols[k], "%s", (const char *)sqlite3_column_text(st, 0));
+        sqlite3_finalize(st);
+        sqlite3_free(u);
+    }
+    int left = 0;
+    if (there && sqlite3_prepare_v2(db, "select fileurl, on_ from waiting", -1, &st, 0) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char *f = (const char *)sqlite3_column_text(st, 0);
+            int on = sqlite3_column_int(st, 1), done = 0;
+            sqlite3_exec(db, "begin", 0, 0, 0);
+            u = sqlite3_mprintf("delete from stock.myfav where fileurl = %Q", f);
+            done = sqlite3_exec(db, u, 0, 0, 0) == SQLITE_OK && !on;
+            sqlite3_free(u);
+            for (int k = 0; on && !done && k < 1 + cat; ++k) {
+                if (!*cols[k]) continue;
+                u = sqlite3_mprintf("insert into stock.myfav(%s) select %s from %s.%s where fileurl = %Q limit 1", cols[k],
+                                    cols[k], k ? "cat" : same ? "stock" : "lib", k ? "servertable" : "songtable", f);
+                done = sqlite3_exec(db, u, 0, 0, 0) == SQLITE_OK && sqlite3_changes(db) > 0;
+                sqlite3_free(u);
+            }
+            sqlite3_exec(db, done ? "commit" : "rollback", 0, 0, 0);
+            if (done) {
+                u = sqlite3_mprintf("delete from waiting where fileurl = %Q", f);
+                sqlite3_exec(db, u, 0, 0, 0);
+                sqlite3_free(u);
+            } else
+                ++left;
+        }
+        sqlite3_finalize(st);
+    } else if (sqlite3_prepare_v2(db, "select count(*) from waiting", -1, &st, 0) == SQLITE_OK) {
+        left = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int(st, 0) : 0;
+        sqlite3_finalize(st);
+    }
+    fav_waiting = left;
+    sqlite3_exec(db, "detach stock", 0, 0, 0);
+    if (there && !same) sqlite3_exec(db, "detach lib", 0, 0, 0);
+    if (there && cat) sqlite3_exec(db, "detach cat", 0, 0, 0);
+    return there;
+}
+
+/* At the start: likes waiting written through, then the likes are stock's myfav as it is now (today's Vamp may have
+ * changed it since) with those still waiting over it; with no stock myfav, likes.db's own stand */
+static void likes_sync(void) {
+    sqlite3 *db = likes_open();
+    if (!db) return;
+    if (fav_flush(db)) {
+        char *u = sqlite3_mprintf("attach %Q as stock;begin;delete from myfav;"
+                                  "insert or ignore into myfav select fileurl from stock.myfav where fileurl is not null;"
+                                  "insert or ignore into myfav select fileurl from waiting where on_;"
+                                  "delete from myfav where fileurl in (select fileurl from waiting where not on_);commit;"
+                                  "detach stock", path(stock_db_rel));
         if (sqlite3_exec(db, u, 0, 0, 0) == SQLITE_OK) logf_("likes: stock's favorites taken");
         sqlite3_free(u);
     }
-    return db;
+    sqlite3_close(db);
+}
+
+static void likes_poll(unsigned long long t) {
+    if (!fav_waiting || t < fav_looked + LIKES_LOOK_MS) return;
+    fav_looked = t;
+    sqlite3 *db = likes_open();
+    if (db) fav_flush(db);
+    sqlite3_close(db);
 }
 
 static int liked_now(void) { /* the song's like, 0 or 1, -1 when nothing is rated */
@@ -1249,6 +1342,12 @@ static int like_cmd(int id) {
         sqlite3_bind_text(st, 1, p, -1, SQLITE_STATIC);
         ok = sqlite3_step(st) == SQLITE_DONE;
         sqlite3_finalize(st);
+    }
+    if (ok) { /* and through to stock's myfav, now or once it can be */
+        char *u = sqlite3_mprintf("insert or replace into waiting values (%Q, %d)", p, !was);
+        ok = sqlite3_exec(db, u, 0, 0, 0) == SQLITE_OK;
+        sqlite3_free(u);
+        if (ok) fav_flush(db);
     }
     sqlite3_close(db);
     if (!ok) return logf_("like not saved"), 1;
@@ -1345,6 +1444,222 @@ static void plays_flush(unsigned long long t) { /* counts kept while the card wa
     if (!pc.held || t < pc.looked + CARD_LOOK_MS) return;
     pc.looked = t;
     if (card_mounted() && plays_card_save()) pc.held = 0, pc.moved = 1;
+}
+
+/* ---- Memory Playback (docs/playd.md#memory-playback) ----
+ * Today's Vamp's queue snapshot (playback.c playback_save, docs/internals.md#memory-playback-and-a-streamed-queue), in
+ * its format, so either system brings back what the other kept: the card's .q2pod/ringnav-queue, version 4 (a queue
+ * without advanced play): the header's words, the queue's order twice and n zeros, then each song's identity (its
+ * path's length with the NUL, CUE start and end) and path; the checksum FNV-1a over the whole with its own word 0. The
+ * second goes in ringnav-queue-elapsed beside it (the checkpoint: its checksum, the snapshot's, the place, the second)
+ * at a pause or a stop and every CHECKPOINT_MS playing, and the snapshot is written again when the queue or its place
+ * changes. Kept only while [PLAYSET] MEMORYPLAY (1 Track, 2 Location) or [SYSSET] CARMODE is on, for a queue of
+ * library songs (not a source's URL or a server list's answer), at most SAVE_LIMIT songs (past it the kept one is
+ * dropped). At the start the queue comes back paused, at its second for Location and from the song's start for Track;
+ * in car mode playing at its second, once the player connects (memeory_startplayer, ringnav_boot). A snapshot with
+ * advanced play (version 3, or 2) comes back as its queue's rows; a song no longer in the library is left out. With no
+ * card copy the flash files of a release before, /mnt/data/ringnav-queue and its -elapsed, are read. */
+#define SAVE_LIMIT 999
+#define SNAP_MAGIC 0x5132524eu
+#define CHECKPOINT_MS 30000
+#define MEMORY_LOOK_MS 500
+static const char *snap_card_rel = "/mnt/mmc/.q2pod/ringnav-queue", *snap_flash_rel = "/mnt/data/ringnav-queue";
+static struct {
+    int mode;                /* 0 off, 1 Track, 2 Location, 3 car mode */
+    long long stamp;         /* config.ini's, when mode was read */
+    unsigned sig, sum;       /* the queue's as kept (queue_sig), the kept snapshot's checksum */
+    int at, sec, go;         /* the place and second kept; go: car mode's second + 1, started once the player is there */
+    unsigned long long looked, at_ms;
+} mp = {.at = -1, .sec = -1};
+
+static void memory_mode(void) {
+    struct stat st;
+    long long stamp = stat(path("/mnt/data/config.ini"), &st) ? 0 : (long long)st.st_mtime * 1000000000 + st.st_size;
+    if (stamp == mp.stamp) return;
+    mp.stamp = stamp;
+    char *t = read_all(path("/mnt/data/config.ini"));
+    int m = t ? ini_get(t, "PLAYSET", "MEMORYPLAY", 0) : 0, car = t ? ini_get(t, "SYSSET", "CARMODE", 0) : 0;
+    free(t);
+    mp.mode = car == 1 ? 3 : m == 1 || m == 2 ? m : 0;
+}
+
+static unsigned queue_sig(void) { /* the ids in play order */
+    unsigned h = fnv(2166136261u, &q.n, sizeof q.n);
+    for (int i = 0; i < q.n; ++i) h = fnv(h, &q.ids[q.order[i]], sizeof *q.ids);
+    return h;
+}
+
+/* id's path (a card song's, else a server row's fileurl) through the two statements */
+static int path_of(sqlite3_stmt *card, sqlite3_stmt *cat, int id, char *out, size_t room) {
+    sqlite3_stmt *st = (unsigned)id >= CAT_ID_BASE ? cat : card;
+    int ok = 0;
+    if (!st) return 0;
+    sqlite3_reset(st);
+    sqlite3_bind_int(st, 1, id);
+    if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0))
+        ok = snprintf(out, room, "%s", (const char *)sqlite3_column_text(st, 0)) < (int)room;
+    return ok && *out;
+}
+
+static int snap_save(const char *rel, const void *buf, size_t n) {
+    char dir[640];
+    snprintf(dir, sizeof dir, "%s/mnt/mmc/.q2pod", root);
+    mkdir(dir, 0755);
+    return blob_save(path(rel), buf, n);
+}
+
+static void checkpoint_write(int sec) {
+    char rel[64];
+    unsigned c[4] = {0, mp.sum, (unsigned)q.at, (unsigned)sec};
+    c[0] = fnv(2166136261u, c + 1, 3 * sizeof *c);
+    snprintf(rel, sizeof rel, "%s-elapsed", snap_card_rel);
+    if (snap_save(rel, c, sizeof c)) mp.sec = sec;
+}
+
+static void snap_drop(void) {
+    char rel[64];
+    snprintf(rel, sizeof rel, "%s-elapsed", snap_card_rel);
+    unlink(path(snap_card_rel)), unlink(path(rel));
+}
+
+/* the queue as a version 4 snapshot: 1 when the card took it */
+static int snap_write(int sec) {
+    sqlite3 *db = 0, *cat = 0;
+    sqlite3_stmt *a = 0, *b = 0;
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK)
+        sqlite3_prepare_v2(db, "select fileurl from songtable where id = ?", -1, &a, 0);
+    if (sqlite3_open_v2(cat_path, &cat, SQLITE_OPEN_READONLY, 0) == SQLITE_OK)
+        sqlite3_prepare_v2(cat, "select fileurl from servertable where id = ?", -1, &b, 0);
+    unsigned n = (unsigned)q.n, size = 56 + n * 12, room = size + n * 1036, len;
+    unsigned char *buf = malloc(room), *p = buf ? buf + size : 0;
+    int ok = buf != 0;
+    char song[1024];
+    for (unsigned i = 0; ok && i < n; ++i) {
+        ok = path_of(a, b, q.ids[q.order[i]], song, sizeof song);
+        unsigned id3[3] = {(len = (unsigned)strlen(song)) + 1, 0, 0};
+        if (ok) memcpy(p, id3, sizeof id3), memcpy(p + 12, song, len + 1), p += 12 + len + 1;
+    }
+    sqlite3_finalize(a), sqlite3_finalize(b), sqlite3_close(db), sqlite3_close(cat);
+    if (ok) {
+        size = (unsigned)(p - buf);
+        unsigned h[14] = {SNAP_MAGIC, 4, size, 0, n, (unsigned)q.at, (unsigned)sec, 0, 2, 0, (unsigned)q.at, 0, 0, 0xf001};
+        memcpy(buf, h, sizeof h);
+        for (unsigned i = 0; i < n * 3; ++i) {
+            unsigned v = i < n * 2 ? i % n : 0;
+            memcpy(buf + 56 + i * 4, &v, 4);
+        }
+        unsigned sum = fnv(2166136261u, buf, size);
+        memcpy(buf + 12, &sum, 4);
+        ok = snap_save(snap_card_rel, buf, size);
+        if (ok) mp.sum = sum, mp.sec = sec;
+    }
+    free(buf);
+    return ok;
+}
+
+/* the queue kept as it changes (the main loop's, and at the end) */
+static void memory_poll(unsigned long long t, int last) {
+    if (!last && t < mp.looked + MEMORY_LOOK_MS) return;
+    mp.looked = t;
+    memory_mode();
+    if (!mp.mode || src.on || q.paths || !q.n) return;
+    unsigned sig = queue_sig();
+    int sec = q.pos_ms / 1000;
+    if (sig == mp.sig && q.at == mp.at) {
+        if (sec != mp.sec && (last || q.state != PLAYING || t >= mp.at_ms + CHECKPOINT_MS) && card_mounted())
+            checkpoint_write(sec), mp.at_ms = t;
+        return;
+    }
+    if (!card_mounted()) return;
+    if (q.n > SAVE_LIMIT) snap_drop(), mp.sig = sig, mp.at = q.at;
+    else if (snap_write(sec)) mp.sig = sig, mp.at = q.at, mp.at_ms = t;
+}
+
+/* rel read whole (at most room bytes): its length, -1 for none; the card's, else the flash's */
+static long snap_read(const char *card_rel, const char *flash_rel, unsigned char *buf, size_t room) {
+    FILE *f = card_mounted() ? fopen(path(card_rel), "rb") : 0;
+    if (!f) f = fopen(path(flash_rel), "rb");
+    if (!f) return -1;
+    size_t n = fread(buf, 1, room, f);
+    fclose(f);
+    return (long)n;
+}
+
+static void memory_restore(void) {
+    memory_mode();
+    if (!mp.mode) return;
+    size_t room = 60 + (size_t)SAVE_LIMIT * 4 * 3 + 64 * 4 * 2 + (size_t)SAVE_LIMIT * 1036 + 1;
+    unsigned char *buf = malloc(room);
+    long got = buf ? snap_read(snap_card_rel, snap_flash_rel, buf, room) : -1;
+    unsigned h[15] = {0}, hsize = 0;
+    int ok = got >= 56;
+    if (ok) memcpy(h, buf, 56), hsize = h[1] == 2 ? 60 : 56;
+    unsigned n = h[4], pos = h[5], hn = h[11], npend = h[1] == 2 ? 0 : h[12];
+    ok = ok && h[0] == SNAP_MAGIC && h[1] >= 2 && h[1] <= 4 && (long)h[2] == got && got >= (long)hsize && n && n <= SAVE_LIMIT &&
+         pos < n && hn <= 4 * SAVE_LIMIT && npend <= 4 * SAVE_LIMIT && h[6] <= 0x7fffffff &&
+         h[2] >= hsize + (n * 3 + hn + npend) * 4 + n * 14;
+    if (ok) {
+        unsigned sum = h[3], zero = 0;
+        memcpy(buf + 12, &zero, 4);
+        ok = fnv(2166136261u, buf, h[2]) == sum;
+        memcpy(buf + 12, &sum, 4);
+    }
+    unsigned char *p = buf + hsize + (n * 3 + hn + npend) * 4, *end = buf + (ok ? h[2] : 0);
+    for (unsigned i = 0; ok && i < n * 3; ++i) {
+        unsigned v;
+        memcpy(&v, buf + hsize + i * 4, 4);
+        if (i >= n * 2 ? v > 1 : v >= n) ok = 0;
+    }
+    int at = -1, kept = 0;
+    sqlite3 *db = 0, *cat = 0;
+    sqlite3_stmt *a = 0, *b = 0;
+    if (ok && sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK)
+        sqlite3_prepare_v2(db, "select id from songtable where fileurl = ?", -1, &a, 0);
+    if (ok && sqlite3_open_v2(cat_path, &cat, SQLITE_OPEN_READONLY, 0) == SQLITE_OK)
+        sqlite3_prepare_v2(cat, "select id from servertable where fileurl = ?", -1, &b, 0);
+    for (unsigned i = 0; ok && i < n; ++i) {
+        unsigned id3[3];
+        if (end - p < 12) { ok = 0; break; }
+        memcpy(id3, p, 12), p += 12;
+        if (id3[0] < 2 || id3[0] > 1024 || id3[0] > (unsigned)(end - p) || p[id3[0] - 1] || strlen((char *)p) != id3[0] - 1) {
+            ok = 0;
+            break;
+        }
+        int id = -1;
+        for (sqlite3_stmt *st = a; id < 0 && st; st = st == a ? b : 0) {
+            sqlite3_reset(st);
+            sqlite3_bind_text(st, 1, (const char *)p, -1, SQLITE_STATIC);
+            if (sqlite3_step(st) == SQLITE_ROW) id = sqlite3_column_int(st, 0);
+        }
+        if (id >= 0) {
+            if (i == pos || (i > pos && at < 0)) at = kept; /* the place's song, else the next kept, else the last */
+            q.ids[kept] = id, q.order[kept] = kept, ++kept;
+        }
+        p += id3[0];
+    }
+    sqlite3_finalize(a), sqlite3_finalize(b), sqlite3_close(db), sqlite3_close(cat);
+    if (ok && p != end) ok = 0;
+    unsigned c[4];
+    char rel[64], frel[64];
+    snprintf(rel, sizeof rel, "%s-elapsed", snap_card_rel), snprintf(frel, sizeof frel, "%s-elapsed", snap_flash_rel);
+    int sec = ok ? (int)h[6] : 0;
+    if (ok && snap_read(rel, frel, (unsigned char *)c, sizeof c) == (long)sizeof c && c[1] == h[3] && c[2] == pos &&
+        c[3] <= 0x7fffffff && fnv(2166136261u, c + 1, 3 * sizeof *c) == c[0])
+        sec = (int)c[3];
+    free(buf);
+    if (ok && kept && at < 0) at = kept - 1;
+    if (!ok || !kept) {
+        if (got >= 0) logf_("the kept queue is not read: %s", ok ? "none of its songs is in the library" : "damaged");
+        return;
+    }
+    q.n = kept, q.at = at, q.shuffle = 0, q.errors = 0, q.loaded = 0, ++q.list, ++q.seq;
+    song_lookup(q.ids[q.at]);
+    set_cover(q.ids[q.at], *q.row_url ? q.row_url : q.file);
+    if (mp.mode == 1) sec = 0;
+    q.state = PAUSED, q.pos_ms = sec * 1000;
+    if (mp.mode == 3) mp.go = sec + 1; /* playing once the player is there */
+    mp.sig = queue_sig(), mp.at = q.at, mp.sum = h[3], mp.sec = sec;
+    logf_("the kept queue: %d songs, song %d at %d s", kept, q.at + 1, sec);
 }
 
 static int command(const char *verb, const int *ids, int n_ids) {
@@ -1948,6 +2263,8 @@ int main(int argc, char **argv) {
     cmdq_fd = open(path(cmdq_rel), O_RDWR | O_NONBLOCK | O_CLOEXEC); /* RDWR: never an EOF when a writer leaves */
     if (listen_fd < 0) return 1;
     volume_load();
+    likes_sync();
+    memory_restore();
     now_write();
     dac_volume();
     unsigned long long polled = 0;
@@ -1984,6 +2301,7 @@ int main(int argc, char **argv) {
             player = accept4(listen_fd, 0, 0, SOCK_CLOEXEC);
             if (player >= 0) logf_("the player connected");
             if (player >= 0 && way) player_send("mcl-setoutputway", "1"), volume_apply(); /* a player started again: the output it had */
+            if (player >= 0 && mp.go) start_from(q.at, mp.go - 1), mp.go = 0; /* car mode's kept queue */
         }
         if (player >= 0 && p[1].fd == player && p[1].revents) player_read();
         if (p[2].revents & POLLIN) {
@@ -2007,12 +2325,15 @@ int main(int argc, char **argv) {
         if (q.loaded && t >= polled + POLL_MS) ask_status(), polled = t;
         if (volume_dirty_at && t >= volume_dirty_at + VOLUME_SAVE_MS) volume_save(), volume_dirty_at = 0;
         plays_flush(t);
+        memory_poll(t, 0);
+        likes_poll(t);
         if (q.seq != now_written_seq && t >= now_written_at + NOW_EVERY_MS) {
             now_write(), tell_watchers();
             now_written_seq = q.seq, now_written_at = t;
         }
     }
     if (volume_dirty_at) volume_save();
+    memory_poll(now_ms(), 1);
     unlink(path(sock_rel)), unlink(path(push_rel)), unlink(path(api_rel)), unlink(path(cmdq_rel));
     return 0;
 }

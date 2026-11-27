@@ -17,7 +17,7 @@ Vamp OS's library service ([roadmap: Who owns what](vamp-os.md#who-owns-what)), 
 
 Decisions, by the roadmap's [User data](vamp-os.md#user-data) rule (a switch either way loses nothing, and nothing stock or today's Vamp owns is rewritten):
 
-- **Stock's `/mnt/data/database.db` is never touched**, and neither is today's Vamp's `/mnt/mmc/.q2pod/catalogue.db`: both are files of their own. `q2libd`'s index is in `/mnt/data/vamp/`, the roadmap's place for everything new.
+- **Stock's `/mnt/data/database.db` is never touched by `q2libd`** (only its `myfav` rows are written, by `q2playd`, for likes: [playd](playd.md#ratings-and-likes)), and neither is today's Vamp's `/mnt/mmc/.q2pod/catalogue.db`: both are files of their own. `q2libd`'s index is in `/mnt/data/vamp/`, the roadmap's place for everything new.
 - **The catalogue is on the card**, as today's Vamp keeps its own: a 50,000-song catalogue is about 25 MB of rows, past what `/mnt/data` (17.7 MB) holds ([server-library: Where it is kept](server-library.md#where-it-is-kept)).
 - **A song keeps its id while its path stays**: q2playd's queue and q2ui's state name songs by id. A file whose size and modification time are what the last scan saw is not opened again; its row is copied.
 
