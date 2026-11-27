@@ -63,7 +63,8 @@ def base_args(binary, d):
     return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
-            '--wireless', d/'wireless', '--told', d/'told', '--config', d/'config.ini']
+            '--wireless', d/'wireless', '--told', d/'told', '--config', d/'config.ini',
+            '--library-order', d/'library-order']
 
 
 class Picture:
@@ -462,23 +463,47 @@ def pages(binary, work):
     def glyphs(d):
         for name, rgb in (('mode_shuffle_d', (90, 90, 90)), ('mode_shuffle_on', (0, 0, 250)), ('mode_repeat_d', (90, 90, 90)),
                           ('mode_repeat_on', (0, 0, 250)), ('mode_repeat1_on', (0, 250, 0)), ('mode_radio_d', (90, 90, 90)),
-                          ('mode_queue_d', (90, 90, 90)), ('np_fav_d', (250, 0, 0)), ('np_unfav_d', (90, 90, 90))):
+                          ('mode_queue_d', (90, 90, 90)), ('np_fav_d', (250, 0, 0)), ('np_unfav_d', (90, 90, 90)),
+                          ('np_more_d', (0, 250, 250))):
             png(d/f'oled_{name}.png', 16, 16, rgb)
     icons = pathlib.Path(tempfile.mkdtemp(dir=work))
     glyphs(icons)
-    marks = {}
-    for what, text in (('off', NOW), ('on', NOW.replace('id=5', 'id=5\nshuffle=1\nrepeat=2\nhearts=1'))):
+    marks, dots = {}, {}
+    # demo's file says repeat 0 off, 1 one, 2 all (patch/coda_rc_shim.c cr_modes)
+    for what, text in (('off', NOW), ('one', NOW.replace('id=5', 'id=5\nshuffle=1\nrepeat=1\nhearts=1')),
+                       ('all', NOW.replace('id=5', 'id=5\nrepeat=2'))):
         _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'run 600', 'shot @np.ppm'], *home, '--icons', icons, now=text)
         marks[what] = [pics['np'].at(64, 286), pics['np'].at(228, 286), pics['np'].at(200, 160)]
-    good &= check("Now Playing's shuffle, repeat and heart are drawn by what is set",
-                  marks['off'] == [(90, 90, 90)] * 3 and marks['on'] == [(0, 0, 250), (0, 250, 0), (250, 0, 0)], str(marks))
+        # the on dot: 4 px, its centre 15 px under the glyph's (patch/np_bar.c NP_DOT, NP_DOT_DY), in the accent
+        dots[what] = [pics['np'].at(x, y) for x in (64, 228) for y in (300, 301)] + [pics['np'].at(x, 304) for x in (64, 228)]
+    good &= check("Now Playing's shuffle, repeat and heart are drawn by what is set: Repeat One its own glyph, All the lit one",
+                  marks['off'] == [(90, 90, 90)] * 3 and marks['one'] == [(0, 0, 250), (0, 250, 0), (250, 0, 0)]
+                  and marks['all'][1] == (0, 0, 250), str(marks))
+    good &= check('a lit shuffle or repeat has the accent dot under it, an unlit one none',
+                  dots['off'] == [(0, 0, 0)] * 6 and dots['one'] == [ACCENT] * 4 + [(0, 0, 0)] * 2
+                  and dots['all'] == [(0, 0, 0)] * 2 + [ACCENT] * 2 + [(0, 0, 0)] * 2, str(dots))
+    # set from elsewhere while the page is open (the car, the phone, demo's own buttons): the row follows
+    (icons/'lit').write_text(NOW.replace('id=5', 'id=5\nshuffle=1\nrepeat=2'))
+    _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'run 600', f'plays {icons}/lit', 'run 300', 'shot @np.ppm'],
+                        *home, '--icons', icons, now=NOW)
+    later = [pics['np'].at(x, y) for y in (286, 301) for x in (64, 228)]
+    good &= check('shuffle and repeat turned on while Now Playing is open light there, each with its dot',
+                  later == [(0, 0, 250)] * 2 + [ACCENT] * 2, str(later))
+    # More (demo's dots at the right of the art's foot, tools/ipod.py img_more): Centre held opens demo's More page
+    _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'run 600', 'shot @np.ppm'], *home, '--icons', icons, now=NOW)
+    good &= check("Now Playing's More is drawn at the right of the art's foot", pics['np'].at(340, 203) == (0, 250, 250),
+                  str(pics['np'].at(340, 203)))
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'hold centre', 'run 100'], *home, now=NOW, code=None, queue=True)
+    asked = (d/'ask').read_text() if (d/'ask').exists() else ''
+    good &= check("Centre held on Now Playing opens demo's More, and plays or pauses nothing",
+                  asked == 'playermore_page\n' and sent == [], f'{asked!r} {sent}')
     # a tick shows the volume's level in the bar's place, white, and it gives the bar back
     _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick -1', 'run 200', 'shot @volume.ppm', 'run 2000', 'shot @after.ppm'], *home, now=NOW)
     level, bar = pics['volume'].at(80, 231), pics['after'].at(36, 231)
     good &= check('a tick on Now Playing shows the volume in the bar, then the bar comes back',
                   level == (255, 255, 255) and pics['volume'].at(36, 231) != ACCENT and bar == ACCENT, f'{level} {bar}')
     # Library > Artists > the first artist's songs > Centre on the second: that artist's songs are the queue
-    walk = ['rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'run 200']
+    walk = ['rest', 'key centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'run 200']
     _, _, _, (sent, ids, d) = script(binary, work, 60, walk, *home, queue=True)
     db = sqlite3.connect(d/'library.db')
     artist = db.execute('select songer from songtable order by songer collate nocase limit 1').fetchone()[0]
@@ -494,7 +519,7 @@ def pages(binary, work):
     k = next((i for i, a in enumerate(albums) if by['track, name collate nocase, id'][a] != by['name collate nocase, id'][a]), None)
     if k is None:
         return check("the made-up library has an album whose tracks are not in title order", False)
-    walk = ['rest', 'key centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest'] + ['tick 1', 'rest'] * k + ['key centre', 'rest', 'key centre', 'run 200']
+    walk = ['rest', 'key centre', 'rest', 'tick 3', 'rest', 'key centre', 'rest'] + ['tick 1', 'rest'] * k + ['key centre', 'rest', 'key centre', 'run 200']
     _, _, _, (sent, ids, d) = script(binary, work, 60, walk, *home, queue=True)
     want = by['track, name collate nocase, id'][albums[k]]
     good &= check("an album's songs are its tracks in order", len(sent) == 1 and ids == want, f'{ids} for {want}')
@@ -523,6 +548,25 @@ def pages(binary, work):
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("and Ratings, in the Library, for demo's Ratings", asked == 'ratings_page\n', repr(asked))
+    _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'rows @rows.txt'], *home, queue=True)
+    rows = (d/'rows.txt').read_text().split() if (d/'rows.txt').exists() else []
+    good &= check("the Library's rows in demo's default order (patch/library_edit.c lr_default), for the ones q2ui has",
+                  rows == ['Songs', 'Playlists', 'Artists', 'Albums', 'Years', 'Ratings', 'Most', 'Played'], str(rows))
+    # the user's own order and hidden rows from demo's Edit Library (patch/library_edit.c LR_FILE: the rows' letters in
+    # order, each led by + or - once shown or hidden; a row it does not name goes in after the one before it by default).
+    # Most Played moved first, Playlists hidden, Songs moved after Albums: Years and Ratings follow Albums, Songs last
+    order = pathlib.Path(tempfile.mkdtemp(dir=work))/'ringnav-library-order'
+    order.write_bytes(b'm-pals'.ljust(64, b'\0'))
+    _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'rows @rows.txt'], *home, '--library-order', order,
+                                queue=True)
+    rows = (d/'rows.txt').read_text().split() if (d/'rows.txt').exists() else []
+    good &= check("the Library's rows in the user's own order from Edit Library, a row they hid left out",
+                  rows == ['Most', 'Played', 'Artists', 'Albums', 'Years', 'Ratings', 'Songs'], str(rows))
+    _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 5', 'rest', 'key centre', 'rest',
+                                                   'rows @songs.txt'], *home, '--library-order', order, queue=True)
+    rows = (d/'songs.txt').read_text().split() if (d/'songs.txt').exists() else []
+    good &= check('and each row opens its own page there: the sixth, Songs, opens Songs (its Shuffle row first)',
+                  rows[:1] == ['Shuffle'], str(rows[:4]))
     # the last row leaves q2ui for demo's menus: the program ends, with the code of a plain end
     trace, _, _ = script(binary, work, 60, ['rest', 'tick 9', 'rest', 'key centre', 'run 100', 'tick -1', 'run 100'], *home, code=0)
     good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 7, str(trace[-1]['sel']))
@@ -562,7 +606,7 @@ def playlists(binary, work, home):
         return [str(i) for i, _ in songs]
     # script() makes its own folder: its library is made-up the same every time, so the ids are known from a probe
     want = made(folder(work, 60))
-    lines = ['rest', 'key centre', 'rest', 'tick 3', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest',
+    lines = ['rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest',
              'tick 1', 'rest', 'key centre', 'run 200']
     d = folder(work, 60)
     made(d)
@@ -857,7 +901,7 @@ def album_covers(binary, work, home):
     artist = db.execute('select songer from songtable where album = ? order by track, name collate nocase, id', (album,)).fetchone()[0]
     art = pathlib.Path(tempfile.mkdtemp(dir=work))
     png(art/f'{art_key(artist, album):08x}.jpg', 160, 160, (200, 40, 40))  # stb reads it by its bytes
-    walk = ['rest', 'key centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest', 'shot @albums.ppm']
+    walk = ['rest', 'key centre', 'rest', 'tick 3', 'rest', 'key centre', 'rest', 'shot @albums.ppm']
     _, pics, _ = script(binary, work, 60, walk, *home, '--art', art)
     p = pics['albums']
     good &= check("the first album's row is led by its cover and the second, with none made, by the placeholder",
@@ -867,7 +911,7 @@ def album_covers(binary, work, home):
         run.rest()
         run.key(KEY_CENTRE)
         run.rest()
-        run.ticks(2)
+        run.ticks(3)
         run.rest()
         run.key(KEY_CENTRE)
         run.rest()
@@ -877,15 +921,15 @@ def album_covers(binary, work, home):
         run.proc.kill()
         run.proc.wait(timeout=5)
         os.close(run.queue)
-    # Cover Flow makes its thumbnails after q2ui has looked (a fresh card: demo builds them once the scan is done, the
-    # emulator's m27 walk): the rows on screen take the cover once it is written, with no key pressed
+    # Cover Flow makes its thumbnails after q2ui has looked (a fresh card: demo builds them once its Cover Flow page
+    # opens, the emulator's m29 walk): the rows on screen take the cover once it is written, with no key pressed
     late = pathlib.Path(tempfile.mkdtemp(dir=work))
     run = Run(binary, work, 60, *home, '--art', late, '--clock', '12:00')
     try:
         run.rest()
         run.key(KEY_CENTRE)
         run.rest()
-        run.ticks(2)
+        run.ticks(3)
         run.rest()
         run.key(KEY_CENTRE)
         run.rest()
@@ -960,7 +1004,7 @@ def routes(binary, work):
     r.rest()
     r.key(KEY_CENTRE)   # Library
     time.sleep(0.6)
-    r.ticks(1)          # Artists
+    r.ticks(2)          # Artists
     r.key(KEY_CENTRE)
     time.sleep(0.6)
     r.ticks(3)          # the fourth artist
@@ -974,7 +1018,7 @@ def routes(binary, work):
     now = again.picture()
     # below the status row, whose clock may have turned a minute between the two
     same = all(shot.pixel(was, x, y) == shot.pixel(now, x, y) for y in range(BAR_H, 320, 3) for x in range(0, 375, 5))
-    good &= check('started again, it is on the page and the row it was ended on', same and before['ticks'] == 4, f"{before['ticks']} ticks")
+    good &= check('started again, it is on the page and the row it was ended on', same and before['ticks'] == 5, f"{before['ticks']} ticks")
     again.key(KEY_RETURN)
     time.sleep(0.6)
     again.key(KEY_RETURN)

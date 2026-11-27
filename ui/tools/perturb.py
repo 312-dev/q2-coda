@@ -81,6 +81,13 @@ CASES = {
  'slider-track-plain': ('ui/list.c', '#define SLIDER_TRACK_ON 0x7da2ea', '#define SLIDER_TRACK_ON 0x333333', 'scripts', "the grabbed row's track on the bar"),
  'art-never-again': ('ui/art.c', '            if (t.tv_sec == seen_at.tv_sec && t.tv_nsec == seen_at.tv_nsec) continue;', '            continue;', 'pages', 'drawn within seconds'),
  'home-narrow': ('ui/page_home.c', '#define LIST_W 204', '#define LIST_W 196', 'pages', "Home's rows run to x 204"),
+ 'np-no-dot': ('ui/page_now.c', '        if (lit[k]) fill_round(', '        if (0) fill_round(', 'pages', 'has the accent dot under it'),
+ 'np-repeat-swapped': ('ui/page_now.c', 'n->repeat == 1 ? "mode_repeat1_on."', 'n->repeat == 2 ? "mode_repeat1_on."', 'pages', 'Repeat One its own glyph'),
+ 'np-modes-stale': ('ui/page_now.c', '        if (marks != s->marks_s) {', '        if (0) {', 'pages', 'turned on while Now Playing is open'),
+ 'np-no-more': ('ui/page_now.c', '    if (more && *n->title)', '    if (0)', 'pages', "More is drawn"),
+ 'np-hold-nothing': ('ui/page_now.c', '        ui_demo_page("playermore_page");', '        ;', 'pages', "Centre held on Now Playing opens demo's More"),
+ 'library-order-ignored': ('ui/page_library.c', '    FILE *f = fopen(library_order_file, "rb");', '    FILE *f = 0;', 'pages', "user's own order"),
+ 'library-hidden-shown': ('ui/page_library.c', ' && find(hidden, h, out[i]) < 0) lib_shown', ') lib_shown', 'pages', "user's own order"),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

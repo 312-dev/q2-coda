@@ -115,35 +115,93 @@ static void groups_push(int kind) {
 }
 
 /* ---- the Library's own list ---- */
+/* The rows q2ui has, each with its letter in demo's Edit Library file (patch/library_edit.c
+ * lr_default: Shuffle h, Songs s, Playlists p, Artists a, Albums l, Genres g, Years e, Ratings r,
+ * My Fav f, Recently Added n, Recent c, Most Played m, ...; the ones q2ui has not are left out),
+ * in demo's default order. */
+enum { LIB_SONGS, LIB_PLAYLISTS, LIB_ARTISTS, LIB_ALBUMS, LIB_ROWS = 7 };
 static const struct {
+    char letter;
     const char *title, *demo;
-} lib_rows[] = { { "Songs", 0 },          { "Artists", 0 },  { "Albums", 0 },
-                 { "Playlists", 0 },      { "Years", "era_page" }, { "Ratings", "ratings_page" },
-                 { "Most Played", "mostplayed_page" } };
+} lib_rows[LIB_ROWS] = { { 's', "Songs", 0 },           { 'p', "Playlists", 0 },          { 'a', "Artists", 0 },
+                         { 'l', "Albums", 0 },          { 'e', "Years", "era_page" },     { 'r', "Ratings", "ratings_page" },
+                         { 'm', "Most Played", "mostplayed_page" } };
 /* Years, Ratings and Most Played are demo's pages, opened through the gate (page_home.c).
  * Playlists is q2ui's own, read from stock's table: no stock page name opens demo's.
  * ponytail: Genres, Composers, Recently Added and Long Songs are reached through Home's Old Menus
  * until each has a page here or an opener the gate is seen to run. */
+
+/* The user's order and choice of rows, as demo's Library shows them: Edit Library's file (demo's,
+ * written as the user moves or hides a row) holds the rows' letters in order, each led by '+' or
+ * '-' once the user has shown or hidden it; read against demo's default order as its lr_resolve_in
+ * does, a letter it doesn't know dropped and a row it doesn't name put after the row before it in
+ * the default order. Each of q2ui's rows shows unless hidden: demo's rule for them is shown. */
+const char *library_order_file = "/mnt/data/ringnav-library-order";
+static const char lr_default[] = "hspalgerfncmqiLPAvUu";
+static int lib_shown[LIB_ROWS], lib_n; /* lib_rows' indexes in the order shown */
+
+static int find(const char *s, int n, int c) {
+    for (int i = 0; i < n; ++i)
+        if (s[i] == c) return i;
+    return -1;
+}
+static void lib_order(void) {
+    char saved[64] = "", out[64], hidden[64] = "";
+    int n = 0, h = 0, mark = 0, def = (int)strlen(lr_default);
+    FILE *f = fopen(library_order_file, "rb");
+    if (f) saved[fread(saved, 1, sizeof saved - 1, f)] = 0, fclose(f);
+    for (int i = 0; saved[i]; ++i) {
+        int c = saved[i];
+        if (c == '+' || c == '-') {
+            mark = c;
+            continue;
+        }
+        if (find(lr_default, def, c) >= 0 && find(out, n, c) < 0) {
+            out[n++] = (char)c;
+            if (mark == '-') hidden[h++] = (char)c;
+        }
+        mark = 0;
+    }
+    for (int i = 0; i < def; ++i) {
+        if (find(out, n, lr_default[i]) >= 0) continue;
+        int at = 0;
+        for (int j = i; j-- > 0;) {
+            int k = find(out, n, lr_default[j]);
+            if (k >= 0) {
+                at = k + 1;
+                break;
+            }
+        }
+        for (int k = n++; k > at; --k) out[k] = out[k - 1];
+        out[at] = lr_default[i];
+    }
+    lib_n = 0;
+    for (int i = 0; i < n; ++i)
+        for (int k = 0; k < LIB_ROWS; ++k)
+            if (lib_rows[k].letter == out[i] && find(hidden, h, out[i]) < 0) lib_shown[lib_n++] = k;
+}
 static int l_count(void *ctx) {
     (void)ctx;
-    return (int)(sizeof lib_rows / sizeof *lib_rows);
+    return lib_n;
 }
 static void l_row(void *ctx, int i, ui_row *out) {
     (void)ctx;
-    out->title = lib_rows[i].title, out->flags = ROW_CHEVRON;
+    out->title = lib_rows[lib_shown[i]].title, out->flags = ROW_CHEVRON;
 }
 static void l_chosen(void *ctx, int i) {
     (void)ctx;
-    if (lib_rows[i].demo)
-        ui_demo_page(lib_rows[i].demo);
-    else if (i == 0)
+    int k = lib_shown[i];
+    if (lib_rows[k].demo)
+        ui_demo_page(lib_rows[k].demo);
+    else if (k == LIB_SONGS)
         songs_push();
-    else if (i == 3)
+    else if (k == LIB_PLAYLISTS)
         playlists_push();
     else
-        groups_push(i == 1 ? LIB_ARTIST : LIB_ALBUM);
+        groups_push(k == LIB_ARTISTS ? LIB_ARTIST : LIB_ALBUM);
 }
 void library_push(void) {
+    lib_order(); /* read at each open: demo's Edit Library may have changed it while q2ui was away */
     ui_source src = { .count = l_count, .row = l_row, .chosen = l_chosen, .name = "library" };
     ui_push(&list_page, &src);
 }

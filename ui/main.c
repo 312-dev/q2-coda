@@ -31,7 +31,8 @@
  * row reads the battery and Wi-Fi, --told the file demo says the rest of its states in
  * (ui/status.c), --art the folder of Cover Flow's album thumbnails (ui/art.c), --config demo's
  * config.ini, read for Light Mode and Reduce Motion (ui/config.c), --card the card About measures
- * (ui/page_general.c); a test names its own.
+ * (ui/page_general.c), --library-order the Library's order from demo's Edit Library
+ * (ui/page_library.c); a test names its own.
  *
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
@@ -119,6 +120,8 @@ static void parse(int argc, char **argv) {
             art_dir = v, ++i;
         else if (!strcmp(a, "--config"))
             config_file = v, ++i;
+        else if (!strcmp(a, "--library-order"))
+            library_order_file = v, ++i;
         else if (!strcmp(a, "--card"))
             general_card = v, ++i;
         else if (!strcmp(a, "--limit"))

@@ -346,6 +346,7 @@ void control_push(void);      /* Control Center (page_control.c) */
 extern const ui_page page_control;
 /* ---- config.c: the settings q2ui reads from demo's config.ini ---- */
 extern const char *config_file;
+extern const char *library_order_file; /* demo's Edit Library order (ui/page_library.c) */
 extern int config_light_forced, config_motion_forced; /* --light, --reduce-motion */
 int config_int(const char *section, const char *key, int def);
 void config_open(void);      /* read it, and again whenever it is written */
@@ -402,7 +403,7 @@ int lib_playlist_songs(int list, int *songs, int room);    /* a playlist's songs
 typedef struct {
     char title[160], artist[160], album[160];
     int playing, paused, pos_ms, len_s, volume, id;
-    int shuffle, repeat, hearts; /* the modes (repeat: 0 off, 1 all, 2 one) and the song's hearts, -1 unknown */
+    int shuffle, repeat, hearts; /* the modes (repeat: 0 off, 1 one, 2 all) and the song's hearts, -1 unknown */
     uint64_t read_us; /* when this was read: the position is that old */
 } ui_now;
 void now_open(void);              /* watch for changes; a change wakes the loop */

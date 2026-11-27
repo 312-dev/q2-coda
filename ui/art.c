@@ -15,7 +15,7 @@
  * 40 px for a lean's room.
  *
  * An album found with none is not asked again until Cover Flow's folder changes: demo makes the
- * thumbnails after a scan, so on a fresh card the rows are drawn before them. While one is known to
+ * thumbnails only once its Cover Flow page opens, so on a fresh card the rows are drawn before them. While one is known to
  * have none the idle worker looks at the folder's modification time every ART_LOOK_S, and when it
  * has moved, every album with none is asked again (the rows drawn again ask). ponytail: on FAT, whose
  * times are 2 s apart, a write within the window of the read that found none is seen at the next one. */

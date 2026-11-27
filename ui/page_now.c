@@ -1,6 +1,7 @@
 /* Now Playing (docs/oled-design.md#now-playing): the cover as a card at the left, the title, artist
  * and album beside it, the progress bar and the times under them. Centre plays and pauses, the
- * wheel is the volume, Return leaves. While the volume changes, by the wheel here or the side
+ * wheel is the volume, Return leaves, and Centre held opens demo's More (its page of actions on the
+ * song, which demo opens from the dots at the art's foot). While the volume changes, by the wheel here or the side
  * buttons, its level takes the bar's place for VOLUME_SHOW_US, white on the same track, and the
  * times stand aside (demo shows its own volume window then, which q2ui's page is over). The cover is a card of layers (docs/ui-rewrite.md#cards):
  * it lifts as the page opens, settles smaller on pause, and each wheel tick pushes it. */
@@ -25,6 +26,13 @@
 #define MQ_SPEED 35.0f
 #define MQ_FADE 12
 #define TITLE_Y 64
+#define MODE_Y 286 /* the modes row's glyphs' centre */
+/* a lit shuffle or repeat's dot: DOT px, its centre DOT_DY under the glyph's (patch/np_bar.c NP_DOT, NP_DOT_DY) */
+#define DOT 4
+#define DOT_DY 15
+/* More's dots: the glyph's centre, at the right of the art's foot as demo's (tools/ipod.py np_grid, img_more) */
+#define MORE_X 340
+#define MORE_Y 203
 
 struct now_st {
     spring_t push, lift;
@@ -36,6 +44,7 @@ struct now_st {
     uint64_t mq_at;                               /* when the title's turn began, 0: it fits */
     float mq_x;
     char title_s[160], artist_s[160], album_s[160];
+    int marks_s; /* the modes, the hearts and whether a song is loaded, as last drawn */
 };
 
 static int position_ms(void) {
@@ -60,6 +69,8 @@ static void n_event(void *st, const input_t *e) {
         ui_pop();
     } else if (e->type == IN_KEY_UP && e->value == KEY_UI_CENTRE) {
         player_send("toggle");
+    } else if (e->type == IN_KEY_HOLD && e->value == KEY_UI_CENTRE && *now_get()->title) {
+        ui_demo_page("playermore_page"); /* a dialog over demo's page under q2ui (patch/onlinematch.c) */
     } else if (e->type == IN_TICK) {
         char verb[24];
         /* a tick down the wheel is quieter, as on a list it is further down */
@@ -96,6 +107,13 @@ static void n_step(void *st) {
             ui_mark((rect_t){ TEXT_X, 58, SCREEN_W - TEXT_X, 100 });
         }
         ui_mark((rect_t){ 0, BAR_Y - 2, SCREEN_W, 40 });
+        /* the modes and the heart, set from elsewhere too (the car, the phone, demo's own page) */
+        int marks = (n->shuffle > 0) | (n->repeat & 3) << 1 | (n->hearts + 1) << 3 | !*n->title << 12;
+        if (marks != s->marks_s) {
+            s->marks_s = marks;
+            ui_mark((rect_t){ 0, MODE_Y - 20, SCREEN_W, SCREEN_H - (MODE_Y - 20) });
+            ui_mark((rect_t){ TEXT_X, 140, SCREEN_W - TEXT_X, 76 }); /* the heart and More */
+        }
         if (s->volume < 0)
             s->volume = n->volume; /* the level the page opened at: nothing changed */
         else if (n->volume != s->volume && ui_time() - s->volume_at > 600000u) {
@@ -154,19 +172,26 @@ static void n_draw(void *st, rect_t r) {
     if (*n->artist) run_draw(&s->artist, TEXT_X, 96, tok(TOK_SECONDARY), 256);
     if (*n->album) run_draw(&s->album, TEXT_X, 120, tok(TOK_SECONDARY), 256);
     /* the row of modes at the foot, as marks of what is set: shuffle, the song's radio, repeat, Up
-     * Next, each in the theme's own ink for its state (the accent when on). They are not pressed
-     * from here yet: the wheel is the volume and Centre plays. */
+     * Next, each in the theme's own ink for its state (the accent when on), a lit shuffle or repeat
+     * with the accent's dot under it as demo's. Repeat is demo's file's: 0 off, 1 one, 2 all
+     * (patch/coda_rc_shim.c cr_modes). They are not pressed from here yet: the wheel is the volume
+     * and Centre plays. */
     static const float mode_x[] = { 64, 146, 228, 311 };
-    const char *mode[] = { n->shuffle ? "mode_shuffle_on." : "mode_shuffle_d.", "mode_radio_d.",
-                           n->repeat == 2 ? "mode_repeat1_on." : n->repeat ? "mode_repeat_on." : "mode_repeat_d.", "mode_queue_d." };
+    const char *mode[] = { n->shuffle > 0 ? "mode_shuffle_on." : "mode_shuffle_d.", "mode_radio_d.",
+                           n->repeat == 1 ? "mode_repeat1_on." : n->repeat > 0 ? "mode_repeat_on." : "mode_repeat_d.", "mode_queue_d." };
+    const int lit[] = { n->shuffle > 0, 0, n->repeat > 0, 0 };
     for (int k = 0; k < 4; ++k) {
         const image_t *im = icon(mode[k]);
-        if (im) image_draw(im, (rectf_t){ mode_x[k] - (float)im->w / 2, 286 - (float)im->h / 2, (float)im->w, (float)im->h }, 0, 0, 256, -1);
+        if (im) image_draw(im, (rectf_t){ mode_x[k] - (float)im->w / 2, MODE_Y - (float)im->h / 2, (float)im->w, (float)im->h }, 0, 0, 256, -1);
+        if (lit[k]) fill_round((rectf_t){ mode_x[k] - DOT / 2, MODE_Y + DOT_DY - DOT / 2, DOT, DOT }, DOT / 2, 0, RGB_ACCENT, 1, 0);
     }
     /* liked, and not: the image's box at y 146 puts its ink's top on demo's, y 155 (ui/tools/compare.py on the
      * emulator's shots of the same song, m17c-04 and -09) */
     const image_t *heart = icon(n->hearts > 0 ? "np_fav_d." : "np_unfav_d.");
     if (heart && *n->title) image_draw(heart, (rectf_t){ 194, 146, (float)heart->w, (float)heart->h }, 0, 0, 256, -1);
+    const image_t *more = icon("np_more_d.");
+    if (more && *n->title)
+        image_draw(more, (rectf_t){ MORE_X - (float)more->w / 2, MORE_Y - (float)more->h / 2, (float)more->w, (float)more->h }, 0, 0, 256, -1);
     if (s->volume_at) {
         /* the volume's level in the bar's place: a shorter track between two marks, the level in white */
         float level = (float)s->volume / 100, x0 = BAR_X + 22, w = BAR_W - 44;
