@@ -3293,8 +3293,9 @@ def test_car_feed_reader_sleeps_while_no_source_writes(player, songs, tmp):
                                                                          'Q2PLAYER_FEED': str(tmp/'feedidle.fifo')}), 1)
     t = trace.read_text()
     fds = r'(?:\[\{fd=\d+, events=POLLIN\}\]|0x[0-9a-f]+)'  # strace may not be let read the array
-    timed_out = re.findall(rf'poll\({fds}, 1, 100\) += 0 \(Timeout\)', t)
-    waits = re.findall(rf'poll\({fds}, 1, -1', t)
+    # poll on x86-64; arm64 has only ppoll, whose timeout strace prints as a timespec (NULL: none)
+    timed_out = re.findall(rf'(?:poll\({fds}, 1, 100|ppoll\({fds}, 1, \{{tv_sec=0, tv_nsec=100000000\}}, NULL, 0)\) += 0 \(Timeout\)', t)
+    waits = re.findall(rf'(?:poll\({fds}, 1, -1|ppoll\({fds}, 1, NULL)', t)
     assert not timed_out and len(waits) == 1, f'{len(timed_out)} timed-out polls, {len(waits)} waits'
     return f'one wait, no timed-out poll in 4 s idle'
 
