@@ -19,8 +19,8 @@
 static struct {
     char *text;
     unsigned used, room;
-    unsigned (*row)[4]; /* title, artist, album, file */
-    int *id, *track;
+    unsigned (*row)[5]; /* title, artist, album, file, genre */
+    int *id, *track, *added; /* added: time_create, when the scan found it */
     int *sec; /* a CUE track's or a server row's length in seconds; -1 - its start: the file's, from the durations cache */
     struct group {
         int n;       /* groups */
@@ -47,13 +47,18 @@ const int *lib_ids(void) { return lib.id; }
 const char *lib_album(int i) { return lib.text + lib.row[i][2]; }
 int lib_track(int i) { return lib.track[i]; }
 
-/* Artists and Albums: the songs put in the group's order (its name, case folded; inside an album
- * by track, inside an artist by title, which is the order they were read in), and the places a
- * new name starts. Made the first time a list of them opens: a sort of the songs' numbers. */
+/* Artists, Albums and Genres: the songs put in the group's order (its name, case folded, the songs
+ * with none last as demo's Unknown row is; inside an album by track, inside an artist or a genre by
+ * title, which is the order they were read in), and the places a new name starts. Made the first
+ * time a list of them opens: a sort of the songs' numbers. */
 static int group_kind;
-static const char *group_key(int song) { return lib.text + lib.row[song][group_kind == LIB_ALBUM ? 2 : 1]; }
+static const char *group_key(int song) {
+    return lib.text + lib.row[song][group_kind == LIB_ALBUM ? 2 : group_kind == LIB_GENRE ? 4 : 1];
+}
+/* two names in the groups' order: case folded, none after every name */
+static int key_order(const char *a, const char *b) { return !*a || !*b ? !*a - !*b : strcasecmp(a, b); }
 static int group_order(const void *a, const void *b) {
-    int x = *(const int *)a, y = *(const int *)b, c = strcasecmp(group_key(x), group_key(y));
+    int x = *(const int *)a, y = *(const int *)b, c = key_order(group_key(x), group_key(y));
     if (c) return c;
     if (group_kind == LIB_ALBUM && lib.track[x] != lib.track[y]) return lib.track[x] - lib.track[y];
     return x - y;
@@ -75,7 +80,7 @@ int lib_groups(int kind) { return group(kind)->n; }
 const char *lib_group_name(int kind, int g) {
     group_kind = kind;
     const char *name = group_key(group(kind)->order[group(kind)->first[g]]);
-    return *name ? name : kind == LIB_ALBUM ? "Unknown Album" : "Unknown Artist";
+    return *name ? name : kind == LIB_ALBUM ? "Unknown Album" : kind == LIB_GENRE ? "Unknown Genre" : "Unknown Artist";
 }
 const char *lib_group_artist(int g) { return lib_artist(group(LIB_ALBUM)->order[group(LIB_ALBUM)->first[g]]); }
 const int *lib_group_songs(int kind, int g, int *n) {
@@ -91,7 +96,7 @@ int lib_group_of(int kind, int song) {
     const char *key = group_key(song);
     while (lo < hi) {
         int mid = (lo + hi + 1) / 2;
-        if (strcasecmp(group_key(k->order[k->first[mid]]), key) <= 0) lo = mid;
+        if (key_order(group_key(k->order[k->first[mid]]), key) <= 0) lo = mid;
         else hi = mid - 1;
     }
     return k->n ? lo : -1;
@@ -112,15 +117,16 @@ int lib_open(const char *path, const char *catalogue, int limit) {
         sqlite3_finalize(q);
     }
     const char *sql =
-        "select name, songer, id, album, track, fileurl, sec from (select name, songer, id, album, track, fileurl, "
-        "case when time_end > time then time_end - time else -1 - max(time, 0) end as sec from main.songtable%s) "
+        "select name, songer, id, album, track, fileurl, sec, style, time_create from (select name, songer, id, album, "
+        "track, fileurl, case when time_end > time then time_end - time else -1 - max(time, 0) end as sec, style, "
+        "time_create from main.songtable%s) "
         "order by name collate nocase, id limit ?";
     /* a server row's length is the catalogue's (servermeta, patch/catalogue.c ix_build), which a catalogue
      * without it leaves unknown */
     static const char *const servers[] = {
         " union all select s.name, s.songer, s.id, s.album, s.track, s.fileurl, coalesce((select m.seconds from "
-        "cat.servermeta m where m.id = s.id), 0) from cat.servertable s",
-        " union all select name, songer, id, album, track, fileurl, 0 from cat.servertable",
+        "cat.servermeta m where m.id = s.id), 0), s.style, s.time_create from cat.servertable s",
+        " union all select name, songer, id, album, track, fileurl, 0, style, time_create from cat.servertable",
     };
     char text[640];
     int ok = 0;
@@ -141,6 +147,7 @@ int lib_open(const char *path, const char *catalogue, int limit) {
             lib.id = realloc(lib.id, (size_t)lib.rows * sizeof *lib.id);
             lib.track = realloc(lib.track, (size_t)lib.rows * sizeof *lib.track);
             lib.sec = realloc(lib.sec, (size_t)lib.rows * sizeof *lib.sec);
+            lib.added = realloc(lib.added, (size_t)lib.rows * sizeof *lib.added);
         }
         lib.id[lib.n] = sqlite3_column_int(q, 2);
         lib.row[lib.n][2] = keep(sqlite3_column_text(q, 3));
@@ -149,12 +156,31 @@ int lib_open(const char *path, const char *catalogue, int limit) {
         lib.row[lib.n][1] = keep(sqlite3_column_text(q, 1));
         lib.row[lib.n][3] = keep(sqlite3_column_text(q, 5));
         lib.sec[lib.n] = sqlite3_column_int(q, 6);
+        lib.row[lib.n][4] = keep(sqlite3_column_text(q, 7));
+        lib.added[lib.n] = sqlite3_column_int(q, 8);
         ++lib.n;
     }
     if (rc != SQLITE_DONE) fprintf(stderr, "q2ui: songs: %s\n", sqlite3_errmsg(db));
     sqlite3_finalize(q);
     sqlite3_close(db);
     return 0;
+}
+
+/* ---- Recently Added: every song, the newest the scan found first, songs found in the same second in the list's order
+ * (demo's getAllMusic(3) by time_create, descending, its index keeping equal times in rowid order) ---- */
+static int newest_first(const void *a, const void *b) {
+    int x = *(const int *)a, y = *(const int *)b;
+    if (lib.added[x] != lib.added[y]) return (lib.added[x] < lib.added[y]) - (lib.added[x] > lib.added[y]);
+    return (lib.id[x] > lib.id[y]) - (lib.id[x] < lib.id[y]);
+}
+const int *lib_recent(void) {
+    static int *order;
+    if (!order && lib.n) {
+        order = malloc((size_t)lib.n * sizeof *order);
+        for (int i = 0; i < lib.n; ++i) order[i] = i;
+        qsort(order, (size_t)lib.n, sizeof *order, newest_first);
+    }
+    return order;
 }
 
 /* ---- song lengths (docs/oled-design.md#song-rows, Song Length): a CUE track's from its start and end, a server

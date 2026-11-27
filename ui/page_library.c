@@ -7,7 +7,8 @@
 
 #include "q2ui.h"
 
-/* ---- a group's songs, or a playlist's (kind -1) ---- */
+/* ---- a group's songs (kind a LIB_ kind), a playlist's, or Recently Added's ---- */
+enum { PLAYLIST = -1, RECENT = -2 };
 struct songs_st {
     char name[32];
     int kind, group, n;
@@ -19,6 +20,7 @@ static int s_count(void *ctx) { return ((struct songs_st *)ctx)->n; }
 static void s_row(void *ctx, int i, ui_row *out) {
     struct songs_st *s = ctx;
     out->title = lib_title(s->songs[i]);
+    if (s->kind == LIB_GENRE || s->kind == RECENT) out->detail = lib_artist(s->songs[i]); /* a mixed list's */
     if (s->kind == LIB_ALBUM) {
         /* an album's tracks: the number in its column, no artist */
         int track = lib_track(s->songs[i]);
@@ -28,9 +30,9 @@ static void s_row(void *ctx, int i, ui_row *out) {
     /* the length on the right column: an album's under Song Length's Albums or All Lists, an artist's under All Lists
      * (patch/song_rows.c song_row); a playlist's song has its artist there instead */
     int lengths = config_song_length();
-    if (s->kind >= 0 && (lengths == SONG_LENGTH_ALL || (lengths == SONG_LENGTH_ALBUMS && s->kind == LIB_ALBUM)))
+    if (s->kind != PLAYLIST && (lengths == SONG_LENGTH_ALL || (lengths == SONG_LENGTH_ALBUMS && s->kind == LIB_ALBUM)))
         out->length = lib_length(s->songs[i], s->len, sizeof s->len);
-    else if (s->kind < 0)
+    else if (s->kind == PLAYLIST)
         out->value = lib_artist(s->songs[i]); /* a playlist's: its artist on the right column */
 }
 static void s_chosen(void *ctx, int i) {
@@ -52,13 +54,25 @@ static void group_songs_push(int kind, int group) {
     ui_push(&list_page, &src);
 }
 
+/* Recently Added: every song, the newest added first, each with its artist inline as Songs' (patch/song_rows.c: it
+ * is on demo's Songs page) */
+static void recent_push(void) {
+    struct songs_st *s = calloc(1, sizeof *s);
+    s->kind = RECENT, s->n = lib_songs(), s->songs = lib_recent();
+    s->ids = malloc((size_t)(s->n ? s->n : 1) * sizeof *s->ids);
+    for (int i = 0; i < s->n; ++i) s->ids[i] = lib_ids()[s->songs[i]];
+    snprintf(s->name, sizeof s->name, "recent");
+    ui_source src = { .count = s_count, .row = s_row, .chosen = s_chosen, .held = s_held, .song = s_song, .ctx = s, .name = s->name };
+    ui_push(&list_page, &src);
+}
+
 /* ---- Playlists, and a playlist's songs ---- */
 #define PLAYLISTS_MAX 101 /* stock's ids 1 to 100, and On-The-Go */
 #define PLAYLIST_SONGS 5000
 static void playlist_push(int list) {
     struct songs_st *s = calloc(1, sizeof *s);
     int *songs = malloc(PLAYLIST_SONGS * sizeof *songs);
-    s->kind = -1, s->group = list;
+    s->kind = PLAYLIST, s->group = list;
     s->n = lib_playlist_songs(list, songs, PLAYLIST_SONGS);
     s->songs = songs;
     s->ids = malloc((size_t)(s->n ? s->n : 1) * sizeof *s->ids);
@@ -92,7 +106,7 @@ static void playlists_push(void) {
     ui_push(&list_page, &src);
 }
 
-/* ---- Artists, Albums ---- */
+/* ---- Artists, Albums, Genres ---- */
 static int g_count(void *ctx) { return lib_groups((int)(long)ctx); }
 /* An album's cover, under each artist its songs name until one is there (ui/art.c) */
 static const image_t *album_cover(int g) {
@@ -150,7 +164,8 @@ void song_menu(int song) {
 }
 static void groups_push(int kind) {
     ui_source src = { .count = g_count, .row = g_row, .chosen = g_chosen, .ctx = (void *)(long)kind,
-                      .name = kind == LIB_ARTIST ? "artists" : "albums", .letters = 1, .row_h = kind == LIB_ALBUM ? 52 : 0 };
+                      .name = kind == LIB_ARTIST ? "artists" : kind == LIB_GENRE ? "genres" : "albums", .letters = 1,
+                      .row_h = kind == LIB_ALBUM ? 52 : 0 };
     ui_push(&list_page, &src);
 }
 
@@ -159,17 +174,17 @@ static void groups_push(int kind) {
  * lr_default: Shuffle h, Songs s, Playlists p, Artists a, Albums l, Genres g, Years e, Ratings r,
  * My Fav f, Recently Added n, Recent c, Most Played m, ...; the ones q2ui has not are left out),
  * in demo's default order. */
-enum { LIB_SONGS, LIB_PLAYLISTS, LIB_ARTISTS, LIB_ALBUMS, LIB_ROWS = 7 };
+enum { LIB_SONGS, LIB_PLAYLISTS, LIB_ARTISTS, LIB_ALBUMS, LIB_GENRES, LIB_RECENT = 7, LIB_ROWS = 9 };
 static const struct {
     char letter;
     const char *title, *demo;
 } lib_rows[LIB_ROWS] = { { 's', "Songs", 0 },           { 'p', "Playlists", 0 },          { 'a', "Artists", 0 },
-                         { 'l', "Albums", 0 },          { 'e', "Years", "era_page" },     { 'r', "Ratings", "ratings_page" },
-                         { 'm', "Most Played", "mostplayed_page" } };
+                         { 'l', "Albums", 0 },          { 'g', "Genres", 0 },             { 'e', "Years", "era_page" },
+                         { 'r', "Ratings", "ratings_page" }, { 'n', "Recently Added", 0 },  { 'm', "Most Played", "mostplayed_page" } };
 /* Years, Ratings and Most Played are demo's pages, opened through the gate (page_home.c).
- * Playlists is q2ui's own, read from stock's table: no stock page name opens demo's.
- * ponytail: Genres, Composers, Recently Added and Long Songs are reached through Home's Old Menus
- * until each has a page here or an opener the gate is seen to run. */
+ * Playlists, Genres and Recently Added are q2ui's own, read from stock's tables.
+ * ponytail: My Favorites, Recent and Long Songs are reached through Home's Old Menus until each has
+ * a page here or an opener the gate is seen to run; demo's Library has no Composers row. */
 
 /* The user's order and choice of rows, as demo's Library shows them: Edit Library's file (written by demo's editor or
  * q2ui's, ui/page_edit.c) read against demo's default order (order_read). Each of q2ui's rows shows unless hidden:
@@ -216,8 +231,10 @@ static void l_chosen(void *ctx, int i) {
         songs_push();
     else if (k == LIB_PLAYLISTS)
         playlists_push();
+    else if (k == LIB_RECENT)
+        recent_push();
     else
-        groups_push(k == LIB_ARTISTS ? LIB_ARTIST : LIB_ALBUM);
+        groups_push(k == LIB_ARTISTS ? LIB_ARTIST : k == LIB_GENRES ? LIB_GENRE : LIB_ALBUM);
 }
 void library_push(void) {
     lib_order(); /* read at each open: demo's Edit Library may have changed it while q2ui was away */
@@ -232,8 +249,10 @@ int library_route(const char *name) {
         library_push();
     else if (!strcmp(name, "songs"))
         songs_push();
-    else if (!strcmp(name, "artists") || !strcmp(name, "albums"))
-        groups_push(name[1] == 'r' ? LIB_ARTIST : LIB_ALBUM);
+    else if (!strcmp(name, "artists") || !strcmp(name, "albums") || !strcmp(name, "genres"))
+        groups_push(name[1] == 'r' ? LIB_ARTIST : name[0] == 'g' ? LIB_GENRE : LIB_ALBUM);
+    else if (!strcmp(name, "recent"))
+        recent_push();
     else if (!strcmp(name, "playlists"))
         playlists_push();
     else if (sscanf(name, "playlist.%d", &group) == 1 && group >= 0 && group <= 100)
