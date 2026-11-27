@@ -47,6 +47,11 @@ CASES = {
  'no-volume-bar': ('ui/page_now.c', '        s->volume = to, s->volume_at = ui_time();', '        s->volume = to;', 'pages', 'shows the volume in the bar'),
  'volume-bar-stays': ('ui/page_now.c', '    if (s->volume_at && ui_time() - s->volume_at >= VOLUME_SHOW_US) s->volume_at = 0,', '    if (0 && s->volume_at) s->volume_at = 0,', 'pages', 'shows the volume in the bar'),
  'dithers-share-noise': ('ui/fb.c', 'narrow(src[i], noise[((r.x + i + 17) & 63) * 64])', 'narrow(src[i], dither64[(y & 63) * 64 + ((r.x + i) & 63)])', 'engine', 'keeps its mean at 6 bits'),
+ 'panel-any-link': ('ui/panel.c', "    if (!dsi || dsi[DPI_COLOR_CODING / 4] != PANEL_CODING || dsi[VID_PKT_SIZE / 4] != PANEL_PKT) return 0;", "    if (!dsi) return 0;", 'panel', "a link that is not the Q2's"),
+ 'panel-no-wait': ('ui/panel.c', "        if (waited == 20) return 0; /* 20 ms and still full: left for the next time */", "        if (waited == 20) break;", 'panel', 'FIFOs that stay full'),
+ 'panel-keep-ignored': ('ui/panel.c', "    if (panel_keep) return 0;", "", 'panel', '--panel-mode keep'),
+ 'panel-wrong-word': ('ui/panel.c', "    dsi[GEN_PLD_DATA / 4] = COLMOD | COLMOD_24 << 8;", "    dsi[GEN_PLD_DATA / 4] = COLMOD | 0x55 << 8;", 'panel', 'sent COLMOD 0x77'),
+ 'hup-plain-end': ('ui/ui.c', "        if (reload) ui_quit(UI_EXIT_RELOAD);", "        if (reload) ui_quit(0);", 'live', 'SIGHUP ends q2ui with its reload code'),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

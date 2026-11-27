@@ -5,13 +5,17 @@
  * wheel, Centre, Return and touches to it (ringnav_input), as it does for q2video and a card game.
  * Play/Pause and the side buttons stay demo's, so the music's keys work as they do on any page.
  *
- *  - q2ui ends (Return on its first page, or a crash): demo has the screen again, whole, and
- *    keeps it until the next start of demo. Return on q2ui's first page is the way out of q2ui.
+ *  - q2ui ends by itself (its Old Menus row): demo has the screen again, whole, and keeps it
+ *    until the next start of demo.
+ *  - q2ui is ended by a signal (a kill from a shell, a fault): it is started again, unless it had
+ *    run under Q2UI_RAN_MS, when demo keeps the screen rather than loop.
  *  - demo needs the screen (a window other than Home or Now Playing opened by itself: the USB
  *    prompt, a pairing request, Shut Down?): q2ui is ended so the window can be seen and
  *    answered, and started again once Home is back on top. Now Playing is not such a window:
  *    stock opens it when a song is chosen, and q2ui has its own over it. Nor is the volume's
  *    display, which every volume step brings up for a moment.
+ *  - q2ui ends with Q2UI_RELOAD (kill -HUP sends it there): it is started again on the next pass,
+ *    with whatever /mnt/data/q2ui.args now says. No frame of demo's shows between.
  *  - q2ui asks for a page of demo's it has not got: it names the page in Q2UI_ASK and ends with
  *    Q2UI_ASKED. demo opens that page, and starts q2ui again when the page has been left.
  *
@@ -24,8 +28,10 @@
 #define Q2UI_BIN "/usr/bin/q2ui"
 #define Q2UI_TARGET "/mnt/data/ui-target"
 #define Q2UI_ASK "/tmp/q2ui.open"
-#define Q2UI_ASKED 3     /* its exit code with a page named in Q2UI_ASK (ui/main.c ui_demo_page) */
+#define Q2UI_ASKED 3     /* its exit code with a page named in Q2UI_ASK (ui/q2ui.h UI_EXIT_ASK) */
+#define Q2UI_RELOAD 4    /* and to be started again at once (UI_EXIT_RELOAD: kill -HUP, for new options) */
 #define Q2UI_OPEN_MS 1500 /* a page asked for that has not come up by now is not coming */
+#define Q2UI_RAN_MS 10000 /* a q2ui a signal ended is started again if it had run this long */
 #define Q2UI_DUE (-1) /* to be started on the next pass: already the screen's holder */
 
 static struct {
@@ -34,6 +40,7 @@ static struct {
     char took, back;   /* demo ended it for a window of its own; start it again on Home */
     char booted;       /* it has been started once: the boot animation is over */
     char opening;      /* a page q2ui asked for is on its way up: Home on top does not yet mean it was left */
+    unsigned started_at; /* time_now_ms when q2ui was last started */
     unsigned asked_at; /* time_now_ms when it was asked for */
 } qu __attribute__((section(".scratch")));
 
@@ -55,12 +62,24 @@ int q2ui_on(void) {
 }
 
 /* Nothing of demo's on top that the user has to see or answer: Home, Now Playing, the volume's
- * own display (it comes up at every volume step and goes by itself), or no window yet (demo still
- * starting) */
+ * own display (it comes up at every volume step and goes by itself), the USB Debugging page
+ * (usb_ui.c: it stands on top from boot for as long as the cable is in with debugging on, and
+ * only says so; with it counted, a Q2 on a developer's cable never reached q2ui), or no window yet
+ * (demo still starting) */
 static int on_home(void) {
     void *top = window_manager_get_top_window(window_manager());
     const char *name = top ? widget_get_prop_str(top, "name", "") : "home_page";
-    return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "playing_page") || !tk_strcmp(name, "volume_dialog");
+    return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "playing_page") || !tk_strcmp(name, "volume_dialog") ||
+           !tk_strcmp(name, "usbdebug_page");
+}
+
+/* A line in demo's log for each thing the gate does: with none, a Q2 that came up on demo's menus
+ * said nothing of why. */
+void ulog(char level, const char *src, const char *msg);
+static void said(const char *what, int n) {
+    char line[64];
+    tk_snprintf(line, sizeof line, "%s %d", what, n);
+    ulog('I', "q2ui", line);
 }
 
 /* The page q2ui named as it left, opened: a stock page's name and nothing else (lower case and
@@ -91,6 +110,8 @@ static void start(void) {
     }
     qu.pid = pid > 0 ? pid : 0;
     qu.took = 0;
+    qu.started_at = (unsigned)time_now_ms();
+    said("started, pid", qu.pid);
     if (!qu.pid) widget_invalidate_force(window_manager(), 0);
 }
 
@@ -111,9 +132,15 @@ void q2ui_poll(void) {
     }
     int status = 0;
     if (waitpid(qu.pid, &status, 1)) { /* WNOHANG: it has ended */
+        unsigned ran = (unsigned)time_now_ms() - qu.started_at;
+        said(qu.took ? "ended for a window of demo's, status" : "ended, status", status);
         qu.pid = 0;
         qu.back = qu.took;
+        /* ended by a signal that was not the gate's (a kill from a shell, a fault): started again,
+         * unless it had only just started, which is a q2ui that cannot run and would loop */
+        if (!qu.took && (status & 0x7f) && ran >= Q2UI_RAN_MS) qu.pid = Q2UI_DUE;
         if (!qu.took && status == Q2UI_ASKED << 8) open_asked();
+        if (!qu.took && status == Q2UI_RELOAD << 8) qu.pid = Q2UI_DUE;
         widget_invalidate_force(window_manager(), 0);
         return;
     }
@@ -122,6 +149,7 @@ void q2ui_poll(void) {
         tk_snprintf(cmd, sizeof cmd, "kill %d", qu.pid); /* demo imports no kill() */
         system(cmd);
         qu.took = 1;
+        ulog('I', "q2ui", widget_get_prop_str(window_manager_get_top_window(window_manager()), "name", "a window"));
     }
 }
 

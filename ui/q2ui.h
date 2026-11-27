@@ -55,6 +55,12 @@ unsigned fb_refresh_us(void); /* the panel's refresh period, from its timings (1
  * into and returns the other. */
 uint32_t *canvas_swap(uint32_t *other);
 
+/* ---- panel.c: the panel's colour mode ---- */
+int panel_24bit(void);           /* tell the panel to take 24 bits a pixel; 1 when the command was sent */
+extern const char *panel_mem;    /* what is mapped for the DSI host's registers (/dev/mem), */
+extern unsigned panel_base;      /* and where in it they are (a test's file has them at 0) */
+extern int panel_keep;           /* 1: the panel's mode is never touched */
+
 /* ---- anim.c: the frame clock and what moves by it ---- */
 /* The time every motion is stepped to, microseconds: read once a frame, so one frame shows one
  * instant. A script's clock is its own (ui_clock_fake). */
@@ -226,6 +232,8 @@ void ui_route(char *out, size_t room);
 void ui_select_top(int sel);
 void ui_push(const ui_page *p, void *arg);
 void ui_pop(void); /* the top page closes; the last page's pop ends the program */
+#define UI_EXIT_ASK 3    /* its exit code with a page of demo's named (ui_demo_page) */
+#define UI_EXIT_RELOAD 4 /* and to be started again at once: SIGHUP's, for new options */
 void ui_quit(int code);
 int ui_quitting(int *code); /* whether ui_quit was called, and with what */
 void ui_mark(rect_t r);  /* r is to be drawn again and shown */
