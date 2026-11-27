@@ -276,6 +276,13 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 | `q2sendd.c` | `q2sendd`: today's `q2send` run as a child, its incoming requests asked over Q2UI/1, a trusted sender toasted, the card held while a computer has it, the radio held | `main`, `look_ask`, `read_ui`, `look_state` | [vamp-os-services](vamp-os-services.md#localsend) |
 | `Makefile` | `q2sendd` and `q2send` (`patch/localsend*.c`, `LS_HOST`, OpenSSL), for the image (`os/package/q2sendd`) and this machine | | [vamp-os-services](vamp-os-services.md#localsend) |
 
+## carrd/: Vamp OS's Car Remote
+
+| File | For | Enter at | Doc |
+| --- | --- | --- | --- |
+| `q2carrd.c` | `q2carrd`: today's `coda-rc` run while `[Q2POD] CARREMOTE` is on, its pairing code asked over Q2UI/1, a car's cover app started over Q2PKG/1, the radio held over Q2NET/1 | `main`, `look_pair`, `read_ui`, `look_wake`, `hold_radio` | [carrd](carrd.md) |
+| `Makefile` | `q2carrd` and `coda-rc` (`patch/coda_rc*.c`, `CODA_LIBC`, SQLite), for the image (`os/package/q2carrd`) and this machine | | [carrd](carrd.md) |
+
 ## libd/: Vamp OS's library service
 
 | File | For | Enter at | Doc |
@@ -416,6 +423,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | q2sysd | `sysd.py`: q2sysd built for this machine on a stand-in `/sys` and `/dev/input`: the power key's press and hold, the backlight, the battery file, the USB modes and the cable, Q2SYS/1, the watchdog through `wdt_shim.c` (an `LD_PRELOAD` stand-in for the driver's ioctls) | `cc` |
 | q2dacloop | `dacloop.py`: q2dacloop built for this machine between alsa-lib's file PCMs (bit for bit, the rate, the prebuffer, the pitch file), and `dacloop_pitch.c`'s simulation of the fill level against computers whose clocks are off | `cc`, libasound |
 | q2sendd | `sendd.py`: q2sendd and today's q2send built for this machine beside stand-in Q2UI/1, Q2NET/1 and Q2SYS/1 sockets, a LocalSend sender made in the test over TLS: accepted, declined, no UI, withdrawn, trusted, held, SIGTERM | `cc`, OpenSSL |
+| q2carrd | `carrd.py`: q2carrd, coda-rc and q2playd built for this machine beside a stand-in q2player and Q2UI/1, Q2NET/1, Q2PKG/1 sockets, a phone over TCP: paired off the card, browsing, playing, Now Playing and the queue followed; the switch, Cancel, the timeout, the toasts, a cover's app, the radio, SIGTERM | `cc`, SQLite |
 | q2libd | `libd.py`: q2libd built for this machine on a stand-in card of songs ffmpeg makes: tags, ids across scans, catalogues, q2ui's query, the service's first library, Q2LIB/1's transcripts | `cc`, ffmpeg, the host's FFmpeg and SQLite |
 | q2netd | `netd.py`: q2netd built for this machine with a stand-in wpa_supplicant: the radio, DHCP, Smart Wi-Fi's holds, the saved networks, scans, Q2NET/1 | `cc`, python3 |
 | q2btd | `btd.py`: q2btd built for this machine against `btd_standin.c` (BlueZ and bluez-alsa on a bus of the test's) and a stand-in q2playd: power, the auto-reconnect, pairing and the agent, the codec, the battery, the output, absolute volume, the buttons, Q2BT/1; `os_bt.py` runs it in the image beside the image's own daemons under QEMU | `cc`, libdbus-1's headers, `dbus-daemon` |

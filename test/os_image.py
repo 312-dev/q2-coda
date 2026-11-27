@@ -19,7 +19,8 @@ in the emulator (~/q2-emu). The boot passes when the record shows rcS's order (f
 partition, every module of Shanling's script in its order with its parameters, the framebuffer) before
 either service starts, q2ui draws a frame, q2player connects to q2playd, and a song asked for over Q2PLAY/1
 reaches q2player and its end comes back; then adb over Wi-Fi's key rules, and q2sysd's battery file, a press of the
-power key turning the screen off and on, and its hold starting init's shutdown.
+power key turning the screen off and on, and its hold starting init's shutdown; and Car Remote, nothing on TCP
+7720 while off, a phone paired and browsing the library while on (docs/carrd.md).
 
 --card-boot runs it as today's Vamp starts it from the card (patch/q2vampos.sh): rcS and then runsvdir with no init
 of the image's own, beside stand-ins for today's Wi-Fi and Wi-Fi adbd, /mnt/data already mounted and /proc/modules
@@ -29,7 +30,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark), `carrd-off` (no q2carrd), `carrd-card` (with --card-boot: q2carrd's run script not waiting on a card boot). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -195,7 +196,8 @@ def check_image(build, fs, manifest, perturb=None):
     check(os.access(fs/'usr/bin/q2-iap', os.X_OK) and os.access(fs/'usr/libexec/vamp/q2car', os.X_OK) and os.access(fs/'usr/bin/q2car', os.X_OK)
           and ko.exists() and hashlib.sha256(ko.read_bytes()).hexdigest() == uac1.PIN[0], "Car Audio: q2-iap, q2car and tools/uac1.py's pinned usb_f_uac1.ko")
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['adb-wifi', 'adbd', 'bluealsa', 'bluetoothd', 'bt-attach', 'dbus', 'q2-airplay', 'q2btd', 'q2dacloop', 'q2dlnad', 'q2libd',
+    check(os.access(fs/'usr/bin/q2carrd', os.X_OK) and os.access(fs/'usr/bin/coda-rc', os.X_OK), "Car Remote: q2carrd and today's coda-rc")
+    check(services == ['adb-wifi', 'adbd', 'bluealsa', 'bluetoothd', 'bt-attach', 'dbus', 'q2-airplay', 'q2btd', 'q2carrd', 'q2dacloop', 'q2dlnad', 'q2libd',
                        'q2netd', 'q2pkgd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sendd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(os.access(fs/'usr/bin/q2sendd', os.X_OK) and os.access(fs/'usr/bin/q2send', os.X_OK) and (fs/'etc/sv/q2sendd/down').exists()
@@ -518,6 +520,48 @@ def lib_check(fs):
           out[2].startswith('song id=1 title=song1 ') and out[2].endswith(' time=60 source=card'), f'q2libd: Q2LIB/1 answers on the image ({out})')
 
 
+def set_carremote(data, on):
+    """[Q2POD] CARREMOTE in config.ini, the rest of the file kept (q2carrd looks at it once a second)"""
+    ini = data/'config.ini'
+    text = re.sub(r'\n?\[Q2POD\]\nCARREMOTE=\d\n', '\n', ini.read_text() if ini.exists() else '')
+    ini.write_text(text.rstrip('\n') + f'\n[Q2POD]\nCARREMOTE={1 if on else 0}\n')
+
+
+def carrd_check(fs, data):
+    """Car Remote in the booted image (docs/carrd.md): nothing on TCP 7720 while [Q2POD] CARREMOTE is off; on, q2carrd
+    starts coda-rc, a phone pairs with the code coda-rc shows (read from /tmp/coda-rc.pair: q2ui draws it on a card)
+    and browses q2libd's library, song1.wav with its 60 s; off again, the port closes"""
+    import coda_rc_client as client  # noqa: E402  (tools/, on the path as vampos is)
+    check(not adb_open(7720), 'Car Remote: nothing listens on 7720 while it is off (its default)')
+    set_carremote(data, True)
+    end = time.monotonic() + 60
+    while time.monotonic() < end and not adb_open(7720):
+        time.sleep(0.5)
+    if not adb_open(7720):
+        return check(False, 'Car Remote: on, coda-rc listens on 7720')
+
+    def code(_prompt):
+        pair = fs/'tmp/coda-rc.pair'
+        until = time.monotonic() + 30
+        while time.monotonic() < until and not pair.exists():
+            time.sleep(0.2)
+        return pair.read_text().split('\n')[0] if pair.exists() else '000000'
+    try:
+        with tempfile.TemporaryDirectory() as keys:
+            phone = client.connect('127.0.0.1', 7720, pathlib.Path(keys), name='os_image', ask=code)
+            items = phone.browse('tracks')['items']
+            phone.sock.close()
+        got = [(i['title'], i.get('duration_ms')) for i in items]
+    except Exception as e:  # noqa: BLE001  (the phone's side: any failure is the check's)
+        got = repr(e)
+    check(got == [('song1', 60000)], f"Car Remote: a phone pairs and browses q2libd's library over coda-rc ({got})")
+    set_carremote(data, False)
+    end = time.monotonic() + 15
+    while time.monotonic() < end and adb_open(7720):
+        time.sleep(0.5)
+    check(not adb_open(7720), 'Car Remote: off again, coda-rc stopped')
+
+
 def netd_check(fs, card):
     """q2netd in the booted image: Q2NET/1 answers; with no saved network the radio is off, unless the Wi-Fi adbd let a
     computer in (adb_checks, before this), whose use mark holds it on for 30 minutes (Smart Wi-Fi's rule)"""
@@ -638,6 +682,11 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/sv/q2playd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'pkgd-off':  # no q2pkgd serve: nothing starts an app
         (fs/'etc/sv/q2pkgd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
+    if perturb == 'carrd-off':  # no q2carrd: Car Remote never starts
+        (fs/'etc/sv/q2carrd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
+    if perturb == 'carrd-card':  # q2carrd's run script not waiting on a card boot: two coda-rcs on one Q2
+        r = fs/'etc/sv/q2carrd/run'
+        r.write_text(r.read_text().replace('if [ -e /run/vamp/card-boot ]; then', 'if false; then'))
     if perturb == 'adb-off':  # no Wi-Fi adbd at all
         (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'module':
@@ -694,7 +743,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (emu/'data/wpa_supplicant.conf').write_text('network={\n\tssid="Home"\n\tpsk="secret123"\n}\n')  # networks saved
         # a zone chosen and Light Mode never: the zone's clock at midday, so Auto is light (light_check)
         zone_index, zone_want = day_zone(fs)
-        (emu/'data/config.ini').write_text(f'[SYSSET]\nTIMEZONE={zone_index}\n' + ('[IPOD]\nLIGHT=0\n' if perturb == 'light-dark' else ''))
+        (emu/'data/config.ini').write_text(f'[SYSSET]\nTIMEZONE={zone_index}\n' + ('[IPOD]\nLIGHT=0\n' if perturb == 'light-dark' else '')
+                                           + '[Q2POD]\nCARREMOTE=1\n')  # on: the image's own must still not start
         (emu/'modules').write_text(''.join(f'{ko[:-3]} 16384 0 - Live 0x00000000\n' for ko, _ in want))
         extra = ['--bind', emu/'data', '/mnt/data', '--ro-bind', emu/'modules', '/proc/modules']
     outer = []
@@ -730,11 +780,15 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             netd_check(fs, card)
         if not card and proc.poll() is None:
             launch_check(fs)
+        if not card and proc.poll() is None:
+            carrd_check(fs, fs/'mnt/data')
         if card and proc.poll() is None:
             outer_check(outer, emu/'record', outer_adbd)
             got = sys_heat(fs)
             check(got == 'heat off', f"q2sysd: no heat of its own on a card boot, today's Vamp's q2guard's ({got})")
             light_check(fb)
+            time.sleep(3)  # q2carrd's run script, had it not waited, would have started coda-rc by now (config.ini: on)
+            check(not adb_open(7720), "card boot: Car Remote is today's Vamp's (nothing of the image's on 7720)")
             if not outer_adbd:
                 adb_checks(fs, emu/'data/adb_keys')
         if proc.poll() is None:
@@ -830,7 +884,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark', 'carrd-off', 'carrd-card'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()

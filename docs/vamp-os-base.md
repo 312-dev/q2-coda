@@ -65,6 +65,7 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | `q2-airplay` | `q2pkgd app-run /mnt/mmc/.airplay` ([q2playd: AirPlay](playd.md#airplay)): the AirPlay sender, a service package, once `q2pkgd app-add` has added it; else a look every minute | the app on the card, added |
 | `q2dlnad` | `/usr/bin/q2dlnad` ([dlnad](dlnad.md)): the DLNA renderer, listening only while `[SYSSET] DLNA=1` (stock's switch, off by default) | Q2PLAY/1 (tried every 2 s) |
 | `q2sendd` | `/usr/bin/q2sendd` ([LocalSend](vamp-os-services.md#localsend)): LocalSend's receive side, today's `q2send` with its questions over Q2UI/1. Down at boot (its `down` file) | the LocalSend page's `sv up` |
+| `q2carrd` | `/usr/bin/q2carrd` ([carrd](carrd.md)): Car Remote, today's `coda-rc` run while `[Q2POD] CARREMOTE` is 1, its pairing card asked over Q2UI/1; nothing on a card boot | `config.ini`'s switch (looked at once a second) |
 
 ## adb
 
@@ -197,6 +198,7 @@ Everything here has been run only under the emulator and on this machine. What o
 | Battery | The CW2015's and the charger's files under this init | [q2sysd](sysd.md#needs-a-q2) |
 | Charging | `PE22` driven through the kernel's GPIO class, and the charger stopping | [q2sysd](sysd.md#needs-a-q2) |
 | USB storage | The mass-storage gadget on the real controller, the card seen by a computer and mounted again | [q2sysd](sysd.md#needs-a-q2) |
+| Car Remote | `coda-rc`'s LE GATT server beside BlueZ 5.88, mDNS on `wlan0`, a phone pairing off `q2ui`'s card | [carrd](carrd.md#needs-a-q2) |
 | Car Audio | The UAC1 module under this init, the iPhone gadget beside q2adb's park, a drive | [car-audio-os](car-audio-os.md#needs-a-q2) |
 | USB DAC mode | `usb_f_uac2` with Shanling's rates and its `Capture Rate` control; the DAC free of the player; the sound at each rate | [dacloop](dacloop.md#needs-a-q2) |
 | Standby | `mem` suspend with Vamp OS's services, its wake sources, its current | [q2sysd](sysd.md#needs-a-q2) |

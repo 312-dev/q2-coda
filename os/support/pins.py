@@ -7,6 +7,7 @@
                                       taken from Buildroot's download folder DL (each checked against its pin), compiled
                                       with CC; the program in SRC/stage/usr/bin/adbd
     pins.py adb-mdns-sources          tools/build.py's ADB_MDNS_SOURCES
+    pins.py coda-rc-sources           tools/build.py's CODA_RC_SOURCES
     pins.py release-key               the release key's public half (assets/signing/q2-coda-release.pub) as a C array
     pins.py uac1                      Car Audio's usb_f_uac1.ko: tools/uac1.py's pinned module in the third-party cache,
                                       its SHA-256 checked; the build stops when it is not there
@@ -52,9 +53,10 @@ elif sys.argv[1:2] == ['adbd'] and len(sys.argv) == 5:
     log = src/'q2-adbd.log'
     log.write_text('')
     thirdparty.build_adbd(src, src/'stage', env, log)
-elif sys.argv[1:] == ['adb-mdns-sources']:
+elif sys.argv[1:] in (['adb-mdns-sources'], ['coda-rc-sources']):
+    name = {'adb-mdns-sources': 'ADB_MDNS_SOURCES', 'coda-rc-sources': 'CODA_RC_SOURCES'}[sys.argv[1]]
     tree = ast.parse((TOOLS/'build.py').read_text())
-    value = next(n.value for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, 'id', None) == 'ADB_MDNS_SOURCES' for t in n.targets))
+    value = next(n.value for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, 'id', None) == name for t in n.targets))
     print(' '.join(ast.literal_eval(value)))
 elif sys.argv[1:] == ['uac1']:
     import hashlib

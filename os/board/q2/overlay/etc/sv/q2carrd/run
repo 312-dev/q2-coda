@@ -1,0 +1,11 @@
+#!/bin/sh
+# q2carrd (docs/carrd.md): Car Remote, the coda-rc daemon run while [Q2POD] CARREMOTE is 1, its pairing card asked
+# over Q2UI/1, a car's cover app started over Q2PKG/1 and the radio held over Q2NET/1. On a card boot today's Vamp's
+# own demo runs its coda-rc outside the image (TCP 7720, the LE channel): this one waits and looks again every minute.
+. /usr/libexec/vamp/log
+exec 2>&1
+if [ -e /run/vamp/card-boot ]; then
+    exec sleep 60
+fi
+step "q2carrd: start"
+exec /usr/bin/q2carrd
