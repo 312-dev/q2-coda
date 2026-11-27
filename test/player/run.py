@@ -339,7 +339,8 @@ def test_scan(player, songs, tmp):
     # second for where a window falls. A player stopped 300 ms a second reached 17 s (1 of 20), as a busy Q2 would: 15
     # s is past what playing on would reach (14 s). Back at twice is twice its hold at most, less on a busy machine,
     # where it went back 1 s in a hold of 1.25 s: it must go back, and no further than that and the turn's 2 s, the
-    # hold read from the transcript's milliseconds (10 ms: 22 s back to 16 s in a hold read as 1.996 s).
+    # hold read from the transcript's milliseconds (idle, 21 s back to 16 s in a hold of 2.00 s: a second inside it, with
+    # the PCM SCAN_LEAD_MS ahead, as test_scan_keeps_the_pcm_close_ahead holds it).
     sent = {l.split()[-1]: float(l.split()[0]) for l in reversed(s.lines) if l.split()[1] == '>' and 'mcl-scan' in l}
     sent0 = [float(l.split()[0]) for l in s.lines if l.endswith('{mcl-scan\\0}')]
     fwd, hold = sent0[0] - sent['{mcl-scan\\400}'], sent0[1] - sent['{mcl-scan\\-200}']
@@ -352,6 +353,33 @@ def test_scan(player, songs, tmp):
     assert jumps in ([], [-2]), f'jumps of {jumps} s'  # -2: the dropped half second, never heard on a Q2
     assert secs[0] == 10 and secs[-1] > back, f'from {secs[0]} s, ending at {secs[-1]} s'
     return f'{len(heard)} windows: 10 s to {max(secs)} s, back to {back} s, on to {secs[-1]} s; {len(off)} off their tone'
+
+
+
+def test_scan_keeps_the_pcm_close_ahead(player, songs, tmp):
+    """While a scan runs, forward at 4 times and backward at twice, the PCM holds at most SCAN_LEAD_MS (150 ms,
+    player/engine.c) and one write ahead of what is heard, not the PCM's half second, so a change of speed and the
+    release are heard that soon (docs/player.md#scan). Read from the car trace's delay, a line each second (a quiet
+    window of 300 ms, looked at each second), on the lines made well inside each run of the scan."""
+    cp, car = car_player(), tmp/'scanlead.audio'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    s = fakedemo.Session(tmp/'scanlead')
+    s.music = songs
+    runs = ((2.0, 4.0), (4.0, 7.0))  # forward, then backward: the commands' times, the song sent at 1.0
+    s.run(fakedemo.scenarios(str(songs))['scan'][:4] + [
+        (1.0, fakedemo.song('set-songurl', f'{songs}/pos.flac', start=10)), (2.0, '{mcl-scan\\400}'),
+        (4.0, '{mcl-scan\\-200}'), (7.0, '{mcl-scan\\0}'), (8.0, '{mcl-stop\\null}'), (9.0, None)],
+          fakedemo.launch_host(cp, str(songs), 1, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
+                                                   'Q2PLAYER_CAR_QUIET_MS': '300'}), 1)
+    lines, at, inside = car_trace((tmp/'scanlead/player.log').read_text()), 1.0, []
+    for l in lines:  # each line made at the end of its window, the windows one after another from the PCM's open
+        at += l['ms'] / 1000
+        if any(a + 0.4 <= at <= b - 0.1 for a, b in runs): inside.append((round(at, 1), l['delay']))
+    assert len(inside) >= 3, [(l['ms'], l['delay']) for l in lines]
+    worst = max(d for _, d in inside)
+    # one write: a block of at most 4096 frames at 2 times or more, and a 40 ms segment the stretch held, under 4096
+    assert worst <= 44100 * 150 // 1000 + 4096, f'the PCM {worst * 1000 // 44100} ms ahead while scanning: {inside}'
+    return f'the PCM at most {worst * 1000 // 44100} ms ahead over {len(inside)} lines inside the scan'
 
 
 def test_cue_tracks(player, songs, tmp):
@@ -3314,6 +3342,29 @@ def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, t
     return f'3 s of sound dropped in {took:.2f} s'
 
 
+def test_car_feed_drops_at_the_source_rate_when_wakes_are_late(player, songs, tmp):
+    """test_car_feed_does_not_block_a_source_the_car_does_not_take with every sleep of the player's waking up to
+    10 ms late (a timer slack of 10 ms, as a busy Q2 or an idle virtual machine wakes a thread late): the drop keeps
+    to the source's rate over the whole run, so 3 s of sound is still done in about 3 s. A drop paced only by a sleep
+    of each read's length adds every wake's lateness to the source's time: 4.6 to 5 s here."""
+    car, feed = tmp/'feed6.audio', tmp/'feed6.fifo'
+    wrap = tmp/'feed6.py'  # prctl(PR_SET_TIMERSLACK), kept across the exec and by every thread the player makes
+    wrap.write_text(f'#!{sys.executable}\nimport ctypes, os\nctypes.CDLL(None).prctl(29, 10_000_000, 0, 0, 0)\n'
+                    f'os.execv({car_player()!r}, [{car_player()!r}])\n')
+    wrap.chmod(0o755)
+    src, f = tone(3.0), Feeder(feed)
+    s = fakedemo.Session(tmp/'feed6')
+    s.music = songs
+    s.run([(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (6.5, None)],
+          fakedemo.launch_host(str(wrap), str(songs), 1, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
+                                                                        'Q2PLAYER_FEED': str(feed)}), 1)
+    assert not list((tmp/'feed6/pcm').glob('*.raw'))
+    assert len(f.runs) == 1, 'the source finished'
+    took = f.runs[0][1] - f.runs[0][0]
+    assert 2.5 < took < 3.8, f'{took:.2f} s for 3 s of sound, the player\'s wakes up to 10 ms late'
+    return f'3 s of sound dropped in {took:.2f} s, the player\'s wakes up to 10 ms late'
+
+
 # Tests that read another's output, run after it in its folder: {test: the test whose folder it reads}.
 AFTER = {'test_exact_mp3_no_step_at_the_cut': 'test_exact_mp3_gapless'}
 # Tests that run alone, after everything else, each tried again when it failed on a run the machine starved:
@@ -3321,9 +3372,10 @@ AFTER = {'test_exact_mp3_no_step_at_the_cut': 'test_exact_mp3_gapless'}
 # lines a second, a preload's opening against the song's end, the clicks' 130 ms mute, the positions sampled in a
 # window of seconds while a growing song's seek waits), each failed side by side (2026-11-22), and the one that
 # asserts on the host's own /tmp/notsupport, which any player whose song fails writes.
-SERIAL = ('test_scan', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_car_trace', 'test_car_feed_reaches_the_car', 'test_car_feed_hands_over_both_ways',
+SERIAL = ('test_scan', 'test_scan_keeps_the_pcm_close_ahead', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_car_trace', 'test_car_feed_reaches_the_car', 'test_car_feed_hands_over_both_ways',
           'test_car_feed_paused_is_silence_not_a_stall', 'test_car_feed_source_gone_leaves_the_song_resumable',
-          'test_car_feed_does_not_block_a_source_the_car_does_not_take', 'test_preload_outrun', 'test_click_idle',
+          'test_car_feed_does_not_block_a_source_the_car_does_not_take',
+          'test_car_feed_drops_at_the_source_rate_when_wakes_are_late', 'test_preload_outrun', 'test_click_idle',
           'test_a_failure_already_replaced_is_not_reported',
           # fix/stream-start's: a song with a cover opened by 3.0 s, the feed's 150 ms lead, the feed reader's wakeups
           # counted over seconds, the car's PCM fds read from /proc right after each release
