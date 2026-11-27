@@ -436,6 +436,8 @@ def pages(binary, work):
     _, _, _, (sent, ids, d) = script(binary, work, 60, walk, *home, queue=True)
     want = by['track, name collate nocase, id'][albums[k]]
     good &= check("an album's songs are its tracks in order", len(sent) == 1 and ids == want, f'{ids} for {want}')
+    # Library > Albums: two-line rows, each led by its cover from Cover Flow's thumbnails, else the placeholder
+    good &= album_covers(binary, work, home)
     # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
@@ -446,6 +448,48 @@ def pages(binary, work):
     # the last row leaves q2ui for demo's menus: the program ends, with the code of a plain end
     trace, _, _ = script(binary, work, 60, ['rest', 'tick 9', 'rest', 'key centre', 'run 100', 'tick -1', 'run 100'], *home, code=0)
     good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 6, str(trace[-1]['sel']))
+    return good
+
+
+def art_key(artist, album):
+    """patch/coverflow.c tags_key: the name of an album's thumbnail in Cover Flow's folder."""
+    def fnv(h, text):
+        for b in text.encode():
+            h = (h ^ b) * 16777619 & 0xffffffff
+        return h * 16777619 & 0xffffffff
+    return fnv(fnv(2166136261, artist), album)
+
+
+def album_covers(binary, work, home):
+    """Albums' rows lead with their covers (ui/art.c), found as Cover Flow names them; one it has not made shows the
+    placeholder. Read in place by a script, and by the worker in a live run."""
+    good = True
+    probe = folder(work, 60)
+    db = sqlite3.connect(probe/'library.db')
+    album = db.execute('select album from songtable order by album collate nocase limit 1').fetchone()[0]
+    artist = db.execute('select songer from songtable where album = ? order by track, name collate nocase, id', (album,)).fetchone()[0]
+    art = pathlib.Path(tempfile.mkdtemp(dir=work))
+    png(art/f'{art_key(artist, album):08x}.jpg', 160, 160, (200, 40, 40))  # stb reads it by its bytes
+    walk = ['rest', 'key centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest', 'shot @albums.ppm']
+    _, pics, _ = script(binary, work, 60, walk, *home, '--art', art)
+    p = pics['albums']
+    good &= check("the first album's row is led by its cover and the second, with none made, by the placeholder",
+                  p.at(44, 84) == (200, 40, 40) and p.at(44, 136) == (0x2c, 0x2c, 0x2e), f'{p.at(44, 84)} {p.at(44, 136)}')
+    run = Run(binary, work, 60, *home, '--art', art, '--clock', '12:00')
+    try:
+        run.rest()
+        run.key(KEY_CENTRE)
+        run.rest()
+        run.ticks(2)
+        run.rest()
+        run.key(KEY_CENTRE)
+        run.rest()
+        got = shot.pixel(run.picture(), 44, 84)
+        good &= check('live, the worker reads it and the row is drawn again with it', got == (200, 40, 40), str(got))
+    finally:  # Home's Return opens no way out: the program is ended
+        run.proc.kill()
+        run.proc.wait(timeout=5)
+        os.close(run.queue)
     return good
 
 

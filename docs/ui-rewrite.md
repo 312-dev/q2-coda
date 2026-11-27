@@ -219,7 +219,7 @@ ui_source src = { .count = count, .row = row, .chosen = chosen };
 ui_push(&list_page, &src);
 ```
 
-A row is described, not drawn: `ROW_CHEVRON`, `ROW_SWITCH` with `ROW_ON`, `ROW_GREY`, `ROW_PLAYING`, `ROW_ACCENT`, `ROW_CHECK`, `ROW_HEADER`, with a title and optionally a detail after it (a song's artist), a value at the right column, a second line, a leading number, a glyph or art. The list lays it out, cuts what does not fit, slides a cut title while its row is selected, and gives every row the focus motion. A list can also be one part of a page that draws other things: `list_new`, `list_event`, `list_step`, `list_draw` in a box.
+A row is described, not drawn: `ROW_CHEVRON`, `ROW_SWITCH` with `ROW_ON`, `ROW_GREY`, `ROW_PLAYING`, `ROW_ACCENT`, `ROW_CHECK`, `ROW_HEADER`, with a title and optionally a detail after it (a song's artist), a value at the right column, a second line, a leading number, a glyph or art. The list lays it out, cuts what does not fit, slides a cut title while its row is selected, and gives every row the focus motion. A list can also be one part of a page that draws other things: `list_new`, `list_event`, `list_step`, `list_draw` in a box. A row keeps its layout while it stays in sight, so a picture given as its art must outlive the draw; whoever owns pictures that change or go (a cover read, one let go) calls `list_pictures_changed`, and every row with art is asked for again before it is next drawn. A page waits on its own file descriptors (a worker's pipe, a daemon's socket) with `ui_watch`, four at most, each woken in the loop's one `poll`.
 
 **The rest, by group** (each a section above):
 
@@ -340,6 +340,7 @@ By what is used most and coupled least. Each step ships behind the switch and is
 | `ui/card.c`                                    | a card of layers                                                                    |
 | `ui/status.c`, `ui/theme.c`                    | the status row (clock, battery, play state, Wi-Fi, and the slots `demo` tells it of); the tokens                      |
 | `ui/lib.c`                                     | the library's songs from SQLite                                                     |
+| `ui/art.c`                                     | album covers for rows: Cover Flow's thumbnails, read by a worker thread              |
 | `ui/player.c`                                  | play and transport, through `demo`'s command queue                                  |
 | `ui/page_songs.c`                              | Library > Songs                                                                     |
 | `ui/page_gallery.c`, `ui/page_depth.c`         | the examples; the panel's colour depth card                                         |
@@ -502,7 +503,7 @@ What a user sees and can do in `demo` today, against q2ui. The scope is the owne
 |                     | The scroll indicator: 4 px, y 134 to 206, shown a second after a tick                  | done                                                                                          |
 |                     | A cut title slides while its row is selected, its ends faded                           | done (title only; a cut value does not yet)                                                   |
 |                     | Chevron, key/value, switch (and on the selection), check, greyed row, section header   | done as drawn shapes; compared with `demo`'s pages as each page is built                      |
-|                     | Two-line rows with 40 px art (52 px pitch)                                             | built, on no page yet                                                                         |
+|                     | Two-line rows with 40 px art (52 px pitch)                                             | done, on Albums                                                                               |
 |                     | Captioned rows, inline sliders, the A-Z index, Edit Library's slide-aside              | not yet                                                                                       |
 |                     | Touch: drag, fling, tap                                                                | not yet                                                                                       |
 |                     | The hold menu (Centre held)                                                            | the hold reaches the page (`held`); no menu yet                                               |
@@ -532,7 +533,7 @@ What a user sees and can do in `demo` today, against q2ui. The scope is the owne
 |                     | Edit Home, the Full layout, Home's Settings and Streaming sub-lists                     | not yet                                                                                       |
 | Library             | Its list                                                                               | Songs, Artists and Albums are q2ui's; Years, Ratings and Most Played open `demo`'s through the gate; the rest through Old Menus |
 |                     | Artists: each artist, then that artist's songs by title; Centre plays them from the row | done, walked in the emulator; `demo`'s artist page (albums first, a monogram header) is not matched |
-|                     | Albums: each album with its artist, then its tracks in order with their numbers         | done, walked in the emulator; one-line rows, no covers yet; `demo`'s album page header is not matched |
+|                     | Albums: each album with its artist, then its tracks in order with their numbers         | done, walked in the emulator; two-line rows (the album, its artist) led by the cover Cover Flow made for it (`/mnt/mmc/.coverflow/<key>.jpg`, its `tags_key` tried under each of the album's first four artists), the Raised 2 placeholder until it has, read off the loop by `ui/art.c`'s worker; held by `test/ui.py` `album_covers` and `test/fw/test_coverflow.py` (the key); `demo`'s album page header is not matched, and q2ui groups albums by name alone where `demo` also splits by album artist and folder |
 |                     | Playlists, Genres, Composers, Years, Ratings, Recently Added, Most Played, Folders      | not yet                                                                                       |
 | Now Playing         | The cover at 150 px with 6 px corners, title, artist, album, the bar, the two times     | done, walked in the emulator beside `demo`'s: the same places by eye; a song with no cover shows a plain card, not `demo`'s note |
 |                     | Centre plays and pauses; the wheel is the volume                                       | done, in the emulator too; the level shows in the bar's place here and in the status row on every other page |

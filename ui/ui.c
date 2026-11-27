@@ -298,9 +298,15 @@ static int dark(void) {
     return off;
 }
 
-static int extra_fd = -1;
-static void (*extra_fn)(void);
-void ui_watch(int fd, void (*fn)(void)) { extra_fd = fd, extra_fn = fn; }
+#define WATCHES 4
+static int watches;
+static struct {
+    int fd;
+    void (*fn)(void);
+} watch[WATCHES];
+void ui_watch(int fd, void (*fn)(void)) {
+    if (watches < WATCHES) watch[watches].fd = fd, watch[watches++].fn = fn;
+}
 
 /* SIGHUP: q2ui starts itself again in place (ui_restart, set by main.c: the same program file run
  * anew under the same pid), so options changed in /mnt/data/q2ui.args, or a new q2ui put where the
@@ -318,7 +324,7 @@ static void on_hup(int sig) {
 }
 
 int ui_run(void) {
-    struct pollfd fds[5];
+    struct pollfd fds[3 + WATCHES];
     sigset_t hup, open_mask;
     sigemptyset(&hup), sigaddset(&hup, SIGHUP);
     signal(SIGHUP, on_hup);
@@ -328,7 +334,7 @@ int ui_run(void) {
     for (int i = 0; i < nfds; ++i) fds[i] = (struct pollfd){ keys[i], POLLIN, 0 };
     while (!quit) {
         int n = nfds;
-        if (extra_fd >= 0) fds[n++] = (struct pollfd){ extra_fd, POLLIN, 0 };
+        for (int k = 0; k < watches; ++k) fds[n++] = (struct pollfd){ watch[k].fd, POLLIN, 0 };
         int wait = -1, hold = input_wait_ms();
         if (again)
             /* a frame just shown waited for the panel, so the next step is due now; a step that
@@ -349,7 +355,8 @@ int ui_run(void) {
             rested = 0;
         struct timespec ts = { wait / 1000, (long)(wait % 1000) * 1000000L };
         ppoll(fds, (nfds_t)n, wait >= 0 ? &ts : 0, &open_mask);
-        if (extra_fd >= 0 && fds[n - 1].revents && extra_fn) extra_fn();
+        for (int k = 0; k < watches; ++k)
+            if (fds[nfds + k].revents) watch[k].fn();
         input_t in[64];
         int got = input_read(in, 64);
         /* the press that wakes the screen is only that, its release included */

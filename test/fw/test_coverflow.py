@@ -4200,3 +4200,15 @@ def test_the_art_look_asks_the_card_when_a_folder_can_t_be_read(fw):
     r = Rec('alb1', '/mnt/mmc/.subsonic/cat/alb1/s1.flac', 'Art')
     assert state(r.p, C.create_string_buffer(512), 512) == 2
     assert card.reads == 0 and len(card.asked) == 2
+
+
+def test_tags_key_is_the_name_q2ui_looks_for(fw):
+    """q2ui's Albums rows read Cover Flow's thumbnails by this key (ui/art.c art_key, test/ui.py art_key): FNV-1a over
+    the artist, then the album, each closed by a multiply. The two must not drift apart."""
+    def fnv(h, text):
+        for b in text.encode():
+            h = (h ^ b) * 16777619 & 0xffffffff
+        return h * 16777619 & 0xffffffff
+    key = fw.fn('tags_key', C.c_uint, C.c_char_p, C.c_char_p)
+    for artist, album in (('An Artist', 'An Album'), ('', ''), ('ab', 'c'), ('a', 'bc')):
+        assert key(artist.encode(), album.encode()) == fnv(fnv(2166136261, artist), album)

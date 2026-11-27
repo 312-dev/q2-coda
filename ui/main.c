@@ -6,7 +6,7 @@
  *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--playlist FILE]
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
- *          [--wireless FILE] [--told FILE]
+ *          [--wireless FILE] [--told FILE] [--art DIR]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
@@ -28,7 +28,8 @@
  * (ui/now.c), --ask the file a page of demo's is asked for in (ui_demo_page), --backlight the
  * folder whose state says the screen is dark, --power, --wifi and --wireless where the status
  * row reads the battery and Wi-Fi, --told the file demo says the rest of its states in
- * (ui/status.c); a test names its own.
+ * (ui/status.c), --art the folder of Cover Flow's album thumbnails (ui/art.c); a test names its
+ * own.
  *
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
@@ -110,6 +111,8 @@ static void parse(int argc, char **argv) {
             status_wireless = v, ++i;
         else if (!strcmp(a, "--told"))
             status_told = v, ++i;
+        else if (!strcmp(a, "--art"))
+            art_dir = v, ++i;
         else if (!strcmp(a, "--limit"))
             opt.limit = atoi(v), ++i;
         else if (!strcmp(a, "--motion"))
@@ -421,6 +424,7 @@ int main(int argc, char **argv) {
     panel_24bit();
     open_ms = (unsigned)((mono_us() - t0) / 1000u);
     now_open();
+    art_sync = opt.script || opt.bench; /* covers read in place: a script's pictures and a bench's times repeat */
     if (opt.script) {
         int code = script(opt.script);
         fb_close();
