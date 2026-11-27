@@ -9,6 +9,7 @@ The API Vamp OS offers a program that is not part of it ([roadmap: Platform](../
 | Network | `q2netd` | `/run/vamp/net.sock` | [Q2NET/1](network.md) | `network-hold` |
 | Media library | `q2libd` | two SQLite files, read-only | [Library 1](library.md) | `library` |
 | Packages | `q2pkgd` | the card | [Packages](packages.md) | |
+| Notices and questions (designed, not served) | `q2ui` | `/run/vamp/ui.sock` | [Q2UI/1 notices](notices.md) | `notices`, `ask` |
 
 Not in API 1 yet: the declarative UI (Q2SPOT/1 stays API 0, served by today's Vamp; Vamp OS has no shim for it yet), `libvampui`, the canvas, input, a settings namespace, storage folders, power holds and notices, and the permission checks themselves ([Packages: Permissions](packages.md#permissions)).
 
