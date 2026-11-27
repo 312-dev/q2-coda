@@ -49,9 +49,60 @@ def build(work, pub):
     return out
 
 
-def stage(binary, rel, rootfs, out):
-    r = subprocess.run([str(binary), 'stage', str(rel), '--rootfs', str(rootfs), '--out', str(out)], capture_output=True, text=True)
+def stage(binary, rel, rootfs, card):
+    """q2pkgd stage onto the card folder card; (status, what it said). The staged image is card/.vamp/stage/recovery-update/"""
+    r = subprocess.run([str(binary), 'stage', str(rel), '--rootfs', str(rootfs), '--card', str(card)], capture_output=True, text=True)
     return r.returncode, r.stdout + r.stderr
+
+
+def pkgd(binary, *args):
+    r = subprocess.run([str(binary), *map(str, args)], capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+
+def stock_recovery(card):
+    """the owner's rescue copy: stand-ins for stock's xImage and rootfs.squashfs in the card's recovery-update/"""
+    d = card/'recovery-update'
+    d.mkdir(parents=True, exist_ok=True)
+    (d/'xImage').write_bytes(b'stock kernel ' * 1000)
+    (d/'rootfs.squashfs').write_bytes(b'stock rootfs ' * 5000)
+    return {n: (d/n).read_bytes() for n in ('xImage', 'rootfs.squashfs')}
+
+
+def recovery(card):
+    d = card/'recovery-update'
+    return {n: (d/n).read_bytes() for n in ('xImage', 'rootfs.squashfs') if (d/n).exists()}
+
+
+def rescue_checks(binary, card, want):
+    """install keeps the rescue copy before it puts the staged image in recovery-update/, and confirm puts it back"""
+    kept = recovery(card)
+    rescue = card/'.vamp/rescue'
+    # a failed install: the rescue folder cannot be written, so nothing may change
+    rescue.mkdir(parents=True)
+    rescue.chmod(0o555)
+    code, said = pkgd(binary, 'install', '--card', card)
+    rescue.chmod(0o755)
+    check(code == 1 and recovery(card) == kept, f'install refused when the rescue copy cannot be kept; recovery-update/ as it was ({said.strip()[-70:]})')
+    # no stock copy on the card to keep: refused
+    bare = card.parent/'card-bare'
+    (bare/'.vamp/stage/recovery-update').mkdir(parents=True)
+    (bare/'.vamp/stage/recovery-update/rootfs.squashfs').write_bytes(b'x')
+    code, said = pkgd(binary, 'install', '--card', bare)
+    check(code == 1 and not (bare/'recovery-update').exists(), f'install refused on a card with no recovery to keep ({said.strip()[-70:]})')
+    # the install
+    code, said = pkgd(binary, 'install', '--card', card)
+    now = recovery(card)
+    check(code == 0 and {n: (rescue/n).read_bytes() for n in kept if (rescue/n).exists()} == kept and (rescue/'pending').exists(),
+          'install: the rescue copy is kept whole in .vamp/rescue/ first, and pending marked')
+    check(vampos.sha256(card/'recovery-update/rootfs.squashfs') == want and now['xImage'] == kept['xImage'],
+          "install: recovery-update/ holds the staged image beside the rescue's own xImage")
+    code, said = pkgd(binary, 'install', '--card', card)  # again, pending: the rescue copy must stay the stock one
+    check(code == 0 and {n: (rescue/n).read_bytes() for n in kept if (rescue/n).exists()} == kept, 'a second install while pending keeps the first rescue copy')
+    code, said = pkgd(binary, 'confirm', '--card', card)
+    check(code == 0 and recovery(card) == kept and not (rescue/'pending').exists(), 'confirm: recovery-update/ holds the rescue copy again')
+    code, _ = pkgd(binary, 'confirm', '--card', card)
+    check(code == 0 and recovery(card) == kept, 'confirm with nothing pending changes nothing')
 
 
 def main():
@@ -78,11 +129,15 @@ def main():
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(stock/n, dst)
         for label, rootfs in (('a stock root filesystem', stock), ("Vamp OS's /vendor", vfs)):
-            out = work/f'out-{label[0]}'
-            code, said = stage(binary, rel, rootfs, out)
+            card = work/f'card-{label[0]}'
+            kept = stock_recovery(card)
+            code, said = stage(binary, rel, rootfs, card)
+            out = card/'.vamp/stage/recovery-update'
             got = vampos.sha256(out/'rootfs.squashfs') if (out/'rootfs.squashfs').exists() else None
             check(code == 0 and got == want, f'staged from {label}: rootfs.squashfs is the composed image tools/vampos.py gives ({said.strip()[-80:]})')
-            check(not (work/f'out-{label[0]}.q2pkgd').exists(), f'from {label}: its work folder is gone')
+            check(not pathlib.Path(str(out) + '.q2pkgd').exists(), f'from {label}: its work folder is gone')
+            check(recovery(card) == kept, f'from {label}: the card\'s recovery-update/ (the rescue copy) is untouched by stage')
+        rescue_checks(binary, work/'card-a', want)
 
         image_fs = work/'imagefs'
         subprocess.run(['unsquashfs', '-q', '-n', '-ignore-errors', '-no-xattrs', '-d', str(image_fs), str(a.build/'vampos.squashfs')],
@@ -114,9 +169,11 @@ def main():
             bad = work/name
             shutil.copytree(rel, bad)
             edit(bad)
-            out = work/f'out-{name}'
-            code, said = stage(binary, bad, stock, out)
-            check(code == 1 and words in said and not (out/'rootfs.squashfs').exists(), f'refused: {name} ({said.strip()[-90:]})')
+            card = work/f'card-{name}'
+            kept = stock_recovery(card)
+            code, said = stage(binary, bad, stock, card)
+            check(code == 1 and words in said and not (card/'.vamp/stage/recovery-update/rootfs.squashfs').exists() and recovery(card) == kept,
+                  f'refused: {name} ({said.strip()[-90:]})')
 
         def resign(d, text, key=pem):
             (d/'release.txt').write_text(text)
@@ -134,9 +191,10 @@ def main():
             (rootfs/first).parent.mkdir(parents=True, exist_ok=True)
         saved = (stock/first).read_bytes()
         (stock/first).write_bytes(saved + b'x')
-        out = work/'out-vendor'
-        code, said = stage(binary, rel, stock, out)
-        check(code == 1 and f'{first} is not the file this release was tested with' in said and not (out/'rootfs.squashfs').exists(),
+        card = work/'card-vendor'
+        code, said = stage(binary, rel, stock, card)
+        check(code == 1 and f'{first} is not the file this release was tested with' in said
+              and not (card/'.vamp/stage/recovery-update/rootfs.squashfs').exists(),
           f'refused: a vendor file changed, named ({said.strip()[-90:]})')
         (stock/first).write_bytes(saved)
     print(f'{len(FAILS)} failed' if FAILS else 'all passed')

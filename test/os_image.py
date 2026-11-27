@@ -185,7 +185,7 @@ def check_image(build, fs, manifest, perturb=None):
     check(actions.count('sysinit') == 1 and table[0] == '::sysinit:/etc/init.d/rcS'
           and '::respawn:/usr/bin/runsvdir -P /etc/sv' in table, 'inittab: rcS, the one sysinit, then runsvdir over /etc/sv')
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['adb-wifi', 'adbd', 'q2libd', 'q2netd', 'q2playd', 'q2player', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+    check(services == ['adb-wifi', 'adbd', 'q2libd', 'q2netd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(not (fs/'etc/init.d').exists() or sorted(p.name for p in (fs/'etc/init.d').iterdir()) == ['rcK', 'rcS'],
           '/etc/init.d holds rcS and rcK alone')

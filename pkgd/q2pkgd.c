@@ -1,20 +1,29 @@
-/* q2pkgd: Vamp OS's update service (docs/vamp-os.md#installer-and-updates, docs/pkgd.md), its first slice: a release
- * checked, composed with this Q2's own vendor set and staged for Shanling's recovery, as one command:
+/* q2pkgd: Vamp OS's update service (docs/vamp-os.md#installer-and-updates, docs/pkgd.md), its first slice:
  *
- *     q2pkgd stage RELEASE_DIR [--rootfs DIR] [--out DIR]
+ *     q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR]    a release checked, composed, staged beside the rescue copy
+ *     q2pkgd install [--card DIR]                             the staged image put where Shanling's recovery reads it
+ *     q2pkgd confirm [--card DIR]                             after a good boot: the rescue copy put back
  *
- * RELEASE_DIR holds vampos.squashfs, release.txt and release.sig. In order, stopping at the first failure with its
- * reason and leaving nothing behind in --out:
- *   1. release.sig is the release key's Ed25519 signature of "q2-coda-vampos-v1 TAG SHA512(release.txt)\n";
- *   2. vampos.squashfs has the SHA-512 and size release.txt names;
- *   3. every vendor file release.txt names (a stock path, its SHA-256, its mode) is found in --rootfs (the running
- *      system: under its stock path, or under /vendor where Vamp OS keeps it) with that hash;
- *   4. the image is composed: copied, and /vendor appended by mksquashfs with fixed owners and times on one thread,
- *      the flags tools/vampos.py compose uses, so the bytes are the build machine's;
- *   5. the composed image has the SHA-256 release.txt gives for this stock version;
- *   6. it is renamed into --out as rootfs.squashfs (default /mnt/mmc/recovery-update).
- * It writes nothing to flash and marks nothing for the recovery: flashing is Shanling's recovery's, started by the
- * owner's keys (hold Previous, power on with Centre), never by this program. */
+ * The card's recovery-update/ (xImage and rootfs.squashfs, stock's) is the owner's only way back when a boot fails:
+ * hold Previous and power on with Centre, and Shanling's recovery flashes it. So nothing here leaves the card without a
+ * known-good copy there while idle:
+ *
+ *   stage    RELEASE_DIR holds vampos.squashfs, release.txt and release.sig. In order, stopping at the first failure
+ *            and leaving nothing behind: release.sig is the release key's Ed25519 signature of
+ *            "q2-coda-vampos-v1 TAG SHA512(release.txt)\n"; vampos.squashfs has the SHA-512 and size release.txt names;
+ *            every vendor file release.txt names is found in --rootfs (its stock path, or under /vendor) with its
+ *            SHA-256; the image is composed (copied, /vendor appended by mksquashfs with tools/vampos.py compose's
+ *            flags); the result has a SHA-256 release.txt lists. It lands in .vamp/stage/recovery-update/ on the card,
+ *            never in recovery-update/.
+ *   install  keeps the rescue copy first: recovery-update/'s files copied whole to .vamp/rescue/ and checked byte for
+ *            byte (or found there already, when an install is pending), then the staged rootfs.squashfs put into
+ *            recovery-update/ beside the rescue's xImage, and .vamp/rescue/pending written. Any failure leaves
+ *            recovery-update/ as it was.
+ *   confirm  with an install pending: .vamp/rescue/'s files put back in recovery-update/ (written beside and renamed),
+ *            pending removed. Vamp OS's boot runs it once its services are up (/etc/sv/q2pkgd-confirm).
+ *
+ * It writes no flash and marks nothing for the recovery: flashing is Shanling's recovery's, started by the owner's keys.
+ */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -222,7 +231,7 @@ static void remove_tree(const char *dir) { /* the staging folder, made by this p
     run(argv);
 }
 
-static int stage(const char *dir, const char *rootfs, const char *out) {
+static int stage(const char *dir, const char *rootfs, const char *out) { /* out: the card's .vamp/stage/recovery-update */
     char p[1000], q[800], h[129], txt_sha512[129];
     size_t n;
     /* 1. the signature */
@@ -284,17 +293,93 @@ static int stage(const char *dir, const char *rootfs, const char *out) {
     snprintf(p, sizeof p, "%s/rootfs.squashfs", out);
     if (rename(img, p)) return remove_tree(tmp), fail("cannot write %s", p);
     remove_tree(tmp);
-    printf("staged %s %s as %s: hold Previous and power on with Centre for Shanling's recovery to install it\n", rel.tag, h, p);
+    printf("staged %s %s as %s (recovery-update/ untouched: q2pkgd install puts it there)\n", rel.tag, h, p);
+    return 0;
+}
+
+/* ---- install and confirm ---- */
+
+static int same_file(const char *a, const char *b) {
+    char ha[65], hb[65];
+    long long na, nb;
+    return !hash_file(a, 0, ha, &na) && !hash_file(b, 0, hb, &nb) && na == nb && !strcmp(ha, hb);
+}
+
+/* from copied whole to to: beside it, checked byte for byte, then renamed over it */
+static int put(const char *from, const char *to) {
+    char tmp[900];
+    snprintf(tmp, sizeof tmp, "%s.q2pkgd", to);
+    if (copy(from, tmp, 0644) || !same_file(from, tmp) || rename(tmp, to)) return unlink(tmp), -1;
+    return 0;
+}
+
+static const char *const RECOVERY_FILES[] = {"xImage", "rootfs.squashfs"};
+
+static int install(const char *card) {
+    char rec[600], rescue[600], staged[700], pending[700], a[800], b[800];
+    snprintf(rec, sizeof rec, "%s/recovery-update", card);
+    snprintf(rescue, sizeof rescue, "%s/.vamp/rescue", card);
+    snprintf(staged, sizeof staged, "%s/.vamp/stage/recovery-update/rootfs.squashfs", card);
+    snprintf(pending, sizeof pending, "%s/pending", rescue);
+    if (access(staged, R_OK)) return fail("nothing staged (%s)", staged);
+    int is_pending = !access(pending, F_OK);
+    if (mkdirs(rescue)) return fail("cannot make %s", rescue);
+    for (unsigned i = 0; i < 2; ++i) {
+        snprintf(a, sizeof a, "%s/%s", rec, RECOVERY_FILES[i]);
+        snprintf(b, sizeof b, "%s/%s", rescue, RECOVERY_FILES[i]);
+        if (is_pending) { /* recovery-update holds an earlier install's image: the rescue copy is the one kept */
+            if (access(b, R_OK)) return fail("an install is pending and its rescue copy %s is gone", b);
+            continue;
+        }
+        if (access(a, R_OK)) return fail("no %s: the card has no recovery to keep (put stock's recovery-update/ there first)", a);
+        if (put(a, b)) return fail("cannot keep the rescue copy of %s", a);
+    }
+    /* the rescue copy is safe: now recovery-update/ takes the staged image beside the rescue's own xImage */
+    if (!is_pending) {
+        FILE *f = fopen(pending, "w");
+        if (!f || fclose(f)) return fail("cannot write %s", pending);
+    }
+    snprintf(a, sizeof a, "%s/rootfs.squashfs", rec);
+    if (put(staged, a)) {
+        snprintf(b, sizeof b, "%s/rootfs.squashfs", rescue), put(b, a); /* as it was */
+        return fail("cannot write %s", a);
+    }
+    printf("installed: %s holds the staged image; hold Previous and power on with Centre to flash it. Vamp OS puts the "
+           "rescue copy back once it has booted (q2pkgd confirm)\n", rec);
+    return 0;
+}
+
+static int confirm(const char *card) {
+    char rec[600], rescue[600], pending[700], a[800], b[800];
+    snprintf(rec, sizeof rec, "%s/recovery-update", card);
+    snprintf(rescue, sizeof rescue, "%s/.vamp/rescue", card);
+    snprintf(pending, sizeof pending, "%s/pending", rescue);
+    if (access(pending, F_OK)) return 0; /* nothing installed since the last confirm */
+    for (unsigned i = 0; i < 2; ++i) {
+        snprintf(a, sizeof a, "%s/%s", rec, RECOVERY_FILES[i]);
+        snprintf(b, sizeof b, "%s/%s", rescue, RECOVERY_FILES[i]);
+        if (put(b, a)) return fail("cannot put the rescue copy back into %s", a);
+    }
+    unlink(pending);
+    printf("confirmed: %s holds the rescue copy again\n", rec);
     return 0;
 }
 
 int main(int argc, char **argv) {
-    const char *rootfs = "/", *out = "/mnt/mmc/recovery-update";
-    if (argc < 3 || strcmp(argv[1], "stage")) return fprintf(stderr, "usage: q2pkgd stage RELEASE_DIR [--rootfs DIR] [--out DIR]\n"), 2;
-    for (int i = 3; i < argc; ++i) {
+    const char *rootfs = "/", *card = "/mnt/mmc", *usage =
+        "usage: q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR] | install [--card DIR] | confirm [--card DIR]\n";
+    if (argc < 2) return fputs(usage, stderr), 2;
+    int first = !strcmp(argv[1], "stage") ? 3 : 2;
+    if (first > argc) return fputs(usage, stderr), 2;
+    for (int i = first; i < argc; ++i) {
         if (!strcmp(argv[i], "--rootfs") && i + 1 < argc) rootfs = argv[++i];
-        else if (!strcmp(argv[i], "--out") && i + 1 < argc) out = argv[++i];
-        else return fprintf(stderr, "usage: q2pkgd stage RELEASE_DIR [--rootfs DIR] [--out DIR]\n"), 2;
+        else if (!strcmp(argv[i], "--card") && i + 1 < argc) card = argv[++i];
+        else return fputs(usage, stderr), 2;
     }
-    return stage(argv[2], rootfs, out);
+    char out[600];
+    snprintf(out, sizeof out, "%s/.vamp/stage/recovery-update", card);
+    if (!strcmp(argv[1], "stage")) return stage(argv[2], rootfs, out);
+    if (!strcmp(argv[1], "install")) return install(card);
+    if (!strcmp(argv[1], "confirm")) return confirm(card);
+    return fputs(usage, stderr), 2;
 }
