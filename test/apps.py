@@ -11,6 +11,9 @@ import sys
 
 import pytest
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import pkgd as pkgd_test  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE = pathlib.Path(os.environ.get('Q2PKGD_SOURCE') or ROOT/'pkgd/q2pkgd.c')
 PAGE = pathlib.Path(os.environ.get('Q2API_DOCS') or ROOT/'docs/platform')/'packages.md'
@@ -18,11 +21,7 @@ PAGE = pathlib.Path(os.environ.get('Q2API_DOCS') or ROOT/'docs/platform')/'packa
 
 @pytest.fixture(scope='session')
 def binary(tmp_path_factory):
-    out = tmp_path_factory.mktemp('pkgd')/'q2pkgd'
-    mono = ROOT/'patch/monocypher'
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', f'-I{mono}', '-I', str(ROOT/'perm'), '-DRELEASE_KEY={0}', '-o', str(out), str(SOURCE),
-                    str(mono/'monocypher.c'), str(mono/'monocypher-ed25519.c')], check=True)
-    return out
+    return pkgd_test.compile_q2pkgd(tmp_path_factory.mktemp('pkgd')/'q2pkgd', source=SOURCE)
 
 
 def app(tmp_path, manifest, folder='.radio', files=('q2-radio',)):

@@ -1,9 +1,11 @@
-/* q2pkgd: Vamp OS's update service (docs/vamp-os.md#installer-and-updates, docs/pkgd.md), its first slice:
+/* q2pkgd: Vamp OS's update service (docs/vamp-os.md#installer-and-updates, docs/pkgd.md):
  *
  *     q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR]    a release checked, composed, staged beside the rescue copy
  *     q2pkgd install [--card DIR]                             the staged image put where Shanling's recovery reads it
  *     q2pkgd restore [--card DIR]                             at boot, first: the rescue copy put back in recovery-update/
  *     q2pkgd confirm [--card DIR]                             after a good boot: the same, and the install no longer pending
+ *     q2pkgd download [--feed URL] [--tag TAG] [--ca FILE] [--timeout S] [--rootfs DIR] [--card DIR]
+ *                                                             a release fetched, checked and composed for the next card boot
  *     q2pkgd app-check DIR                                    an app's folder and its q2app manifest (docs/platform/packages.md)
  *     q2pkgd app-add DIR | app-remove ID [--root DIR]         a package's user and groups made, or retired
  *     q2pkgd accounts [--root DIR]                            /run/vamp/passwd and group composed (rcS, at each boot)
@@ -30,6 +32,13 @@
  *            Q2: the folder gone after each install), so the card has no recovery at all until this runs: rcS runs it as
  *            soon as the card is mounted, before anything else that can fail.
  *   confirm  restore, then pending removed. Vamp OS runs it once its services have been up a minute (/etc/sv/q2pkgd-confirm).
+ *
+ *   download a release from the feed (FEED, a GitHub repository; --feed another) over HTTPS verified against --ca
+ *            (/etc/scrobble-ca.pem): the tag from releases/latest's redirect (or --tag), release.sig and release.txt
+ *            fetched and checked first, then the image onto the card and staged as stage does it, and the composed
+ *            image put in .vamp/os/ (vampos.squashfs, its .sha256 and release.txt), where the next card boot reads it
+ *            (patch/q2vampos.sh). The switch (boot-once, boot-always) is left as it is. A release the card has, or a
+ *            latest tag not newer than the card's, fetches no image; any failure leaves .vamp/os/ as it was.
  *
  * It writes no flash and marks nothing for the recovery: flashing is Shanling's recovery's, started by the owner's keys.
  *
@@ -81,8 +90,20 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <ctype.h>
 #include <grp.h>
+#include <netdb.h>
+#include <strings.h>
+#include <sys/file.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
+
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/net_sockets.h>
+#include <mbedtls/ssl.h>
+#include <mbedtls/x509_crt.h>
+#include <psa/crypto.h>
 
 #include "monocypher-ed25519.h"
 #include "q2perm.h" /* perm/: the permissions' groups */
@@ -195,6 +216,7 @@ static int read_release(const char *text) {
     char line[512];
     const char *p = text;
     int first = 1;
+    memset(&rel, 0, sizeof rel);
     while (*p) {
         size_t k = strcspn(p, "\n");
         if (k >= sizeof line) return fail("release.txt: a line too long");
@@ -281,15 +303,16 @@ static void remove_tree(const char *dir) { /* the staging folder, made by this p
     run(argv);
 }
 
-static int stage(const char *dir, const char *rootfs, const char *out) { /* out: the card's .vamp/stage/recovery-update */
-    char p[1000], q[800], h[129], txt_sha512[129];
+/* release.txt read into rel and release.sig checked against it with the compiled-in key */
+static int release_signed(const char *dir) {
+    char p[1000], txt_sha512[129];
     size_t n;
-    /* 1. the signature */
     snprintf(p, sizeof p, "%s/release.txt", dir);
     char *text = slurp(p, &n);
     if (!text) return fail("no %s", p);
-    if (hash_file(p, 1, txt_sha512, 0)) return fail("cannot read %s", p);
-    if (read_release(text)) return 1;
+    int bad = hash_file(p, 1, txt_sha512, 0) ? fail("cannot read %s", p) : read_release(text);
+    free(text);
+    if (bad) return 1;
     char message[256];
     int m = snprintf(message, sizeof message, "q2-coda-vampos-v1 %s %s\n", rel.tag, txt_sha512);
     unsigned char sig[64];
@@ -299,6 +322,14 @@ static int stage(const char *dir, const char *rootfs, const char *out) { /* out:
     if (f) fclose(f);
     if (got != 64 || crypto_ed25519_check(sig, release_key, (const unsigned char *)message, (size_t)m))
         return fail("release.sig is not the release key's signature of release.txt");
+    return 0;
+}
+
+/* out: where rootfs.squashfs lands (the card's .vamp/stage/recovery-update for stage); digest, when given, its SHA-256 */
+static int stage(const char *dir, const char *rootfs, const char *out, char *digest) {
+    char p[1000], q[800], h[129];
+    /* 1. the signature */
+    if (release_signed(dir)) return 1;
     /* 2. the image */
     long long bytes;
     snprintf(p, sizeof p, "%s/vampos.squashfs", dir);
@@ -344,6 +375,7 @@ static int stage(const char *dir, const char *rootfs, const char *out) { /* out:
     snprintf(p, sizeof p, "%s/rootfs.squashfs", out);
     if (rename(img, p)) return remove_tree(tmp), fail("cannot write %s", p);
     remove_tree(tmp);
+    if (digest) return memcpy(digest, h, 64), digest[64] = 0, 0;
     printf("staged %s %s as %s (recovery-update/ untouched: q2pkgd install puts it there)\n", rel.tag, h, p);
     return 0;
 }
@@ -415,6 +447,347 @@ static int restore(const char *card, int and_confirm) {
     if (and_confirm) unlink(pending);
     printf("%s: %s holds the rescue copy again\n", and_confirm ? "confirmed" : "restored", rec);
     return 0;
+}
+
+/* ---- download: a release from the feed into the card's .vamp/os/ for the next card boot (docs/pkgd.md#download) ---- */
+
+#ifndef FEED /* the repository whose releases are fetched (os/package/q2pkgd: Q2PKGD_FEED) */
+#define FEED "https://github.com/312-dev/q2-coda"
+#endif
+#define CONNECT_S 15
+#define REDIRECTS 5
+static int dl_timeout = 30; /* no byte for this long ends a transfer (--timeout) */
+static const char *dl_ca = "/etc/scrobble-ca.pem";
+static char dl_err[300];
+
+static int dl_fail(const char *fmt, ...) { /* the reason, for the caller to say */
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(dl_err, sizeof dl_err, fmt, ap);
+    va_end(ap);
+    return -1;
+}
+
+static int tcp_connect(const char *host, const char *port) {
+    struct addrinfo hints = {.ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM}, *res, *a;
+    int fd = -1;
+    if (getaddrinfo(host, port, &hints, &res)) return -1;
+    for (a = res; a && fd < 0; a = a->ai_next) {
+        fd = socket(a->ai_family, a->ai_socktype | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+        if (fd < 0) continue;
+        struct pollfd pf = {.fd = fd, .events = POLLOUT};
+        int err = 0;
+        socklen_t el = sizeof err;
+        if ((connect(fd, a->ai_addr, a->ai_addrlen) && errno != EINPROGRESS) || poll(&pf, 1, CONNECT_S * 1000) != 1 ||
+            getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el) || err)
+            close(fd), fd = -1;
+    }
+    freeaddrinfo(res);
+    if (fd >= 0) fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
+    return fd;
+}
+
+/* mbedTLS's I/O on the socket (the image's mbedTLS has no net module); a read waits as mbedTLS's read timeout says */
+static int bio_send(void *ctx, const unsigned char *b, size_t n) {
+    ssize_t w = send(*(int *)ctx, b, n, MSG_NOSIGNAL);
+    return w >= 0 ? (int)w : errno == EINTR ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_NET_SEND_FAILED;
+}
+
+static int bio_recv(void *ctx, unsigned char *b, size_t n, uint32_t ms) {
+    struct pollfd pf = {.fd = *(int *)ctx, .events = POLLIN};
+    int r = poll(&pf, 1, ms ? (int)ms : -1);
+    if (r == 0) return MBEDTLS_ERR_SSL_TIMEOUT;
+    if (r < 0) return errno == EINTR ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
+    ssize_t got = recv(pf.fd, b, n, 0);
+    return got >= 0 ? (int)got : errno == EINTR ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
+}
+
+/* a header's value from the block hdr (lines after the status line), 0 when it has none */
+static const char *header(const char *hdr, const char *name, char *out, size_t room) {
+    size_t k = strlen(name);
+    for (const char *l = strstr(hdr, "\r\n"); l && l[2]; l = strstr(l + 2, "\r\n"))
+        if (!strncasecmp(l + 2, name, k) && l[2 + k] == ':') {
+            const char *v = l + 3 + k;
+            while (*v == ' ' || *v == '\t') v++;
+            snprintf(out, room, "%.*s", (int)strcspn(v, "\r\n"), v);
+            return out;
+        }
+    return 0;
+}
+
+/* One GET over verified TLS. The status, with Location in loc for a redirect; for a 200 the body, which must have a
+ * Content-Length (and be want bytes when want >= 0), into f or into mem (at most room - 1 bytes, then a 0). -1 with
+ * dl_err when it could not be had. */
+static long get(const char *url, char *loc, size_t locn, long long want, FILE *f, char *mem, size_t room, size_t *got_n) {
+    char host[256], port[8] = "443", where[512];
+    const char *h = url + 8, *slash, *colon;
+    if (strncmp(url, "https://", 8)) return dl_fail("%.120s is not https", url);
+    if (!(slash = strchr(h, '/'))) slash = h + strlen(h);
+    colon = memchr(h, ':', (size_t)(slash - h));
+    snprintf(host, sizeof host, "%.*s", (int)((colon ? colon : slash) - h), h);
+    if (colon) snprintf(port, sizeof port, "%.*s", (int)(slash - colon - 1), colon + 1);
+    snprintf(where, sizeof where, "%s", *slash ? slash : "/");
+    mbedtls_ssl_context ssl;
+    mbedtls_ssl_config conf;
+    mbedtls_x509_crt ca;
+    mbedtls_ctr_drbg_context drbg;
+    mbedtls_entropy_context ent;
+    int fd = -1;
+    long code = -1;
+    mbedtls_ssl_init(&ssl), mbedtls_ssl_config_init(&conf), mbedtls_x509_crt_init(&ca), mbedtls_ctr_drbg_init(&drbg);
+    mbedtls_entropy_init(&ent);
+    psa_crypto_init();
+    char req[1024], hdr[16384];
+    int n = snprintf(req, sizeof req, "GET %s HTTP/1.1\r\nHost: %s%s%s\r\nUser-Agent: Vamp\r\nAccept: */*\r\nConnection: close\r\n\r\n",
+                     where, host, colon ? ":" : "", colon ? port : "");
+    int ok = n > 0 && n < (int)sizeof req;
+    if (ok && (mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &ent, (const unsigned char *)"q2pkgd", 6) ||
+               mbedtls_x509_crt_parse_file(&ca, dl_ca) < 0 ||
+               mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT)))
+        ok = 0, dl_fail("no TLS: cannot read %s", dl_ca);
+    if (ok) {
+        mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_REQUIRED); /* the signature is checked too, but a verified host first */
+        mbedtls_ssl_conf_ca_chain(&conf, &ca, 0);
+        mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &drbg);
+        mbedtls_ssl_conf_read_timeout(&conf, (uint32_t)dl_timeout * 1000);
+        if (mbedtls_ssl_setup(&ssl, &conf) || mbedtls_ssl_set_hostname(&ssl, host)) ok = 0, dl_fail("no TLS for %s", host);
+        else if ((fd = tcp_connect(host, port)) < 0) ok = 0, dl_fail("cannot reach %s", host);
+    }
+    if (ok) {
+        mbedtls_ssl_set_bio(&ssl, &fd, bio_send, 0, bio_recv);
+        int r;
+        while ((r = mbedtls_ssl_handshake(&ssl)) == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) {
+        }
+        if (r) ok = 0, dl_fail("%s: TLS refused (-0x%x)", host, (unsigned)-r);
+    }
+    for (int off = 0; ok && off < n;) {
+        int w = mbedtls_ssl_write(&ssl, (const unsigned char *)req + off, (size_t)(n - off));
+        if (w > 0) off += w;
+        else if (w != MBEDTLS_ERR_SSL_WANT_WRITE) ok = 0, dl_fail("%s: the request was not sent", host);
+    }
+    size_t hn = 0;
+    char *end = 0;
+    while (ok && !end) { /* the head, up to its blank line */
+        if (hn == sizeof hdr - 1) ok = 0, dl_fail("%s: a head too long", host);
+        int r = ok ? mbedtls_ssl_read(&ssl, (unsigned char *)hdr + hn, sizeof hdr - 1 - hn) : 0;
+        if (!ok || r == MBEDTLS_ERR_SSL_WANT_READ) continue;
+        if (r == MBEDTLS_ERR_SSL_TIMEOUT) ok = 0, dl_fail("%s: timed out (nothing for %d s)", host, dl_timeout);
+        else if (r <= 0) ok = 0, dl_fail("%s: no answer", host);
+        else hn += (size_t)r, hdr[hn] = 0, end = strstr(hdr, "\r\n\r\n");
+    }
+    if (ok && (strncmp(hdr, "HTTP/1.", 7) || hn < 12)) ok = 0, dl_fail("%s: not an HTTP answer", host);
+    if (ok) {
+        code = strtol(hdr + 9, 0, 10);
+        end[2] = 0; /* the head's lines, each ending \r\n */
+        size_t have = hn - (size_t)(end + 4 - hdr);
+        char v[600];
+        if (code != 200) {
+            if (loc && locn) loc[0] = 0, header(hdr, "Location", loc, locn);
+        } else if (header(hdr, "Transfer-Encoding", v, sizeof v) || !header(hdr, "Content-Length", v, sizeof v)) {
+            code = dl_fail("%s: the answer has no length", host);
+        } else {
+            long long len = strtoll(v, 0, 10), done = 0;
+            if (want >= 0 && len != want) code = dl_fail("%s is %lld bytes, release.txt says %lld", where, len, want);
+            else if (!f && (len < 0 || (unsigned long long)len >= room)) code = dl_fail("%s: too long (%lld bytes)", where, len);
+            char buf[16384], *p = end + 4;
+            while (code == 200 && done < len) {
+                size_t k = have;
+                if (!k) {
+                    int r = mbedtls_ssl_read(&ssl, (unsigned char *)buf, sizeof buf);
+                    if (r == MBEDTLS_ERR_SSL_WANT_READ) continue;
+                    if (r == MBEDTLS_ERR_SSL_TIMEOUT) {
+                        code = dl_fail("%s: timed out (nothing for %d s, %lld of %lld bytes)", where, dl_timeout, done, len);
+                        break;
+                    }
+                    if (r <= 0) {
+                        code = dl_fail("%s: the answer was short (%lld of %lld bytes)", where, done, len);
+                        break;
+                    }
+                    p = buf, k = (size_t)r;
+                }
+                have = 0;
+                if ((long long)k > len - done) k = (size_t)(len - done);
+                if (f ? fwrite(p, 1, k, f) != k : (memcpy(mem + done, p, k), 0)) code = dl_fail("cannot write to the card");
+                done += (long long)k;
+            }
+            if (code == 200 && !f) mem[len] = 0, *got_n = (size_t)len;
+        }
+        mbedtls_ssl_close_notify(&ssl);
+    }
+    if (fd >= 0) close(fd);
+    mbedtls_ssl_free(&ssl), mbedtls_ssl_config_free(&conf), mbedtls_x509_crt_free(&ca);
+    mbedtls_ctr_drbg_free(&drbg), mbedtls_entropy_free(&ent);
+    return ok ? code : -1;
+}
+
+/* get, following up to REDIRECTS redirects (each to an https:// place: GitHub's assets are on another host) */
+static long fetch(const char *url, long long want, FILE *f, char *mem, size_t room, size_t *got_n) {
+    char now[1024], loc[1024];
+    snprintf(now, sizeof now, "%s", url);
+    for (int i = 0; i <= REDIRECTS; ++i) {
+        long code = get(now, loc, sizeof loc, want, f, mem, room, got_n);
+        if (code < 300 || code > 308 || !*loc) return code;
+        if (loc[0] == '/') { /* on the same host */
+            const char *slash = strchr(now + 8, '/');
+            int k = slash ? (int)(slash - now) : (int)strlen(now);
+            char t[2100];
+            if (snprintf(t, sizeof t, "%.*s%s", k, now, loc) >= (int)sizeof now) return dl_fail("%.120s: a redirect too long", url);
+            memcpy(now, t, strlen(t) + 1);
+        } else {
+            snprintf(now, sizeof now, "%s", loc);
+        }
+    }
+    return dl_fail("%.120s: too many redirects", url);
+}
+
+/* a release tag as it goes into a URL and the signed message: 1 to 31 of A-Za-z0-9._- (Network Update's rule) */
+static int plain_tag(const char *t) {
+    size_t k = strlen(t);
+    if (!k || k > 31) return 0;
+    for (; *t; ++t)
+        if (!isalnum((unsigned char)*t) && !strchr("._-", *t)) return 0;
+    return 1;
+}
+
+/* tags compared as versions: a leading v skipped, runs of digits as numbers (v1.10.0 after v1.9.0) */
+static int tag_cmp(const char *a, const char *b) {
+    a += *a == 'v', b += *b == 'v';
+    while (*a || *b) {
+        if (isdigit((unsigned char)*a) && isdigit((unsigned char)*b)) {
+            char *ea, *eb;
+            unsigned long long na = strtoull(a, &ea, 10), nb = strtoull(b, &eb, 10);
+            if (na != nb) return na < nb ? -1 : 1;
+            a = ea, b = eb;
+            continue;
+        }
+        if (*a != *b) return (unsigned char)*a < (unsigned char)*b ? -1 : 1;
+        a++, b++;
+    }
+    return 0;
+}
+
+static int write_synced(const char *path, const char *text, size_t n) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    int ok = fd >= 0 && write(fd, text, n) == (ssize_t)n && !fsync(fd);
+    if (fd >= 0 && close(fd)) ok = 0;
+    return ok ? 0 : -1;
+}
+
+static void sync_dir(const char *dir) {
+    int fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd >= 0) fsync(fd), close(fd);
+}
+
+/* the work of download, in dl (made empty by the caller, removed by it after) */
+static int download_in(const char *feed, const char *want_tag, const char *card, const char *rootfs, const char *dl) {
+    char url[1400], p[1400], tag[64], os[700], loc[1024];
+    static char mem[65536];
+    size_t n;
+    snprintf(os, sizeof os, "%s/.vamp/os", card);
+    /* the tag: the one asked for, else where releases/latest redirects (.../releases/tag/TAG) */
+    if (want_tag) {
+        if (!plain_tag(want_tag)) return fail("--tag %s is not a release tag", want_tag);
+        snprintf(tag, sizeof tag, "%s", want_tag);
+    } else {
+        snprintf(url, sizeof url, "%s/releases/latest", feed);
+        long code = get(url, loc, sizeof loc, -1, 0, mem, sizeof mem, &n);
+        if (code < 0) return fail("%s", dl_err);
+        const char *t = code >= 301 && code <= 308 && strstr(loc, "/releases/tag/") ? strrchr(loc, '/') + 1 : "";
+        if (!plain_tag(t)) return fail("no release at %s (%ld%s%.80s)", feed, code, *loc ? " to " : "", loc);
+        snprintf(tag, sizeof tag, "%s", t);
+    }
+    /* the signature and release.txt, checked before the image is fetched */
+    const char *small[] = {"release.sig", "release.txt"};
+    for (int i = 0; i < 2; ++i) {
+        snprintf(url, sizeof url, "%s/releases/download/%s/%s", feed, tag, small[i]);
+        long code = fetch(url, i ? -1 : 64, 0, mem, sizeof mem, &n);
+        if (code < 0) return fail("%s %s: %s", tag, small[i], dl_err);
+        if (code != 200) return fail(i ? "%s: no %s (%ld)" : "%s: release not signed (%s: %ld): not downloaded", tag, small[i], code);
+        snprintf(p, sizeof p, "%s/%s", dl, small[i]);
+        if (write_synced(p, mem, n)) return fail("cannot write %s", p);
+    }
+    if (release_signed(dl)) return 1;
+    if (strcmp(rel.tag, tag)) return fail("release.txt's tag %s is not %s: not downloaded", rel.tag, tag);
+    /* the card has it already, or something newer */
+    char have[65] = "", card_tag[64] = "";
+    snprintf(p, sizeof p, "%s/vampos.squashfs.sha256", os);
+    FILE *f = fopen(p, "r");
+    if (f) {
+        if (fscanf(f, "%64s", have) != 1) have[0] = 0;
+        fclose(f);
+    }
+    for (int i = 0; i < rel.composed_n; ++i)
+        if (!strcmp(have, rel.composed[i].sha256)) return printf("%s is on the card already (%s)\n", tag, os), 0;
+    snprintf(p, sizeof p, "%s/release.txt", os);
+    if ((f = fopen(p, "r"))) {
+        char line[200];
+        while (fgets(line, sizeof line, f))
+            if (sscanf(line, "tag %63s", card_tag) == 1) break;
+        fclose(f);
+    }
+    if (!want_tag && *card_tag && tag_cmp(tag, card_tag) <= 0)
+        return fail("%s is not newer than the card's %s: not downloaded (--tag %s to take it)", tag, card_tag, tag);
+    /* room for the download and the composed copy beside it, while the card's image stays */
+    struct statvfs sv;
+    long long need = 2 * rel.image_bytes + (16LL << 20);
+    if (statvfs(card, &sv)) return fail("cannot read %s's free space", card);
+    long long freeb = (long long)sv.f_bavail * (long long)sv.f_frsize;
+    if (freeb < need) return fail("the card has %lld MB free; %s needs %lld MB: not downloaded", freeb >> 20, tag, need >> 20);
+    /* the image, onto the card and flushed; stage then reads it back from there */
+    char part[1300], img[1300];
+    snprintf(part, sizeof part, "%s/vampos.squashfs.part", dl);
+    snprintf(img, sizeof img, "%s/vampos.squashfs", dl);
+    snprintf(url, sizeof url, "%s/releases/download/%s/vampos.squashfs", feed, tag);
+    if (!(f = fopen(part, "wb"))) return fail("cannot write %s", part);
+    long code = fetch(url, rel.image_bytes, f, 0, 0, &n);
+    int flushed = !fflush(f) && !fsync(fileno(f));
+    if (fclose(f)) flushed = 0;
+    if (code < 0) return fail("%s vampos.squashfs: %s", tag, dl_err);
+    if (code != 200) return fail("%s: no vampos.squashfs (%ld)", tag, code);
+    if (!flushed || rename(part, img)) return fail("cannot write %s", img);
+    /* stage's checks again on the card's copy, and the image composed with this Q2's vendor set */
+    char out[1300], digest[65], line[200];
+    snprintf(out, sizeof out, "%s/composed", dl);
+    if (stage(dl, rootfs, out, digest)) return 1;
+    /* into .vamp/os: the image renamed over the card's (a running card boot keeps its open copy), then its .sha256;
+     * between the two, q2vampos sees a mismatch and boots today's Vamp */
+    char a[1400], b[1400];
+    if (mkdirs(os)) return fail("cannot make %s", os);
+    int k = snprintf(line, sizeof line, "%s  vampos.squashfs\n", digest);
+    snprintf(a, sizeof a, "%s/vampos.squashfs.sha256.new", os);
+    snprintf(p, sizeof p, "%s/release.txt", dl);
+    char *text = slurp(p, &n);
+    snprintf(b, sizeof b, "%s/release.txt.new", os);
+    int bad = !text || write_synced(a, line, (size_t)k) || write_synced(b, text, n);
+    free(text);
+    if (bad) return unlink(a), unlink(b), fail("cannot write to %s", os);
+    snprintf(p, sizeof p, "%s/rootfs.squashfs", out);
+    char dst[1400];
+    snprintf(dst, sizeof dst, "%s/vampos.squashfs", os);
+    if (rename(p, dst)) return unlink(a), unlink(b), fail("cannot write %s", dst);
+    snprintf(dst, sizeof dst, "%s/vampos.squashfs.sha256", os);
+    if (rename(a, dst)) return fail("cannot write %s", dst);
+    snprintf(dst, sizeof dst, "%s/release.txt", os);
+    if (rename(b, dst)) return fail("cannot write %s", dst);
+    sync_dir(os);
+    printf("downloaded %s: %s/vampos.squashfs (%s), the next card boot's\n", tag, os, digest);
+    return 0;
+}
+
+static int download(const char *feed, const char *tag, const char *card, const char *rootfs) {
+    char vamp[700], lock[800], dl[800];
+    snprintf(vamp, sizeof vamp, "%s/.vamp", card);
+    snprintf(lock, sizeof lock, "%s/download.lock", vamp);
+    snprintf(dl, sizeof dl, "%s/download", vamp);
+    if (mkdirs(vamp)) return fail("cannot make %s", vamp);
+    int fd = open(lock, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) return fail("cannot open %s", lock);
+    if (flock(fd, LOCK_EX | LOCK_NB)) return close(fd), fail("another download is running (%s)", lock);
+    remove_tree(dl); /* a download that was stopped part way */
+    int r = mkdirs(dl) ? fail("cannot make %s", dl) : download_in(feed, tag, card, rootfs, dl);
+    remove_tree(dl);
+    close(fd);
+    return r;
 }
 
 /* ---- app manifests (docs/platform/packages.md) ---- */
@@ -1017,6 +1390,7 @@ static int apps_main(int argc, char **argv) {
 int main(int argc, char **argv) {
     const char *rootfs = "/", *card = "/mnt/mmc", *usage =
         "usage: q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR] | install | restore | confirm [--card DIR]"
+        " | download [--feed URL] [--tag TAG] [--ca FILE] [--timeout S] [--rootfs DIR] [--card DIR]"
         " | app-check DIR | app-add DIR | app-remove ID | app-run DIR | accounts [--root DIR]"
         " | serve [--root DIR] [--runsv PROG] [--self PROG]\n";
     if (argc < 2) return fputs(usage, stderr), 2;
@@ -1026,16 +1400,22 @@ int main(int argc, char **argv) {
         int r = apps_main(argc, argv);
         return r == 2 ? (fputs(usage, stderr), 2) : r;
     }
-    int first = !strcmp(argv[1], "stage") ? 3 : 2;
+    int first = !strcmp(argv[1], "stage") ? 3 : 2, dl = !strcmp(argv[1], "download");
+    const char *feed = FEED, *tag = 0;
     if (first > argc) return fputs(usage, stderr), 2;
     for (int i = first; i < argc; ++i) {
         if (!strcmp(argv[i], "--rootfs") && i + 1 < argc) rootfs = argv[++i];
         else if (!strcmp(argv[i], "--card") && i + 1 < argc) card = argv[++i];
+        else if (dl && !strcmp(argv[i], "--feed") && i + 1 < argc) feed = argv[++i];
+        else if (dl && !strcmp(argv[i], "--tag") && i + 1 < argc) tag = argv[++i];
+        else if (dl && !strcmp(argv[i], "--ca") && i + 1 < argc) dl_ca = argv[++i];
+        else if (dl && !strcmp(argv[i], "--timeout") && i + 1 < argc && atoi(argv[i + 1]) > 0) dl_timeout = atoi(argv[++i]);
         else return fputs(usage, stderr), 2;
     }
+    if (dl) return download(feed, tag, card, rootfs);
     char out[600];
     snprintf(out, sizeof out, "%s/.vamp/stage/recovery-update", card);
-    if (!strcmp(argv[1], "stage")) return stage(argv[2], rootfs, out);
+    if (!strcmp(argv[1], "stage")) return stage(argv[2], rootfs, out, 0);
     if (!strcmp(argv[1], "install")) return install(card);
     if (!strcmp(argv[1], "restore")) return restore(card, 0);
     if (!strcmp(argv[1], "confirm")) return restore(card, 1);

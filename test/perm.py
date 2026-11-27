@@ -18,6 +18,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import conformance  # noqa: E402
 import netd  # noqa: E402
+import pkgd as pkgd_test  # noqa: E402
 import playd  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -34,14 +35,14 @@ SERVICES = {'playd': ('play.sock', 'Q2PLAY/1', 'playback'), 'sysd': ('sys.sock',
 def bins(tmp_path_factory):
     out = tmp_path_factory.mktemp('perm')
     b = {'playd': playd.build(tmp_path_factory.mktemp('playd'))}
-    for name in ('sysd', 'netd'):
-        subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-I', str(conformance.PERM), '-o', str(out/f'q2{name}'),
-                        str(SOURCES[name])], check=True)
+    patch = ROOT/'patch'
+    guard = [str(patch/f) for f in ('q2guard_core.c', 'q2guard_pmic.c', 'card_store.c')]  # q2sysd's heat, as sysd/Makefile builds it
+    for name, extra in (('sysd', ['-std=gnu11', '-DQ2GUARD_HOST', '-I', str(patch)]), ('netd', ['-std=c11'])):
+        subprocess.run(['cc', *extra, '-Wall', '-Wextra', '-Werror', '-O2', '-I', str(conformance.PERM), '-o', str(out/f'q2{name}'),
+                        str(SOURCES[name]), *(guard + ['-pthread'] if name == 'sysd' else [])], check=True)
         b[name] = out/f'q2{name}'
     (out/'fake_wpa.py').write_text(netd.FAKE_WPA)
-    mono = ROOT/'patch/monocypher'
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', f'-I{mono}', '-I', str(conformance.PERM), '-DRELEASE_KEY={0}',
-                    '-o', str(out/'q2pkgd'), str(PKGD), str(mono/'monocypher.c'), str(mono/'monocypher-ed25519.c')], check=True)
+    pkgd_test.compile_q2pkgd(out/'q2pkgd', source=PKGD, perm=conformance.PERM)
     b['pkgd'], b['dir'] = out/'q2pkgd', out
     return b
 

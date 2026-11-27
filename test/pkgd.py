@@ -8,7 +8,8 @@ A release made by tools/vampos.py release (signed with a key made here) is stage
 and from Vamp OS's (the vendor set under /vendor), and each must give rootfs.squashfs byte for byte the image
 tools/vampos.py compose gives; and when BUILD's image has its own mksquashfs, that MIPS mksquashfs, run under QEMU with
 q2pkgd's flags, must give the same bytes too (a Q2 composing what the build machine composed); then each refusal: another key's signature, release.txt changed, the image changed, a
-vendor file changed, a composed hash that is not the result; after any refusal nothing is staged. Needs openssl,
+vendor file changed, a composed hash that is not the result; after any refusal nothing is staged. Then download, from a
+local HTTPS feed shaped as GitHub's, into the card's .vamp/os/, and each of its refusals. Needs openssl,
 mksquashfs and unsquashfs. Q2PKGD_SOURCE builds another copy, to show a broken one fails."""
 import argparse
 import os
@@ -39,14 +40,23 @@ def keypair(d, name):
     return pem, signing.public_key(pub)
 
 
-def build(work, pub):
-    src = pathlib.Path(os.environ.get('Q2PKGD_SOURCE') or ROOT/'pkgd/q2pkgd.c')
+def compile_q2pkgd(out, key='{0}', source=None, perm=None):
+    """q2pkgd for this machine (test/apps.py and test/launch.py build theirs here too): key the release key's public half
+    as a C initialiser, perm q2perm.h's folder, linked with tools/player.py's host mbedTLS (the image's release and settings) for download"""
+    src = pathlib.Path(source or os.environ.get('Q2PKGD_SOURCE') or ROOT/'pkgd/q2pkgd.c')
     mono = ROOT/'patch/monocypher'
-    key = '{' + ','.join(str(b) for b in pub) + '}'
-    out = work/'q2pkgd'
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', f'-I{mono}', '-I', str(ROOT/'perm'), f'-DRELEASE_KEY={key}', '-o', str(out), str(src),
-                    str(mono/'monocypher.c'), str(mono/'monocypher-ed25519.c')], check=True)
+    # in a process of its own: a suite importing this one may have test/thirdparty.py where tools/thirdparty.py goes
+    tls = pathlib.Path(subprocess.run([sys.executable, '-c', "import player; print(player.mbedtls('host'))"], cwd=ROOT/'tools',
+                                      check=True, capture_output=True, text=True).stdout.strip().splitlines()[-1])
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', f'-I{mono}', '-I', str(perm or ROOT/'perm'), '-isystem', str(tls/'include'),
+                    f'-DRELEASE_KEY={key}', '-DFEED="https://feed.invalid/o/r"', '-o', str(out), str(src),
+                    str(mono/'monocypher.c'), str(mono/'monocypher-ed25519.c'),
+                    *(str(tls/'lib'/a) for a in ('libmbedtls.a', 'libmbedx509.a', 'libmbedcrypto.a'))], check=True)
     return out
+
+
+def build(work, pub):
+    return compile_q2pkgd(work/'q2pkgd', '{' + ','.join(str(b) for b in pub) + '}')
 
 
 def stage(binary, rel, rootfs, card):
@@ -110,6 +120,226 @@ def rescue_checks(binary, card, want):
     check(code == 0 and recovery(card) == kept, 'confirm with nothing pending changes nothing')
 
 
+def certs(d):
+    """a CA, a leaf for localhost it signs, and a stranger CA that signed nothing here"""
+    d.mkdir()
+    o = lambda *a: subprocess.run(['openssl', *a], cwd=d, check=True, capture_output=True)  # noqa: E731
+    for ca in ('ca', 'stranger'):
+        o('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', f'{ca}.key', '-out', f'{ca}.pem', '-days', '2', '-subj', f'/CN=Test {ca}')
+    o('req', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'leaf.key', '-out', 'leaf.csr', '-subj', '/CN=localhost')
+    (d/'ext').write_text('subjectAltName=DNS:localhost\n')
+    o('x509', '-req', '-in', 'leaf.csr', '-CA', 'ca.pem', '-CAkey', 'ca.key', '-CAcreateserial', '-out', 'leaf.pem', '-days', '2', '-extfile', 'ext')
+    return d
+
+
+class Feed:
+    """A release feed shaped as GitHub serves one: OWNER/NAME/releases/latest a 302 to .../releases/tag/TAG, and
+    .../releases/download/TAG/ASSET a 302 to the asset on another host (here another port), which answers 200 with its
+    Content-Length. self.releases maps a tag to its folder; self.latest names the tag; self.mode breaks one answer."""
+    def __init__(self, certs):
+        import http.server
+        import ssl
+        import threading
+        self.releases, self.latest, self.mode, self.got = {}, None, {}, []
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def answer(self, code, body=b'', **headers):
+                self.send_response(code)
+                for k, v in headers.items():
+                    self.send_header(k.replace('_', '-'), v)
+                if 'Content_Length' not in headers:
+                    self.send_header('Content-Length', str(len(body)))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except OSError:  # q2pkgd hung up first: a refusal on the head, as meant
+                    pass
+
+            def do_GET(self):
+                outer.got.append(self.path)
+                parts = self.path.split('/')
+                if self.path == '/o/r/releases/latest':
+                    if outer.mode.get('latest') == '200':
+                        return self.answer(200, b'<html>')
+                    tag = outer.latest or ''
+                    return self.answer(302, Location=f'https://localhost:{outer.port}/o/r/releases/tag/{tag}')
+                if self.path.startswith('/o/r/releases/download/') and len(parts) == 7:
+                    scheme = 'http' if outer.mode.get(parts[6]) == 'http' else 'https'
+                    return self.answer(302, Location=f'{scheme}://localhost:{outer.assets.port}/assets/{parts[5]}/{parts[6]}')
+                if self.path.startswith('/assets/') and len(parts) == 4 and (outer.releases.get(parts[2], pathlib.Path('/-'))/parts[3]).exists():
+                    body = (outer.releases[parts[2]]/parts[3]).read_bytes()
+                    mode = outer.mode.get(parts[3])
+                    if mode == 'altered':
+                        body = body[:-1] + bytes([body[-1] ^ 1])
+                    if mode == 'shorter':
+                        body = body[:-1]
+                    if mode == 'cut':  # the length promised, the connection closed early
+                        return self.answer(200, body[:len(body) // 2], Content_Length=str(len(body)))
+                    if mode == 'stall':
+                        self.send_response(200)
+                        self.send_header('Content-Length', str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body[:4096])
+                        self.wfile.flush()
+                        import time
+                        time.sleep(8)
+                        return
+                    return self.answer(200, body)
+                self.answer(404, b'Not Found')
+
+            def log_message(self, *a):
+                pass
+
+        def server(this):
+            srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+            srv.daemon_threads = True
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(certs/'leaf.pem', certs/'leaf.key')
+            srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            this.srv, this.port = srv, srv.server_address[1]
+        server(self)
+
+        class Assets:
+            pass
+        self.assets = Assets()
+        server(self.assets)
+
+    def fetched(self, name):
+        return [g for g in self.got if g.startswith('/assets/') and g.endswith('/' + name)]
+
+
+def download_checks(binary, work, rel, rootfs, stock, want, pem, other):
+    """q2pkgd download: a release fetched from the feed over verified HTTPS, checked as stage checks it, and the composed
+    image put where the next card boot reads it (.vamp/os/, docs/vamp-os-base.md#card-boot); every refusal leaves the
+    card's image, its .sha256 and its switch as they were, and nothing of the download behind"""
+    import fcntl
+    import hashlib
+    c = certs(work/'certs')
+    feed = Feed(c)
+    tag = 'v9.9.9-test'
+    text = (rel/'release.txt').read_text()
+
+    def release(name, new_tag, body=None, key=pem):
+        d = work/'feed'/name
+        shutil.copytree(rel, d)
+        body = body if body is not None else text.replace(f'tag {tag}\n', f'tag {new_tag}\n')
+        (d/'release.txt').write_text(body)
+        msg = f'q2-coda-vampos-v1 {new_tag} {hashlib.sha512(body.encode()).hexdigest()}\n'.encode()
+        (d/'release.sig').write_bytes(signing.sign(msg, pathlib.Path(key).read_text()))
+        return d
+    feed.releases[tag] = rel
+    card = work/'card-dl'
+    kept = stock_recovery(card)
+    os_dir = card/'.vamp/os'
+    os_dir.mkdir(parents=True)
+
+    def old_image():
+        for n in list(os_dir.iterdir()):
+            n.unlink()
+        (os_dir/'vampos.squashfs').write_bytes(b'the image the card boots today ' * 100)
+        (os_dir/'vampos.squashfs.sha256').write_text(f'{vampos.sha256(os_dir/"vampos.squashfs")}  vampos.squashfs\n')
+        (os_dir/'boot-always').write_text('')
+        return {n.name: n.read_bytes() for n in os_dir.iterdir()}
+
+    def dl(*extra, ca=c/'ca.pem', root=rootfs, timeout=None):
+        args = [str(binary), 'download', '--feed', f'https://localhost:{feed.port}/o/r', '--card', str(card), '--rootfs', str(root),
+                '--ca', str(ca), *map(str, extra)]
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout or 300)
+        return r.returncode, (r.stdout + r.stderr).strip()
+
+    def state():
+        return {n.name: n.read_bytes() for n in os_dir.iterdir()}
+
+    before = old_image()
+    feed.latest = tag
+    code, said = dl()
+    sums = (os_dir/'vampos.squashfs.sha256').read_text() if (os_dir/'vampos.squashfs.sha256').exists() else ''
+    check(code == 0 and (os_dir/'vampos.squashfs').exists() and vampos.sha256(os_dir/'vampos.squashfs') == want,
+          f"download: the latest release's composed image is the card's .vamp/os/vampos.squashfs ({said[-120:]})")
+    check(sums == f'{want}  vampos.squashfs\n', f'download: vampos.squashfs.sha256 names it as q2vampos reads it ({sums.strip()[:20]})')
+    check((os_dir/'release.txt').exists() and (os_dir/'release.txt').read_bytes() == (rel/'release.txt').read_bytes(),
+          'download: the release.txt it came with is kept beside it')
+    check((os_dir/'boot-always').exists() and not (os_dir/'boot-once').exists(), 'download: the switch is as it was (boot-always kept, no boot-once made)')
+    check(not (card/'.vamp/download').exists(), 'download: its work folder on the card is gone')
+    check(recovery(card) == kept and not (card/'.vamp/stage').exists(), "download: recovery-update/ untouched and nothing staged for the recovery")
+    check(feed.got[:1] == ['/o/r/releases/latest'] and len(feed.fetched('vampos.squashfs')) == 1, f'download: latest asked first, the image fetched once ({feed.got[:4]})')
+
+    got = state()
+    feed.got.clear()
+    code, said = dl()
+    check(code == 0 and 'already' in said and not feed.fetched('vampos.squashfs') and state() == got,
+          f'download again: the card has that release already, the image not fetched ({said[-80:]})')
+
+    # an older release of another image (its composed hash another), so the card does not have it already
+    feed.releases['v1.0.0'] = release('older', 'v1.0.0', text.replace('tag v9.9.9-test\n', 'tag v1.0.0\n').replace(want, '1' * 64))
+    feed.latest = 'v1.0.0'
+    feed.got.clear()
+    code, said = dl()
+    check(code == 1 and 'not newer' in said and not feed.fetched('vampos.squashfs') and state() == got,
+          f'refused: a latest release older than the card\'s ({said[-80:]})')
+
+    def refused(what, words, fetched_image=None, **kw):
+        before = old_image()
+        feed.got.clear()
+        code, said = dl(*kw.pop('extra', ()), **kw)
+        image = feed.fetched('vampos.squashfs')
+        ok = code == 1 and words in said and state() == before and not (card/'.vamp/download').exists() and recovery(card) == kept
+        if fetched_image is not None:
+            ok = ok and bool(image) == fetched_image
+        check(ok, f'refused: {what} ({said[-100:]})')
+
+    feed.releases['v9.9.10'] = release('other-key', 'v9.9.10', key=other)
+    feed.latest = 'v9.9.10'
+    refused("another key's signature, the image never fetched", 'release.sig', fetched_image=False)
+    feed.releases['v9.9.11'] = rel  # signed as v9.9.9-test, served as v9.9.11
+    feed.latest = 'v9.9.11'
+    refused('a release signed for another tag, the image never fetched', 'tag', fetched_image=False)
+    feed.releases['v9.9.12'] = release('huge', 'v9.9.12', text.replace(f'tag {tag}\n', 'tag v9.9.12\n').replace(
+        next(l for l in text.splitlines() if l.startswith('image ')), f'image {"0" * 128} {1 << 50}'))
+    feed.latest = 'v9.9.12'
+    refused('a release larger than the card has room for, the image never fetched', 'free', fetched_image=False)
+    feed.releases['v9.9.13'] = release('unsigned', 'v9.9.13')
+    (feed.releases['v9.9.13']/'release.sig').unlink()
+    feed.latest = 'v9.9.13'
+    refused('a release with no signature', 'not signed', fetched_image=False)
+    feed.latest = tag
+    for mode, words in (('altered', 'not the image'), ('shorter', 'bytes'), ('cut', 'short'), ('http', 'https')):
+        feed.mode = {'vampos.squashfs': mode}
+        refused(f'the image {mode} on the way', words)
+    feed.mode = {'vampos.squashfs': 'stall'}
+    import time
+    t0 = time.monotonic()
+    refused('a transfer that stalls (--timeout 2)', 'timed out', extra=('--timeout', '2'))
+    check(time.monotonic() - t0 < 30, f'the stall ended by the timeout ({time.monotonic() - t0:.0f} s)')
+    feed.mode = {'latest': '200'}
+    refused('a latest that is not a redirect to a tag', 'no release', fetched_image=False)
+    feed.mode = {}
+    feed.latest = '..%2fx'
+    refused('a tag that is not plain', 'no release', fetched_image=False)
+    feed.latest = tag
+    refused('a server whose certificate the CA bundle does not sign', 'TLS', fetched_image=False, ca=c/'stranger.pem')
+    first = sorted(vampos.read_manifest()[0])[0]
+    saved = (stock/first).read_bytes()
+    (stock/first).write_bytes(saved + b'x')
+    refused('a vendor file changed', f'{first} is not the file', root=stock)
+    (stock/first).write_bytes(saved)
+    lock = open(card/'.vamp/download.lock', 'w')
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    refused('another download running', 'another download', fetched_image=False)
+    lock.close()
+    old_image()
+    (card/'.vamp/download').mkdir()
+    (card/'.vamp/download/vampos.squashfs.part').write_bytes(b'left by a download that was killed')
+    code, said = dl()
+    check(code == 0 and vampos.sha256(os_dir/'vampos.squashfs') == want and not (card/'.vamp/download').exists(),
+          f"a killed download's leftovers are cleared and the next one lands ({said[-60:]})")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('build', type=pathlib.Path)
@@ -143,6 +373,7 @@ def main():
             check(not pathlib.Path(str(out) + '.q2pkgd').exists(), f'from {label}: its work folder is gone')
             check(recovery(card) == kept, f'from {label}: the card\'s recovery-update/ (the rescue copy) is untouched by stage')
         rescue_checks(binary, work/'card-a', want)
+        download_checks(binary, work, rel, vfs, stock, want, pem, other)
 
         image_fs = work/'imagefs'
         subprocess.run(['unsquashfs', '-q', '-n', '-ignore-errors', '-no-xattrs', '-d', str(image_fs), str(a.build/'vampos.squashfs')],

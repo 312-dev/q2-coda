@@ -17,6 +17,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import conformance  # noqa: E402
+import pkgd as pkgd_test  # noqa: E402
 import playd  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -68,9 +69,7 @@ CHIME = 'name=Chime\napi=1\nversion=1\nkind=service\nentry=q2-chime\npermissions
 @pytest.fixture(scope='session')
 def bins(tmp_path_factory):
     out = tmp_path_factory.mktemp('launch')
-    mono = ROOT/'patch/monocypher'
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', f'-I{mono}', '-I', str(conformance.PERM), '-DRELEASE_KEY={0}',
-                    '-o', str(out/'q2pkgd'), str(PKGD), str(mono/'monocypher.c'), str(mono/'monocypher-ed25519.c')], check=True)
+    pkgd_test.compile_q2pkgd(out/'q2pkgd', source=PKGD, perm=conformance.PERM)
     with tarfile.open(BUSYBOX) as t:
         t.extractall(out, filter='data')
     src = out/'busybox-1.37.0'
