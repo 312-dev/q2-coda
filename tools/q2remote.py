@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import typing
 import zlib
 
 PORT = 2302
@@ -54,7 +55,7 @@ def load_key():
 
 # vamp (tools/vamp.py, docs/adb.md#vamp) runs this module's commands over adb instead of port 2302: it sets
 # TRANSPORT to its Device, whose shell() keeps shell()'s contract, and every command below goes through it.
-TRANSPORT = None
+TRANSPORT: typing.Any = None
 
 
 def shell(cmd, data=b"", timeout=TIMEOUT, host=None, sink=None, done=None):
