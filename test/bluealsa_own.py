@@ -5,6 +5,7 @@ an A2DP source transport per codec, the PCM opened as the ALSA plugin opens it (
 audio written through the encoder to the transport's socket, with the encoder thread's CPU time beside it.
 
     python3 test/bluealsa_own.py STOCKFS DAEMON [--stock] [--codecs SBC,AAC,...] [--seconds N] [--json FILE]
+                                 [--capture DIR]
 
 STOCKFS is an unpacked V1.36 rootfs (qemu's -L, the libraries the daemon loads); DAEMON the MIPS program:
 Vamp's bluealsad (tools/thirdparty.py build bluealsa), or with --stock Shanling's bluealsa 4.0.0, which is
@@ -15,6 +16,13 @@ What it cannot show: anything a radio does. The transport's socket is a local on
 there is no AVDTP, no real MTU, no flow control from a controller, no headset and no bluetoothd of Shanling's.
 The CPU figure is the host's time in qemu's thread for the encoder, good for comparing two daemons under the
 same emulator and nothing else: it is not the Q2's.
+
+--capture DIR writes, for each codec, what the payload's callers read (docs/bluealsa.md#the-callers): the
+daemon's org.freedesktop.DBus.ObjectManager.GetManagedObjects on /org/bluealsa as `dbus-send --print-reply`
+prints it while the PCM exists, as DIR/<stock|own>-<codec>.txt, the fixtures test/unit/test_q2bt.py,
+test/fw/test_bt_battery.py, test/fw/test_bt_ui.py and test/q2_guest.py read. The results also say which PCM
+signals the daemon sent (InterfacesAdded and InterfacesRemoved on /org/bluealsa, and 4.0.0's PCMAdded and
+PCMRemoved), from dbus-monitor.
 
 Run by the system python3 (dbus-python and PyGObject), as test/guest/fake_bluez.py is."""
 import argparse
@@ -274,7 +282,17 @@ def audio(rate, channels, bits, width, seconds):
     return bytes(out)
 
 
-def run(stockfs, daemon, stock, codecs, seconds, qemu):
+def signals(path):
+    """(member, object path) of each org.bluealsa signal dbus-monitor wrote to path"""
+    out = []
+    for line in pathlib.Path(path).read_text(errors='replace').splitlines():
+        if line.startswith('signal ') and ' member=' in line:
+            fields = dict(f.split('=', 1) for f in line.split() if '=' in f)
+            out.append((fields.get('member', ''), fields.get('path', '')))
+    return out
+
+
+def run(stockfs, daemon, stock, codecs, seconds, qemu, capture=None):
     import dbus
     results, work = {}, pathlib.Path(tempfile.mkdtemp(prefix='q2-bluealsa-'))
     address = f'unix:path={work}/bus'
@@ -317,6 +335,11 @@ def run(stockfs, daemon, stock, codecs, seconds, qemu):
                                   endpoints=reg['endpoints'], profiles=reg['profiles'], rss_kb=rss_kb(d.pid),
                                   shanling_service=bool(bus.name_has_owner('shanling.bluealsa')))
         manager = dbus.Interface(bus.get_object('org.bluealsa', '/org/bluealsa'), 'org.freedesktop.DBus.ObjectManager')
+        owner = bus.get_name_owner('org.bluealsa')
+        monitor = subprocess.Popen(['dbus-monitor', '--address', address, f"type='signal',sender='{owner}'"],
+                                   stdout=open(work/'signals', 'w'), stderr=subprocess.DEVNULL)
+        procs.append(monitor)
+        time.sleep(0.3)  # its match in place before the first configuration
         for codec in codecs:
             r = results[codec] = {}
             answer = fake.ask(f'config {codec}')
@@ -336,6 +359,16 @@ def run(stockfs, daemon, stock, codecs, seconds, qemu):
                 r['error'] = 'no PCM appeared'
                 continue
             path, p = pcm
+            if capture:
+                reply = subprocess.run(['dbus-send', '--system', '--print-reply', '--dest=org.bluealsa', '/org/bluealsa',
+                                        'org.freedesktop.DBus.ObjectManager.GetManagedObjects'],
+                                       env=env, capture_output=True, text=True, check=True).stdout
+                pathlib.Path(capture).mkdir(parents=True, exist_ok=True)
+                (pathlib.Path(capture) / f'{"stock" if stock else "own"}-{codec}.txt').write_text(reply)
+                if stock:  # what the callers read before: 4.0.0's GetPCMs, to compare (5.0.0 has none)
+                    old = subprocess.run(['dbus-send', '--system', '--print-reply', '--dest=org.bluealsa', '/org/bluealsa',
+                                          'org.bluealsa.Manager1.GetPCMs'], env=env, capture_output=True, text=True).stdout
+                    (pathlib.Path(capture) / f'stock-{codec}-GetPCMs.txt').write_text(old)
             rate = int(p['Sampling' if stock else 'Rate'])
             fmt, channels = int(p['Format']), int(p['Channels'])
             bits, width = fmt & 0xff, fmt >> 8 & 0x3f
@@ -375,6 +408,9 @@ def run(stockfs, daemon, stock, codecs, seconds, qemu):
                 time.sleep(0.05)
             r['ok'] = r['drop'] == 'OK' and r['packets_a_second'] > 0 and d.poll() is None
         results['alive_at_end'] = d.poll() is None
+        time.sleep(0.3)
+        results['signals'] = sorted({m for m, path in signals(work/'signals') if path.startswith('/org/bluealsa')}
+                                    & {'InterfacesAdded', 'InterfacesRemoved', 'PCMAdded', 'PCMRemoved'})
     finally:
         if fake:
             fake.close()
@@ -402,14 +438,17 @@ def main():
     a.add_argument('--seconds', type=int, default=15)
     a.add_argument('--qemu', default='qemu-mipsel')
     a.add_argument('--json')
+    a.add_argument('--capture')
     args = a.parse_args()
     codecs = args.codecs.split(',')
-    results = run(args.stockfs, args.daemon, args.stock, codecs, args.seconds, args.qemu)
+    results = run(args.stockfs, args.daemon, args.stock, codecs, args.seconds, args.qemu, args.capture)
     tail = results.pop('daemon_log_tail')
     print(json.dumps(results, indent=1))
     if args.json:
         pathlib.Path(args.json).write_text(json.dumps(results, indent=1) + '\n')
-    ok = results.get('alive_at_end') and all(results.get(c, {}).get('ok') for c in codecs)
+    # the object manager's two signals, which the payload's callers follow (docs/bluealsa.md#the-callers)
+    ok = (results.get('alive_at_end') and all(results.get(c, {}).get('ok') for c in codecs) and
+          {'InterfacesAdded', 'InterfacesRemoved'} <= set(results.get('signals', [])))
     if not ok:
         print(tail, file=sys.stderr)
     return 0 if ok else 1

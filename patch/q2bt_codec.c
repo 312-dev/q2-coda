@@ -1,5 +1,5 @@
 /* q2bt-codec PCM CODEC: the step-down's switch (docs/internals.md#bluetooth-link-monitor). Asks
- * bluealsa for org.bluealsa.PCM1.SelectCodec(CODEC, {}) on the PCM at object path PCM (GetPCMs's
+ * bluealsa for org.bluealsa.PCM1.SelectCodec(CODEC, {}) on the PCM at object path PCM (GetManagedObjects's
  * A2DP source PCM, q2bt_core.c bt_pcms_path), CODEC as bluealsa names it ("aptX-HD", "aptX",
  * "SBC"). dbus-send cannot send it: its empty a{sv} needs a variant inside a container. A program
  * of its own, forked by q2guard (q2bt.c) for each switch, so the overheat guardian links no libdbus

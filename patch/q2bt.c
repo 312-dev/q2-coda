@@ -14,7 +14,7 @@
  * up, wpa_supplicant's STATUS (the band) and Realtek's coex dump (its moving lines). While a stream
  * runs the band is asked every BT_LINK_MS too, and BT_PACE_FILE says whether downloads are paced
  * (bt_pace). With nothing connected a tick is the two ioctls. Two changes to how the Q2
- * streams: the A2DP sink's link (its address from GetPCMs) is sent Change Connection Packet Type,
+ * streams: the A2DP sink's link (its address from bluealsa's PCMs) is sent Change Connection Packet Type,
  * allowing EDR, once to each of its handles while a stream runs; and under Auto with the
  * step-down's setting on (Adapt to Signal), a link the radio cannot keep up with is moved from aptX
  * HD or aptX straight to SBC and back (bt_step), each switch q2bt-codec's SelectCodec; and on SBC
@@ -39,7 +39,7 @@
 #define CFG_FILE "/tmp/q2bt.cfg" /* the CODEC note's cfg= and cap=: GetCodecs, then the transport's object (cfg_start) */
 #define PCMS_CMD                                                                                   \
     "dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "                          \
-    "org.bluealsa.Manager1.GetPCMs > " PCMS_FILE " 2>/dev/null"
+    "org.freedesktop.DBus.ObjectManager.GetManagedObjects > " PCMS_FILE " 2>/dev/null"
 #define ANSWER_MS 150  /* the five answers are waited for this long at most */
 #define RETRY_MS 60000 /* a Bluetooth socket that would not open is tried again after this */
 #define FIND_MS 10000  /* bluealsa looked for again, while not found, after this */

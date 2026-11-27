@@ -49,10 +49,10 @@ level comes over HFP and is handed to BlueZ ([internals](internals.md#headset-ba
 | Client                                                                      | What it uses                                                                                                                                                                                                                                                                                                         |
 | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `q2player` (`player/output.c`), `q2video`, Rockbox, games                   | the ALSA PCM `plug:'bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp'` at the rate the transport gives; `snd_pcm_pause`, drop and drain; `-EBUSY` while another client holds it, `-ENODEV` when a codec switch replaces it ([internals](internals.md#bluetooth-pause))                                                    |
-| demo's payload, through `dbus-send` (`patch/bt_ui.c`, `patch/bt_battery.c`) | `org.bluealsa.Manager1.GetPCMs`; `org.bluealsa.PCM1.GetCodecs` and `SelectCodec`; the PCM's `Codec`, `Sampling`, `CodecConfiguration` as `dbus-send` prints them                                                                                                                                                     |
-| `q2guard`'s link monitor (`patch/q2bt.c`)                                   | `GetPCMs` and `GetCodecs` the same way; the daemon's pid by its name (`bluealsa`), its encoder thread by its name (`ba-a2dp-...`) for CPU; two bytes at fixed addresses in its memory, written through `/proc/PID/mem`, to step SBC's bitpool and AAC's peak down ([internals](internals.md#bluetooth-link-monitor)) |
+| demo's payload, through `dbus-send` (`patch/bt_ui.c`, `patch/bt_battery.c`) | the object manager's `GetManagedObjects` on `/org/bluealsa` ([The callers](#the-callers)); `org.bluealsa.PCM1.GetCodecs` and `SelectCodec`; the PCM's `Codec`, `Sampling` or `Rate`, `CodecConfiguration` as `dbus-send` prints them |
+| `q2guard`'s link monitor (`patch/q2bt.c`) | `GetManagedObjects` and `GetCodecs` the same way; the daemon's pid by its name (`bluealsa`), its encoder thread by its name (`ba-a2dp-...`) for CPU; two bytes at fixed addresses in its memory, written through `/proc/PID/mem`, to step SBC's bitpool and AAC's peak down ([internals](internals.md#bluetooth-link-monitor)) |
 | `q2bt-codec` (`patch/q2bt_codec.c`)                                         | `PCM1.SelectCodec` over libdbus                                                                                                                                                                                                                                                                                      |
-| `q2-guest` (`patch/q2_guest.c`)                                             | `GetPCMs`, the `PCMAdded` and `PCMRemoved` signals, on `org.bluealsa` and `org.bluealsa.sink`; `pidof bluealsa`; `bluealsa-aplay`                                                                                                                                                                                    |
+| `q2-guest` (`patch/q2_guest.c`) | `GetManagedObjects`, and the object manager's `InterfacesAdded` and `InterfacesRemoved` on `/org/bluealsa`, from `org.bluealsa` and `org.bluealsa.sink`; `pidof bluealsa`; `bluealsa-aplay` |
 | stock demo and `libbtctl.so`                                                | Shanling's own service, below                                                                                                                                                                                                                                                                                        |
 
 **Volume** ([internals](internals.md#headset-controls-and-volume)). Stock's launcher passes no
@@ -117,12 +117,40 @@ What 5.0.0 costs, all of it at the D-Bus edge and all read from the two sources:
 
 | Change since 4.0.0                                                                                                                                                  | Who it touches                                                                     | Answer                                                                                                                                                                           |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Manager1.GetPCMs`, `PCMAdded` and `PCMRemoved` are gone (4.1): the PCMs are listed by `org.freedesktop.DBus.ObjectManager` on `/org/bluealsa`, which 4.0.0 has too | `bt_ui.c`, `bt_battery.c`, `q2bt.c`, `q2_guest.c`                                  | move the four callers to `GetManagedObjects` and `InterfacesAdded` first: that works on stock's daemon as well, so it lands before the cutover and is tested against stock       |
-| the PCM's `Sampling` is `Rate`; `Volume` is an array of bytes, not a `q`; `ChannelMap`, `ClientDelay` and `Running` are new                                         | the same readers; stock's ALSA plugins and `bluealsa-aplay`, which read `Sampling` | the readers take either name; the plugins and `bluealsa-aplay` are ours too, from the same source, and each daemon is paired with its own ([Cutover](#cutover-and-fallback))     |
+| `Manager1.GetPCMs`, `PCMAdded` and `PCMRemoved` are gone (4.1): the PCMs are listed by `org.freedesktop.DBus.ObjectManager` on `/org/bluealsa`, which 4.0.0 has too | `bt_ui.c`, `bt_battery.c`, `q2bt.c`, `q2_guest.c`                                  | done: the four callers use `GetManagedObjects`, `InterfacesAdded` and `InterfacesRemoved`, which stock's daemon has as well, tested against both ([The callers](#the-callers)) |
+| the PCM's `Sampling` is `Rate`; `Volume` is an array of bytes, not a `q`; `ChannelMap`, `ClientDelay` and `Running` are new                                         | the same readers; stock's ALSA plugins and `bluealsa-aplay`, which read `Sampling` | the readers take either name (done; none reads `Volume`); the plugins and `bluealsa-aplay` are ours too, from the same source, and each daemon is paired with its own ([Cutover](#cutover-and-fallback))     |
 | endpoints are registered with `Media1.RegisterApplication`, not `RegisterEndpoint`                                                                                  | bluetoothd                                                                         | stock's 5.66 has both (read: its strings); whether Shanling's codec priority still orders endpoints registered that way **needs a Q2**                                           |
 | A2DP volume is native by default (`--a2dp-volume` is gone)                                                                                                          | the volume path                                                                    | nobody on the Q2 sets the PCM's volume, so bluealsa should scale nothing and write nothing to BlueZ, as now; **needs a Q2**                                                      |
 | the daemon is `bluealsad`, its policy file `org.bluealsa.conf`                                                                                                      | demo's `killall`, `q2guard`, `q2-guest`                                            | installed under the name `bluealsa`; stock's policy file already allows `org.bluealsa`                                                                                           |
 | a per-device store (volume, mute, delay) under `--localstatedir`                                                                                                    | the read-only rootfs                                                               | kept on the tmpfs, `/tmp/q2-bluealsa/lib/bluealsa`; the daemon makes only the last directory (measured: it logs an error at each save otherwise), so the launcher makes the rest |
+
+## The callers
+
+The payload's four readers of bluealsa's PCMs use what stock's bluealsa 4.0.0 and 5.0.0 both have, so they work
+with either daemon and the cutover changes nothing of theirs:
+
+- **The list:** `org.freedesktop.DBus.ObjectManager.GetManagedObjects` on `/org/bluealsa` (each PCM an object
+  with the interface `org.bluealsa.PCM1`), not 4.0.0's `Manager1.GetPCMs`, which 5.0.0 does not have.
+  `bt_ui.c` (the PCM's path for `GetCodecs` and for a Quality switch), `bt_battery.c` (the stream's rate) and
+  `q2bt.c` (the link monitor's codec, rate, delay, the PCM's path and the sink's address, `q2bt_core.c`) read
+  `dbus-send --print-reply`'s text, whose `object path` lines and property lines are printed the same way, one
+  level deeper; `q2_guest.c` reads the reply itself and takes the properties of `org.bluealsa.PCM1`.
+- **Coming and going:** the object manager's `InterfacesAdded` and `InterfacesRemoved` on `/org/bluealsa`
+  (`q2_guest.c`), not `PCMAdded` and `PCMRemoved`. Measured: stock's daemon sends both pairs, ours the object
+  manager's alone, so listening to that one pair sees each PCM once under either.
+- **The rate:** `Sampling` (4.0.0) or `Rate` (5.0.0), whichever is there. Nothing on the Q2 reads `Volume`,
+  whose type changed.
+
+Measured, not assumed: `test/bluealsa_own.py --capture DIR` saves each daemon's `GetManagedObjects` reply while
+a PCM exists, as `dbus-send` prints it. Those replies, stock's and ours for SBC and AAC, are the fixtures in
+`test/bt-fixtures/` that the callers' tests read: `test/unit/test_q2bt.py` (codec, rate, delay, path and sink
+from each), `test/fw/test_bt_battery.py` and `test/fw/test_bt_ui.py` (the payload's own commands run under `sh`
+against a `dbus-send` that answers with each daemon's reply), and `test/q2_guest.py`, whose stand-in bluealsa
+answers and signals as each daemon was measured to (`Q2_FAKE_BLUEALSA`), the whole Guest Play scenario run once
+against each. Stock's `GetPCMs` holds the same properties as its object list (captured beside it); neither has
+`CodecConfiguration`. Seen to fail first: the four callers as they were, against the 5.0.0 replies (the rate
+read as 0, no PCM found, the car's PCM never seen), and against stock's when a test asks that `GetPCMs` is not
+used. The harness passes only when the daemon sends both signals.
 
 ## The patches
 
@@ -351,6 +379,15 @@ each codec. Before each step note the UTC time; after it pull the unified log an
 Steps 1 to 5 decide the cutover's shape; 6 to 9 are what phase 2's source changes are measured against. demo
 and `q2player` are not in this plan on purpose: they need the compatibility service and the callers' move to
 `GetManagedObjects`, phase 2's first two steps.
+
+## Needs a device
+
+1. **The callers on a Q2**, with stock's daemon, before anything else changes: the link monitor's `CODEC` line
+   (codec, rate, delay) and its step-down on a weak link, the status bar's battery with the stream's rate
+   (`/tmp/q2bt.batt`), Quality's switch on a live link, and a Guest Play session (a phone streams, the car is
+   named with its codec line). The text they parse is printed by the Q2's own `dbus-send` and read by BusyBox's
+   `sed`, which the harness did not use.
+2. The same with ours, once the launcher exists.
 
 ## Risks
 

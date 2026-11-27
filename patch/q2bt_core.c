@@ -507,7 +507,8 @@ int bt_pcms(const char *text, char *codec, int n, unsigned *hz, unsigned *delay)
         for (v += 8; *v && *v != '"' && i < n - 1; ++v) codec[i++] = *v;
         codec[i] = 0;
     }
-    if ((v = find_in(pcm, end, "\"Sampling\"")) && (v = find_in(v, end, "uint32 ")))
+    if (((v = find_in(pcm, end, "\"Sampling\"")) || (v = find_in(pcm, end, "\"Rate\""))) &&
+        (v = find_in(v, end, "uint32 ")))
         *hz = digits(v + 7);
     if ((v = find_in(pcm, end, "\"Delay\"")) && (v = find_in(v, end, "uint16 ")))
         *delay = digits(v + 7);

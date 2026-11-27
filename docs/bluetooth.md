@@ -100,7 +100,7 @@ grep '^0:' '/proc/tty/driver/INGENIC serial'    # the H5 port: tx rx fe pe brk o
 cat /proc/net/wireless; cat /sys/class/net/wlan0/statistics/rx_bytes /sys/class/net/wlan0/statistics/tx_bytes
 wpa_cli -i wlan0 status | grep -E '^(freq|wpa_state)='; wpa_cli -i wlan0 signal_poll
 cat /proc/net/rtl8733bs/wlan0/ps_info
-dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa org.bluealsa.Manager1.GetPCMs
+dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa org.freedesktop.DBus.ObjectManager.GetManagedObjects
 ```
 
 **HCI reads**, the class `q2guard`'s link monitor sends (RSSI and the AFH map each second while streaming and every 10 s while a link is up; the role, the two timeouts and the maximum power once a link: [A day-long sampler](#a-day-long-sampler)):
