@@ -54,6 +54,8 @@ while True:
     if now and now != seen:
         seen = now
         seq = now.split()[0]
+        os.makedirs(root + '/mnt/mmc/.navi/cache', exist_ok=True)  # the song whole before its line, as the app renames it in
+        open(root + '/mnt/mmc/.navi/cache/s1.flac', 'wb').write(b'song')
         open(root + '/tmp/navi.m3u', 'w').write('#EXTM3U\n/mnt/mmc/.navi/cache/s1.flac\n')
         open(root + '/tmp/q2-navi.play.tmp', 'w').write(seq + ' /tmp/navi.m3u\n')
         os.rename(root + '/tmp/q2-navi.play.tmp', root + '/tmp/q2-navi.play')

@@ -407,6 +407,7 @@ def test_a_stream_cache_copy_shows_its_server_row_and_cover(run):
     (root/'mnt/mmc/.navi/covers/al1.jpg').write_bytes(b'\xff\xd8 album one')
     play_list(root, [SERVER + 1], 0)
     assert wait_for(root/'tmp/q2-navi.catplay')
+    land(root, '/mnt/mmc/.navi/stream/acct/hi/a/Cloud One [s1].flac')
     (root/'tmp/navi.m3u').write_text('/mnt/mmc/.navi/stream/acct/hi/a/Cloud One [s1].flac\n')
     (root/'tmp/q2-navi.play').write_text('1 /tmp/navi.m3u\n')
     pl.pump(1.0)
@@ -513,6 +514,7 @@ def test_a_list_with_server_songs_is_handed_to_their_app_and_its_m3u_played(run)
                                            '/mnt/mmc/Music/b.mp3', '/mnt/mmc/.navi/cat/al1/s2.flac']
     pl.pump(0.5)
     assert pl.songs() == [], 'nothing plays before the app answers'
+    land(root, '/mnt/mmc/.navi/cache/s1.flac', '/mnt/mmc/Music/b.mp3')
     (root/'tmp/navi.m3u').write_text('#EXTM3U\n/mnt/mmc/.navi/cache/s1.flac\n/mnt/mmc/Music/b.mp3\n')
     (root/'tmp/q2-navi.play').write_text('1 /tmp/navi.m3u\n')
     pl.pump(1.0)
@@ -596,6 +598,7 @@ def test_an_answer_s_copy_named_by_servermeta_shows_its_server_row(run):
     sock = catalogue(root, copies={SERVER + 2: '/mnt/mmc/.navi/cache/s2.flac'})
     play_list(root, [SERVER + 2], 0)
     assert wait_for(root/'tmp/q2-navi.catplay')
+    land(root, '/mnt/mmc/.navi/cache/s2.flac')
     (root/'tmp/navi.m3u').write_text('/mnt/mmc/.navi/cache/s2.flac\n')
     (root/'tmp/q2-navi.play').write_text('1 /tmp/navi.m3u\n')
     pl.pump(1.0)
@@ -642,6 +645,7 @@ def test_a_stopped_app_is_started_through_q2pkgd_and_handed_the_list_once_it_lis
     s = socket.socket(socket.AF_UNIX)
     s.bind(str(root/'tmp/q2-navi.browse.sock'))
     assert wait_for(root/'tmp/q2-navi.catplay')
+    land(root, '/mnt/mmc/.navi/cache/s1.flac')
     (root/'tmp/navi.m3u').write_text('/mnt/mmc/.navi/cache/s1.flac\n')
     (root/'tmp/q2-navi.play').write_text('1 /tmp/navi.m3u\n')
     pl.pump(1.0)
@@ -680,6 +684,74 @@ def test_an_answer_to_an_older_catplay_is_not_taken(run):
     (root/'tmp/q2-navi.play').write_text('7 /tmp/navi.m3u\n')
     pl.pump(1.0)
     assert pl.songs() == []
+    sock.close()
+
+
+# ---- the answer as it grows (docs/playd.md#the-answer-as-it-grows) ----
+
+def land(root, *paths):
+    """songs written whole on the stand-in card, as the app renames a download into place"""
+    for p in paths:
+        f = root/p.lstrip('/')
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b'song')
+
+
+def answer(root, *lines, seq=1):
+    (root/'tmp/navi.m3u').write_text(''.join(l + '\n' for l in lines))
+    (root/'tmp/q2-navi.play').write_text(f'{seq} /tmp/navi.m3u\n')
+
+
+def test_an_answer_s_song_not_there_yet_is_waited_for_and_played_as_it_lands(run):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1, SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    one, two = '/mnt/mmc/.navi/stream/a/hi/x/Cloud One [s1].flac', '/mnt/mmc/.navi/stream/a/hi/x/Cloud Two [s2].flac'
+    land(root, one)
+    answer(root, one, two)
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', one)]
+    pl.say('player-status', 'exit')
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', one)] and pl.names()[-1] != 'mcl-orderstop', 'the next not there yet: no end, no skip'
+    n = now(root, 0.3)
+    assert (n['state'], n['title']) == ('1', 'Cloud Two'), 'Now Playing on the song waited for'
+    land(root, two)
+    pl.pump(1.0)
+    assert pl.songs()[-1] == ('set-songurl', two), 'played as it lands'
+    sock.close()
+
+
+def test_an_answer_with_nothing_there_yet_plays_its_first_as_it_lands(run):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    one = '/mnt/mmc/.navi/stream/a/hi/x/Cloud One [s1].flac'
+    answer(root, one)
+    pl.pump(1.0)
+    assert pl.songs() == []
+    land(root, one)
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', one)]
+    sock.close()
+
+
+def test_the_app_may_rewrite_the_lines_after_those_taken_and_off_card_lines_are_passed_over(run):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1, SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    land(root, '/mnt/mmc/Music/a.flac', '/mnt/mmc/Music/b.mp3')
+    answer(root, '#EXTM3U', '/tmp/elsewhere.flac', '/mnt/mmc/../etc/passwd', '/mnt/mmc/Music/a.flac', '/mnt/mmc/.navi/later.flac')
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/a.flac')], 'the off-card lines passed over'
+    (root/'tmp/navi.m3u').write_text('/tmp/elsewhere.flac\n/mnt/mmc/../etc/passwd\n/mnt/mmc/Music/a.flac\n/mnt/mmc/Music/b.mp3\n')
+    pl.pump(0.6)
+    pl.say('player-status', 'exit')
+    pl.pump(1.0)
+    assert pl.songs()[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3'), 'the line after those taken, rewritten'
     sock.close()
 
 

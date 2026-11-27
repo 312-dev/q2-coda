@@ -89,6 +89,16 @@ static struct {
     unsigned seq;                /* moves with every change of what is written */
 } q = {.volume = 24};
 
+/* A server list's answer as it grows (docs/playd.md#the-answer-as-it-grows): the app's m3u, read again when it changes,
+ * its entries taken in order up to the first whose file is not there yet (want), as the firmware's m3u_songs. next
+ * counts the entries taken or passed over, so the app may rewrite the lines after them. waiting: the queue has played
+ * up to want, which plays once it lands. */
+static struct {
+    int on, next, waiting;
+    char file[300], want[360];
+    long long stamp;
+} mq;
+
 static unsigned long long now_written_at;
 static unsigned now_written_seq = ~0u;
 
@@ -277,6 +287,14 @@ static int path_lookup(int at) {
     return 1;
 }
 
+/* Now Playing while a grown answer waits for mq.want: that song, by its row as path_lookup finds it, nothing sent */
+static void path_lookup_want(void) {
+    char *p[1] = {mq.want}, **was = q.paths;
+    q.paths = p;
+    path_lookup(0);
+    q.paths = was, q.pos_ms = 0, q.len_s = 0, ++q.seq;
+}
+
 /* The queue's song at `at` from ss seconds (a queue given back after a source starts where it was put aside). */
 static int start_from(int at, int ss) {
     while (at >= 0 && at < q.n) {
@@ -329,6 +347,12 @@ static void ended(int error) {
     }
     q.errors = error ? q.errors + 1 : 0;
     if (q.errors < ERRORS_MAX && q.at + 1 < q.n && !start_at(q.at + 1)) return;
+    if (q.errors < ERRORS_MAX && q.paths && mq.on && *mq.want) { /* the next not there yet: it plays once it lands */
+        mq.waiting = 1, q.at = q.n - 1;
+        logf_("waiting for %s", mq.want);
+        path_lookup_want();
+        return;
+    }
     player_send("mcl-orderstop", "null");
     q.state = STOPPED, q.pos_ms = 0;
     ++q.seq;
@@ -536,6 +560,60 @@ static struct { int on, at, starting; char app[64], before[600]; unsigned seq; u
 static void free_paths(void) {
     for (int i = 0; i < q.np; ++i) free(q.paths[i]);
     free(q.paths), q.paths = 0, q.np = 0;
+    mq.on = mq.waiting = 0;
+}
+
+/* a path an app names: on the card, with no ".." segment (patch/addon.c card_path) */
+static int card_path(const char *p) {
+    if (strncmp(p, "/mnt/mmc/", 9)) return 0;
+    for (const char *s = p;;) {
+        if (s[0] == '.' && s[1] == '.' && (!s[2] || s[2] == '/')) return 0;
+        if (!(s = strchr(s, '/'))) return 1;
+        ++s;
+    }
+}
+
+static long long file_stamp(const char *p) {
+    struct stat st;
+    return stat(p, &st) ? -1 : (long long)st.st_mtime * 1000000007LL + (long long)st.st_size;
+}
+
+/* the m3u's entries from mq.next on into q.paths, up to the first not there yet (mq.want); an entry off the card is
+ * passed over. The file read whole each time (it is the app's few lines). */
+static void m3u_read(void) {
+    FILE *f = fopen(path(mq.file), "r");
+    char line[1100], e[sizeof mq.want];
+    int entry = 0;
+    mq.want[0] = 0, mq.stamp = file_stamp(path(mq.file));
+    while (f && fgets(line, sizeof line, f)) {
+        char *l = line;
+        if (!strncmp(l, "\xEF\xBB\xBF", 3)) l += 3; /* a BOM */
+        l[strcspn(l, "\r\n")] = 0;
+        if (!*l || *l == '#' || entry++ < mq.next) continue;
+        if (!card_path(l) || strlen(l) >= sizeof e) { ++mq.next; continue; } /* off the card, or too long to be a path here */
+        memcpy(e, l, strlen(l) + 1);
+        if (access(path(e), F_OK)) { memcpy(mq.want, e, strlen(e) + 1); break; }
+        char **g = realloc(q.paths, (size_t)(q.np + 1) * sizeof *g);
+        if (!g) break;
+        q.paths = g, q.paths[q.np++] = strdup(e), ++mq.next;
+    }
+    if (f) fclose(f);
+    q.n = q.np;
+}
+
+/* while a grown answer plays: its file changed or the song waited for landed, read again; a queue waiting at its end
+ * goes on with what came */
+static void m3u_poll(void) {
+    if (!mq.on || src.on) return;
+    if (mq.stamp == file_stamp(path(mq.file)) && !(*mq.want && !access(path(mq.want), F_OK))) return;
+    int had = q.n;
+    m3u_read();
+    if (mq.waiting && q.n > had) {
+        mq.waiting = 0;
+        logf_("%s landed", q.paths[had]);
+        if (q.state == PAUSED) q.at = had, q.pos_ms = 0, ++q.seq; /* paused while it waited: resume plays it */
+        else start_at(had);
+    }
 }
 
 static void read_small(const char *p, char *out, size_t room) {
@@ -691,20 +769,20 @@ static void catplay_poll(void) {
     char m3u[512] = "";
     if (strcmp(now, cp.before) && sscanf(now, "%u %511[^\n]", &seq, m3u) == 2 && seq == cp.seq) {
         cp.on = 0;
-        FILE *f = fopen(path(m3u), "r");
-        char line[1100];
         free_paths();
-        while (f && fgets(line, sizeof line, f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            if (!*line || *line == '#') continue;
-            char **g = realloc(q.paths, (size_t)(q.np + 1) * sizeof *g);
-            if (!g) break;
-            q.paths = g, q.paths[q.np++] = strdup(line);
+        mq.on = 1, mq.next = 0, mq.waiting = 0;
+        if (strlen(m3u) >= sizeof mq.file) m3u[0] = 0; /* no such path here: an empty answer */
+        memcpy(mq.file, m3u, strlen(m3u) + 1);
+        m3u_read();
+        logf_("%s answered catplay %u with %d songs there%s%s", cp.app, seq, q.np, *mq.want ? ", waiting for " : "", mq.want);
+        if (q.np) {
+            if (start_at(0)) free_paths(), q.state = STOPPED, ++q.seq;
+        } else if (*mq.want) {
+            mq.waiting = 1, q.at = 0, q.state = PLAYING, q.loaded = 0; /* nothing there yet: its first plays as it lands */
+            path_lookup_want();
+        } else {
+            free_paths(), q.state = STOPPED, ++q.seq;
         }
-        if (f) fclose(f);
-        logf_("%s answered catplay %u with %d songs", cp.app, seq, q.np);
-        q.n = q.np;
-        if (!q.np || start_at(0)) free_paths(), q.state = STOPPED, ++q.seq;
         return;
     }
     if (now_ms() >= cp.until) {
@@ -1245,11 +1323,12 @@ int main(int argc, char **argv) {
             int w = (int)(volume_dirty_at + VOLUME_SAVE_MS > t ? volume_dirty_at + VOLUME_SAVE_MS - t : 0);
             if (wait < 0 || w < wait) wait = w;
         }
-        if (cp.on && (wait < 0 || wait > 200)) wait = 200;
+        if ((cp.on || mq.on) && (wait < 0 || wait > 200)) wait = 200;
         int beat = air.t ? CAST_BEAT_MS : CAST_LOOK_MS; /* AirPlay's tap: its beat, or the look for it */
         if (wait < 0 || wait > beat) wait = beat;
         if (poll(p, (nfds_t)n, wait) < 0 && errno != EINTR) break;
         catplay_poll();
+        m3u_poll();
         air_poll();
         if (src.on && cl[src.holder].fd < 0) source_release(src.holder); /* its holder gone (here and after the reads): before a new client takes its slot */
         if (p[0].revents & POLLIN) {
