@@ -687,6 +687,76 @@ def test_an_answer_to_an_older_catplay_is_not_taken(run):
     sock.close()
 
 
+
+# ---- Wi-Fi's state (docs/playd.md#wi-fis-state) ----
+
+class FakeNet:
+    """q2netd's socket (Q2NET/1): the commands it was sent; status answers self.status"""
+    def __init__(self, root, status):
+        import threading
+        self.lines, self.status = [], status
+        (root/'run/vamp').mkdir(parents=True, exist_ok=True)
+        self.s = socket.socket(socket.AF_UNIX)
+        self.s.bind(str(root/'run/vamp/net.sock'))
+        self.s.listen(4)
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                c, _ = self.s.accept()
+            except OSError:
+                return
+            f = c.makefile('rw')
+            for line in f:
+                line = line.rstrip('\n')
+                if line != 'Q2NET/1':
+                    self.lines.append(line)
+                f.write(('Q2NET/1 ok' if line == 'Q2NET/1' else f'status {self.status}' if line == 'status' else 'ok') + '\n')
+                f.flush()
+            c.close()
+
+
+@pytest.mark.parametrize('status', ['state=off ssid= ip= smart=0 held=0', 'state=searching ssid= ip= smart=1 held=0'])
+def test_with_no_wi_fi_link_a_server_list_plays_offline_at_once(run, status):
+    """the user's Wi-Fi off, or on with no network joined: the firmware's networkGetConnectStatus() 0"""
+    root, pl = run
+    net = FakeNet(root, status)
+    sock = catalogue(root, copies={SERVER + 1: COPY1})
+    play_list(root, [SERVER + 1, 3], 0)
+    pl.pump(1.0)
+    assert not (root/'tmp/q2-navi.catplay').exists() and pl.songs() == [('set-songurl', COPY1)]
+    assert 'wake' not in net.lines
+    sock.close()
+
+
+def test_smart_wi_fi_s_radio_off_is_woken_and_the_list_handed_over_once_the_link_is_up(run):
+    root, pl = run
+    net = FakeNet(root, 'state=off ssid= ip= smart=1 held=0')
+    sock = catalogue(root, copies={SERVER + 1: COPY1})
+    play_list(root, [SERVER + 1, 3], 0)
+    pl.pump(2.0)
+    assert 'wake' in net.lines, 'the radio woken for the press'
+    assert not (root/'tmp/q2-navi.catplay').exists() and pl.songs() == [], 'nothing until the link'
+    net.status = 'state=connected ssid=Home ip=10.0.0.9 smart=1 held=1800'
+    assert wait_for(root/'tmp/q2-navi.catplay'), 'handed to the app once connected'
+    sock.close()
+
+
+def test_no_link_within_15_s_of_the_wake_plays_the_list_offline(run):
+    root, pl = run
+    net = FakeNet(root, 'state=off ssid= ip= smart=1 held=0')
+    sock = catalogue(root, copies={SERVER + 1: COPY1})
+    play_list(root, [SERVER + 1, 3], 0)
+    pl.pump(2.0)
+    net.status = 'state=searching ssid= ip= smart=1 held=1800'  # woken, joining nothing
+    pl.pump(11.5)
+    assert pl.songs() == [], 'it has 15 s'
+    pl.pump(3.0)
+    assert pl.songs() == [('set-songurl', COPY1)] and not (root/'tmp/q2-navi.catplay').exists()
+    sock.close()
+
+
 # ---- the answer as it grows (docs/playd.md#the-answer-as-it-grows) ----
 
 def land(root, *paths):

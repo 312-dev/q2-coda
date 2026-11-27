@@ -551,11 +551,19 @@ static void output_set(int w, int s) {
  * An app that is not listening is started first by q2pkgd (Q2PKG/1 start, the launcher:
  * docs/platform/packages.md#starting-and-stopping-q2pkg1), and the catplay written once its socket is there (an app
  * takes a .catplay there at its start as one answered); q2pkgd refusing, or no socket within CATPLAY_START_MS, and the
- * list is played offline. An app whose state says server=down is handed nothing: its list is played offline at once. */
+ * list is played offline. An app whose state says server=down is handed nothing: its list is played offline at once, as
+ * it is with no Wi-Fi link; Smart Wi-Fi's radio off is woken first (docs/playd.md#wi-fis-state). */
 #define CATPLAY_WAIT_MS 4000
 #define CATPLAY_START_MS 15000 /* an app started for a catplay has this long to listen (today's Vamp's catalogue.c) */
 #define PKG_ASK_MS 3000        /* q2pkgd's answer to a start, waited for in the loop */
-static struct { int on, at, starting; char app[64], before[600]; unsigned seq; unsigned long long until; } cp;
+#define LINK_WAIT_MS 15000     /* Smart Wi-Fi's radio woken for a press has this long to join (the firmware's SMART_CONNECT_MS) */
+#define LINK_LOOK_MS 500       /* Q2NET/1's status asked this often while it joins */
+static struct {
+    int on, at, starting, linking;
+    char app[64], before[600];
+    unsigned seq;
+    unsigned long long until, looked;
+} cp;
 
 static void free_paths(void) {
     for (int i = 0; i < q.np; ++i) free(q.paths[i]);
@@ -648,6 +656,43 @@ static int app_of(const char *fileurl, char *app, size_t room) {
     return 0;
 }
 
+/* One Q2NET/1 command to q2netd (docs/platform/network.md): its answer line into out, 0; -1 with no q2netd */
+static int net_ask(const char *cmd, char *out, size_t room) {
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    snprintf(a.sun_path, sizeof a.sun_path, "%s", path("/run/vamp/net.sock"));
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    struct timeval tv = {1, 0};
+    char b[512], req[64];
+    size_t n = 0;
+    if (fd < 0) return -1;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv), setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    int len = snprintf(req, sizeof req, "Q2NET/1\n%s\n", cmd);
+    if (connect(fd, (struct sockaddr *)&a, sizeof a) || send(fd, req, (size_t)len, MSG_NOSIGNAL) != len) return close(fd), -1;
+    for (char *nl; n < sizeof b - 1;) {
+        ssize_t k = recv(fd, b + n, sizeof b - 1 - n, 0);
+        if (k <= 0) break;
+        n += (size_t)k, b[n] = 0;
+        if ((nl = strchr(b, '\n')) && strchr(nl + 1, '\n')) break;
+    }
+    close(fd);
+    b[n] = 0;
+    char *nl = strchr(b, '\n');
+    if (strncmp(b, "Q2NET/1 ok\n", 11) || !nl || !strchr(nl + 1, '\n')) return -1;
+    *strchr(nl + 1, '\n') = 0;
+    snprintf(out, room, "%s", nl + 1);
+    return 0;
+}
+
+/* Wi-Fi's state for a server list, as the firmware's cat_online and smart_wifi_wait judge it: 1 joined, or no q2netd to
+ * ask (as before it); 2 Smart Wi-Fi has the radio off (a press wakes it); 0 no link (Wi-Fi off, or on and joined to
+ * nothing) */
+static int link_state(void) {
+    char s[400];
+    if (net_ask("status", s, sizeof s) || strncmp(s, "status ", 7)) return 1;
+    if (strstr(s, " state=connected") || !strncmp(s, "status state=connected", 22)) return 1;
+    return strstr(s, "state=off") && strstr(s, " smart=1") ? 2 : 0;
+}
+
 /* q2pkgd asked to start app (Q2PKG/1 start): 0 when it answers ok */
 static int pkg_start(const char *app) {
     struct sockaddr_un a = {.sun_family = AF_UNIX};
@@ -726,7 +771,9 @@ static int listening(const char *app) {
     return !access(path(sock), F_OK);
 }
 
-/* 1: handed to the app, or to q2pkgd to start it (an answer awaited); 0: nothing of the list is a server's */
+static int catplay_go(void);
+/* 1: handed to the app, or to q2pkgd to start it, or Wi-Fi woken for it (an answer awaited); 0: nothing of the list is
+ * a server's */
 static int catplay(int at) {
     char app[64] = "";
     int server = 0;
@@ -738,7 +785,26 @@ static int catplay(int at) {
         logf_("%s's server is down", app);
         return play_offline(at), 1;
     }
-    cp.on = 1, cp.at = at;
+    int link = link_state();
+    if (!link) {
+        logf_("no Wi-Fi link: the list played offline");
+        return play_offline(at), 1;
+    }
+    cp.on = 1, cp.at = at, cp.linking = 0;
+    if (link == 2) { /* Smart Wi-Fi's radio off: woken, and the list handed over once it joins */
+        char ok[64];
+        net_ask("wake", ok, sizeof ok);
+        cp.linking = 1, cp.until = now_ms() + LINK_WAIT_MS, cp.looked = now_ms();
+        logf_("Wi-Fi woken for the list");
+        return 1;
+    }
+    return catplay_go();
+}
+
+/* the list to the app: written while it listens, else the app started first (q2pkgd); 1 */
+static int catplay_go(void) {
+    const char *app = cp.app;
+    int at = cp.at;
     if (listening(app)) return catplay_write(), 1;
     if (pkg_start(app)) {
         cp.on = 0;
@@ -754,6 +820,19 @@ static int catplay(int at) {
 static void catplay_poll(void) {
     char p[300], now[600];
     if (!cp.on) return;
+    if (cp.linking) {
+        unsigned long long t = now_ms();
+        if (t >= cp.looked + LINK_LOOK_MS) {
+            cp.looked = t;
+            if (link_state() == 1) cp.linking = 0, logf_("Wi-Fi joined"), catplay_go();
+        }
+        if (cp.linking && t >= cp.until) {
+            cp.on = cp.linking = 0;
+            logf_("no Wi-Fi link within %d s: the list played offline", LINK_WAIT_MS / 1000);
+            play_offline(cp.at);
+        }
+        return;
+    }
     if (cp.starting) {
         if (listening(cp.app)) catplay_write();
         else if (now_ms() >= cp.until) {
@@ -811,7 +890,7 @@ static int play_ids(const int *ids, int n, int at, int shuffle) {
         }
         at = 0;
     }
-    free_paths(), cp.on = cp.starting = 0, q.offline = 0;
+    free_paths(), cp.on = cp.starting = cp.linking = 0, q.offline = 0;
     if (catplay(at)) return 0;
     return start_at(at);
 }
