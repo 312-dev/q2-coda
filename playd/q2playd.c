@@ -15,6 +15,7 @@
  * loaded, never while nothing is. --root prefixes every path, for test/playd.py. */
 #define _GNU_SOURCE
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -1319,6 +1320,46 @@ static int hearts_now(void) { /* the song's stars (the shim's hearts), -1 when n
     return p ? rate_kept(listen_key(p)) : -1;
 }
 
+/* A change of the song's stars or like told to the servers (catalogue.c rated_line, docs/server-library.md#ratings-
+ * and-favorites): "<listen_key>\t<sid>\t<stars=N|like=0|1>\t<time>" appended to the ratings.out of every app on the
+ * card whose q2app says ratings=2 (ratings=1 takes one number and is sent nothing); the sid is the song's server row's
+ * (servermeta), or for a card song a duplicate of one names (serverdup), and only in that row's app's line. */
+static void rated_out(const char *what, int v) {
+    const char *p = rated_path();
+    char app[64] = "", sid[256] = "", line[600], q2app[700], out[700];
+    if (!p) return;
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    if (sqlite3_open_v2(cat_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
+        (sqlite3_prepare_v2(db, "select m.app, m.sid from servermeta m where m.id in (select id from servertable where "
+                                "fileurl = ?1 union select id from serverdup where fileurl = ?1) limit 1", -1, &st, 0) == SQLITE_OK ||
+         sqlite3_prepare_v2(db, "select m.app, m.sid from servermeta m join servertable s on s.id = m.id where s.fileurl = ?1",
+                            -1, &st, 0) == SQLITE_OK)) {
+        sqlite3_bind_text(st, 1, p, -1, SQLITE_STATIC);
+        if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0) && sqlite3_column_text(st, 1))
+            snprintf(app, sizeof app, "%s", (const char *)sqlite3_column_text(st, 0)),
+                snprintf(sid, sizeof sid, "%s", (const char *)sqlite3_column_text(st, 1));
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    DIR *d = opendir(path("/mnt/mmc"));
+    for (struct dirent *e; d && (e = readdir(d));) {
+        if (e->d_name[0] != '.' || !e->d_name[1] || !strcmp(e->d_name, "..")) continue;
+        snprintf(q2app, sizeof q2app, "%s/mnt/mmc/%s/q2app", root, e->d_name);
+        char *t = read_all(q2app);
+        const char *r = t ? strstr(t, "ratings=") : 0;
+        int takes = r && (r == t || r[-1] == '\n') && atoi(r + 8) == 2;
+        free(t);
+        if (!takes) continue;
+        int n = snprintf(line, sizeof line, "%08x\t%s\t%s=%d\t%u\n", listen_key(p), !strcmp(app, e->d_name + 1) ? sid : "",
+                         what, v, (unsigned)time(0));
+        snprintf(out, sizeof out, "%s/mnt/mmc/%s/ratings.out", root, e->d_name);
+        FILE *f = n > 0 && n < (int)sizeof line ? fopen(out, "ab") : 0;
+        if (f) fwrite(line, 1, (size_t)n, f), fclose(f);
+    }
+    if (d) closedir(d);
+}
+
 /* The FIFO's "rate N ID" (coda_rc_shim.c): 0 set, 1 refused (past 5, the table full or not written), 3 when ID is not
  * the song playing */
 static int rate_cmd(int n, int id) {
@@ -1327,34 +1368,134 @@ static int rate_cmd(int n, int id) {
     if (n < 0 || n > 5) return 1;
     int k = rate_keep(listen_key(p), n);
     if (k <= 0) logf_(k ? "rating not saved" : "ratings are full");
+    if (k > 0) rated_out("stars", n);
     ++q.seq;
     return k > 0 ? 0 : 1;
 }
 
 /* The FIFO's "like ID" (the pin's coda_rc_shim.c, ratings.c rate_now_like): the like flipped */
+/* path's like set to on in likes.db, and through to stock's myfav now or once it can be: 1 when kept */
+static int like_set(sqlite3 *db, const char *p, int on) {
+    char *u = sqlite3_mprintf(on ? "insert or ignore into myfav values (%Q);insert or replace into waiting values (%Q, 1)"
+                                 : "delete from myfav where fileurl = %Q;insert or replace into waiting values (%Q, 0)",
+                              p, p);
+    int ok = db && sqlite3_exec(db, u, 0, 0, 0) == SQLITE_OK;
+    sqlite3_free(u);
+    lk.key = 0; /* read again */
+    return ok;
+}
+
 static int like_cmd(int id) {
     const char *p = rated_path();
     if (!p || id != playing_id()) return 3;
     int was = liked_now();
     sqlite3 *db = likes_open();
-    sqlite3_stmt *st;
-    int ok = 0;
-    if (db && sqlite3_prepare_v2(db, was ? "delete from myfav where fileurl = ?" : "insert or ignore into myfav values (?)",
-                                 -1, &st, 0) == SQLITE_OK) {
-        sqlite3_bind_text(st, 1, p, -1, SQLITE_STATIC);
-        ok = sqlite3_step(st) == SQLITE_DONE;
-        sqlite3_finalize(st);
-    }
-    if (ok) { /* and through to stock's myfav, now or once it can be */
-        char *u = sqlite3_mprintf("insert or replace into waiting values (%Q, %d)", p, !was);
-        ok = sqlite3_exec(db, u, 0, 0, 0) == SQLITE_OK;
-        sqlite3_free(u);
-        if (ok) fav_flush(db);
-    }
+    int ok = like_set(db, p, !was);
+    if (ok) fav_flush(db);
     sqlite3_close(db);
     if (!ok) return logf_("like not saved"), 1;
     lk.key = listen_key(p), lk.v = !was, ++q.seq;
+    rated_out("like", !was);
     return 0;
+}
+
+/* A server's stars and likes coming in (docs/server-library.md#ratings-and-favorites, catalogue.c's ratings.in): each
+ * app on the card with ratings=1 or 2 may write .<id>/ratings.in whole, in ratings.out's columns. stars=N is kept by
+ * the line's listen_key; like=0|1 is the song's path's (a server row's by its sid in servermeta, a card song's by its
+ * key in songtable), a server row's offline copy taken out of the likes either way; a ratings=1 app's one number is
+ * its star at five (the like, the stars left alone), else that many stars and no like. A line is passed over when the
+ * song's own ratings.out line of the same kind is newer (a line of one number counts as both). The file is then
+ * removed. Looked for every LIKES_LOOK_MS; it waits while the card's catalogue is not there for a sid's line. */
+static unsigned long long in_looked;
+
+static int out_newer(const char *app, const char *key, char kind, unsigned t) {
+    char f[700], line[600];
+    int newer = 0;
+    snprintf(f, sizeof f, "%s/mnt/mmc/.%s/ratings.out", root, app);
+    FILE *o = fopen(f, "r");
+    while (o && !newer && fgets(line, sizeof line, o)) {
+        char k[16], sid[256], v[32];
+        unsigned when;
+        if (sscanf(line, "%15[^\t]\t%255[^\t]\t%31[^\t]\t%u", k, sid, v, &when) != 4 &&
+            sscanf(line, "%15[^\t]\t\t%31[^\t]\t%u", k, v, &when) != 3)
+            continue;
+        newer = !strcmp(k, key) && when > t && (kind == 'h' || v[0] == kind);
+    }
+    if (o) fclose(o);
+    return newer;
+}
+
+static void in_song(sqlite3 *cat, const char *app, const char *sid, unsigned key, char *path_, size_t room, char *copy, size_t croom) {
+    sqlite3_stmt *st;
+    path_[0] = copy[0] = 0;
+    if (*sid && cat && sqlite3_prepare_v2(cat, "select s.fileurl, m.local from servermeta m join servertable s on s.id = m.id "
+                                                "where m.app = ? and m.sid = ?", -1, &st, 0) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, app, -1, SQLITE_STATIC), sqlite3_bind_text(st, 2, sid, -1, SQLITE_STATIC);
+        if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0)) {
+            snprintf(path_, room, "%s", (const char *)sqlite3_column_text(st, 0));
+            if (sqlite3_column_text(st, 1)) snprintf(copy, croom, "%s", (const char *)sqlite3_column_text(st, 1));
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3 *db;
+    if (*path_ || sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) return;
+    if (sqlite3_prepare_v2(db, "select fileurl from songtable", -1, &st, 0) == SQLITE_OK) {
+        while (!*path_ && sqlite3_step(st) == SQLITE_ROW)
+            if (sqlite3_column_text(st, 0) && listen_key((const char *)sqlite3_column_text(st, 0)) == key)
+                snprintf(path_, room, "%s", (const char *)sqlite3_column_text(st, 0));
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+}
+
+static void ratings_in_poll(unsigned long long t) {
+    if (t < in_looked + LIKES_LOOK_MS) return;
+    in_looked = t;
+    DIR *d = opendir(path("/mnt/mmc"));
+    for (struct dirent *e; d && (e = readdir(d));) {
+        char f[700], line[600];
+        if (e->d_name[0] != '.' || !e->d_name[1] || !strcmp(e->d_name, "..")) continue;
+        snprintf(f, sizeof f, "%s/mnt/mmc/%s/q2app", root, e->d_name);
+        char *m = read_all(f);
+        const char *r = m ? strstr(m, "ratings=") : 0;
+        int level = r && (r == m || r[-1] == '\n') ? atoi(r + 8) : 0;
+        free(m);
+        snprintf(f, sizeof f, "%s/mnt/mmc/%s/ratings.in", root, e->d_name);
+        if (level < 1 || level > 2 || access(f, R_OK)) continue;
+        const char *app = e->d_name + 1;
+        sqlite3 *cat = 0, *likes = likes_open();
+        if (sqlite3_open_v2(cat_path, &cat, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) sqlite3_close(cat), cat = 0;
+        FILE *in = fopen(f, "r");
+        int changed = 0, wait = 0;
+        while (in && fgets(line, sizeof line, in)) {
+            char k[16] = "", sid[256] = "", v[32] = "";
+            unsigned when = 0;
+            if (sscanf(line, "%15[^\t]\t%255[^\t]\t%31[^\t]\t%u", k, sid, v, &when) != 4 &&
+                (sid[0] = 0, sscanf(line, "%15[^\t]\t\t%31[^\t]\t%u", k, v, &when) != 3))
+                continue;
+            unsigned key = (unsigned)strtoul(k, 0, 16);
+            int stars = -1, like = -1;
+            if (!strncmp(v, "stars=", 6)) stars = atoi(v + 6);
+            else if (!strncmp(v, "like=", 5)) like = atoi(v + 5) != 0;
+            else if (*v >= '0' && *v <= '9') like = atoi(v) == 5, stars = atoi(v) < 5 ? atoi(v) : -1;
+            char kind = v[0] >= '0' && v[0] <= '9' ? 'h' : v[0];
+            if (!key || out_newer(app, k, kind, when)) continue;
+            if (stars >= 0 && stars <= 5 && rate_keep(key, stars) > 0) changed = 1;
+            if (like >= 0) {
+                char song[1024], copy[1024];
+                if (*sid && !cat) { wait = 1; break; }
+                in_song(cat, app, sid, key, song, sizeof song, copy, sizeof copy);
+                if (*song && like_set(likes, song, like)) changed = 1;
+                if (*copy) like_set(likes, copy, 0);
+            }
+        }
+        if (in) fclose(in);
+        if (likes && changed) fav_flush(likes);
+        sqlite3_close(likes), sqlite3_close(cat);
+        if (!wait) unlink(f);
+        if (changed) lk.key = 0, ++q.seq, logf_("ratings from %s taken", app);
+    }
+    if (d) closedir(d);
 }
 
 /* ---- play counts (docs/playd.md#play-counts) ----
@@ -2445,6 +2586,7 @@ int main(int argc, char **argv) {
         memory_poll(t, 0);
         likes_poll(t);
         resume_flush(t);
+        ratings_in_poll(t);
         if (q.seq != now_written_seq && t >= now_written_at + NOW_EVERY_MS) {
             now_write(), tell_watchers();
             now_written_seq = q.seq, now_written_at = t;

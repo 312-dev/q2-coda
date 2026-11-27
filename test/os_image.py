@@ -496,7 +496,7 @@ def launch_check(fs):
     check(first == ['Q2PKG/1 ok', 'status navi stopped', 'ok'] and mid == ['Q2PKG/1 ok', 'status navi running', 'ok', 'status navi stopped'],
           f'q2pkgd: an API 0 app started and stopped over Q2PKG/1 ({first + mid[1:]})')
     got = caps.read_text() if caps.exists() else None
-    check(got == 'catalogue playlist ahead\n', f"q2pkgd: the app's caps line is the image's words ({got!r})")
+    check(got == 'catalogue playlist ahead ratings likes\n', f"q2pkgd: the app's caps line is the image's words ({got!r})")
     check((fs/'run/vamp/sv/navi/supervise/stat').exists(), 'q2pkgd: the app ran under a runsv of its own, /run/vamp/sv/navi')
 
 

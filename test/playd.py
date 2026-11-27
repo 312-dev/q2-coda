@@ -2235,3 +2235,110 @@ def test_a_song_started_past_its_first_seconds_keeps_where_it_starts(run):
     pl.pump()
     heard(root, pl, 3600, [77, 78, 79])
     assert ('mcl-seek', '500') not in pl.got, pl.got
+
+
+# ---- ratings to the servers (docs/playd.md#ratings-and-likes, docs/server-library.md#ratings-and-favorites) ----
+
+def apps(root, **ratings):
+    for app, n in ratings.items():
+        (root/f'mnt/mmc/.{app}').mkdir(parents=True, exist_ok=True)
+        (root/f'mnt/mmc/.{app}/q2app').write_text(f'name={app}\nratings={n}\n')
+
+
+def out_lines(root, app):
+    p = root/f'mnt/mmc/.{app}/ratings.out'
+    return [l.split('\t') for l in p.read_text().splitlines()] if p.exists() else []
+
+
+def test_stars_and_likes_go_to_every_app_that_takes_them(run):
+    """catalogue.c rated_line: "<listen_key>\\t<sid>\\t<stars=N|like=0|1>\\t<time>" appended to each ratings=2 app's
+    ratings.out; a ratings=1 app is sent nothing; a card song has no sid"""
+    root, pl = run
+    apps(root, navi=2, old=1)
+    play_list(root, [1], 0)
+    pl.pump()
+    t0 = int(time.time())
+    send(root, '62 rate 4 1', '63 like 1')
+    assert wait_for_value(lambda: acks(root)[:2], [(63, 0), (62, 0)])
+    lines = out_lines(root, 'navi')
+    key = '%08x' % listen_key('/mnt/mmc/Music/a.flac')
+    assert [l[:3] for l in lines] == [[key, '', 'stars=4'], [key, '', 'like=1']], lines
+    assert all(t0 <= int(l[3]) <= t0 + 5 for l in lines)
+    assert out_lines(root, 'old') == []
+
+
+def test_a_server_song_s_line_carries_its_sid_for_its_own_app(run):
+    root, pl = run
+    apps(root, navi=2, other=2)
+    sock = catalogue(root, copies={SERVER + 1: COPY1})
+    (root/'tmp/q2-navi.state').write_text('status=idle\nserver=down\n')
+    play_list(root, [SERVER + 1], 0)
+    pl.pump(1.0)
+    send(root, f'64 rate 5 {SERVER + 1}')
+    assert wait_for_value(lambda: acks(root)[:1], [(64, 0)])
+    key = '%08x' % listen_key('/mnt/mmc/.navi/cat/al1/s1.flac')
+    assert [l[:3] for l in out_lines(root, 'navi')] == [[key, 's1', 'stars=5']]
+    assert [l[:3] for l in out_lines(root, 'other')] == [[key, '', 'stars=5']]
+    sock.close()
+
+
+def ratings_in(root, app, lines):
+    tmp = root/f'mnt/mmc/.{app}/ratings.in.tmp'
+    tmp.write_text(''.join('\t'.join(map(str, l)) + '\n' for l in lines))
+    tmp.rename(root/f'mnt/mmc/.{app}/ratings.in')
+
+
+def test_a_server_s_stars_and_likes_come_in_from_ratings_in(run):
+    """docs/server-library.md#ratings-and-favorites In: stars=N by listen_key, like=0|1 to My Fav by the song's path (a
+    card file found by its key, a server row by its sid, its offline copy taken out); the file deleted once read"""
+    root, pl = run
+    apps(root, navi=2)
+    stock_myfav(root)
+    copy2 = '/mnt/mmc/.navi/stream/acct/hi/a/Cloud Two [s2].flac'
+    sock = catalogue(root, copies={SERVER + 2: copy2})
+    db = sqlite3.connect(root/'mnt/data/vamp/likes.db')  # a heart given to the copy on Now Playing: its own path
+    db.execute('insert into myfav values (?)', (copy2,))
+    db.commit()
+    db.close()
+    a, s2 = listen_key('/mnt/mmc/Music/a.flac'), listen_key('/mnt/mmc/.navi/cat/al1/s2.flac')
+    ratings_in(root, 'navi', [('%08x' % a, '', 'stars=3', 100), ('%08x' % a, '', 'like=1', 100),
+                              ('%08x' % s2, 's2', 'like=1', 100)])
+    assert wait_for_value(lambda: (root/'mnt/mmc/.navi/ratings.in').exists(), False, 6)
+    assert likes(root) == ['/mnt/mmc/.navi/cat/al1/s2.flac', '/mnt/mmc/Music/a.flac']
+    assert [f[0] for f in stock_favs(root)] == ['/mnt/mmc/.navi/cat/al1/s2.flac', '/mnt/mmc/Music/a.flac']
+    play_list(root, [1], 0)
+    pl.pump()
+    n = now(root)
+    assert (n['hearts'], n['liked']) == ('3', '1'), n
+    sock.close()
+
+
+def test_a_change_made_here_after_the_server_s_wins(run):
+    """a line is skipped when the song's own ratings.out line of the same kind is newer"""
+    root, pl = run
+    apps(root, navi=2)
+    play_list(root, [1], 0)
+    pl.pump()
+    send(root, '65 rate 4 1')
+    assert wait_for_value(lambda: acks(root)[:1], [(65, 0)])
+    a = '%08x' % listen_key('/mnt/mmc/Music/a.flac')
+    ratings_in(root, 'navi', [(a, '', 'stars=2', 1000), (a, '', 'like=1', 1000)])
+    assert wait_for_value(lambda: (root/'mnt/mmc/.navi/ratings.in').exists(), False, 6)
+    n = now(root)
+    assert (n['hearts'], n['liked']) == ('4', '1'), n
+
+
+def test_a_ratings_1_app_s_one_number_is_its_star_or_stars(run):
+    """five is its star (the like, the stars left as they are); under five that many stars and no like"""
+    root, pl = run
+    apps(root, old=1)
+    a, b = '%08x' % listen_key('/mnt/mmc/Music/a.flac'), '%08x' % listen_key('/mnt/mmc/Music/b.mp3')
+    ratings_in(root, 'old', [(a, '', '5', 100), (b, '', '3', 100)])
+    assert wait_for_value(lambda: (root/'mnt/mmc/.old/ratings.in').exists(), False, 6)
+    assert likes(root) == ['/mnt/mmc/Music/a.flac']
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    assert (now(root)['hearts'], now(root)['liked']) == ('0', '1')
+    fifo(root, 'next')
+    pl.pump()
+    assert (now(root)['hearts'], now(root)['liked']) == ('3', '0')
