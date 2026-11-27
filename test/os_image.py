@@ -29,7 +29,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -471,6 +471,9 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     (fs/'run/vamp').mkdir(parents=True, exist_ok=True)
     (fs/'run/vamp/boot.log').write_text('')
     want = expected_modules(fs)  # before any perturbation: what Shanling's scripts say
+    if perturb == 'rescue-late':  # rcS without its restore: the 60 s confirm alone would put it back
+        rcs = (fs/'etc/init.d/rcS').read_text().replace('if [ -e /mnt/mmc/.vamp/rescue/pending ]; then', 'if false; then')
+        (fs/'etc/init.d/rcS').write_text(rcs)
     if perturb == 'order':
         rcs = (fs/'etc/init.d/rcS').read_text()
         rcs = rcs.replace('    step "modules: start"\n', '    step "modules: start"\n    step "rcS: done, starting the services"\n')
@@ -522,6 +525,12 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     db.commit()
     db.close()
     wav(fs/'mnt/mmc/song1.wav', seconds=60)
+    # an install pending and recovery-update/ gone, as after Shanling's recovery has flashed it: rcS must put it back
+    rescue = {'xImage': b'stock kernel' * 100, 'rootfs.squashfs': b'stock rootfs' * 100}
+    (fs/'mnt/mmc/.vamp/rescue').mkdir(parents=True, exist_ok=True)
+    for n, b in rescue.items():
+        (fs/'mnt/mmc/.vamp/rescue'/n).write_bytes(b)
+    (fs/'mnt/mmc/.vamp/rescue/pending').write_text('')
     # a sound card that takes anything (alsa-lib's null plugin): the emulator has none, and a song should play out
     (fs/'etc/asound.conf').write_text('pcm.!default { type null }\n')
     for rel, text in (('sys/class/backlight/lcd/bl_power', '0'), ('sys/class/backlight/lcd/brightness', '200'),
@@ -623,6 +632,11 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         return len(got) == len(said) and all(g == w or ('$' in w and g.split('=')[0] == w.split('=')[0]) for g, w in zip(got, said))
     diff = next((f': {g} where the script says {w}' for g, w in zip(loaded, wanted) if not same(g, w)), '')
     check(len(loaded) == len(wanted) and not diff, f'insmod ran {len(loaded)} times, Shanling\'s {len(want)} modules in their order with their parameters{diff}')
+    rec = fs/'mnt/mmc/recovery-update'
+    got = {n: (rec/n).read_bytes() for n in rescue if (rec/n).exists()}
+    at_r, at_fb = first('rescue: recovery-update/ restored'), first('fb0: present')
+    check(got == rescue and at_r is not None and at_fb is not None and at_r < at_fb and at_r < (first('q2player: start') or 10**9),
+          'rcS puts the rescue copy back in recovery-update/ before the framebuffer and the services')
     marks = [('mount proc', first('mount -t proc')), ('mount /dev', first('mount -t tmpfs -o mode=0755,nosuid tmpfs /dev')),
              ('mdev -s', first('mdev -s')), ('mdev -d', first('mdev -d')), ('data', first('data: ')),
              ('first insmod', first('insmod ')), ('last insmod', max((i for i, s in enumerate(order) if s.startswith('insmod ')), default=None)),
@@ -646,7 +660,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()

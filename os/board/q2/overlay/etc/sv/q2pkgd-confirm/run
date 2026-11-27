@@ -1,9 +1,9 @@
 #!/bin/sh
-# After an install (docs/pkgd.md): once Vamp OS has been up a minute, the card's recovery-update/ gets the rescue copy
-# back (q2pkgd confirm), so the owner's Previous and Centre restore a known-good image again. Then nothing more.
+# After an install (docs/pkgd.md): rcS has put the rescue copy back already (q2pkgd restore); once Vamp OS has been up a
+# minute the install is no longer pending (q2pkgd confirm, which restores again if anything undid it). Then nothing.
 . /usr/libexec/vamp/log
 sleep 60
 if [ -e /mnt/mmc/.vamp/rescue/pending ]; then
-    if /usr/bin/q2pkgd confirm; then step "q2pkgd: the rescue copy is back in recovery-update/"; else step "q2pkgd: confirm failed"; fi
+    if /usr/bin/q2pkgd confirm; then step "q2pkgd: the install is confirmed"; else step "q2pkgd: confirm failed"; fi
 fi
 exec sleep 2147483647

@@ -7,7 +7,9 @@
 #   3. Shanling's own module script, /vendor/module_driver/driver_default_init_script.sh, run unchanged from
 #      its folder, as stock's S11module_driver_default runs it; then what loaded, against the .ko files there.
 #      Not run when any of them is loaded already (a boot from the card);
-#   4. a wait for /dev/fb0, and the input devices found.
+#   4. the card's rescue copy of recovery-update/ put back after an install (q2pkgd restore), as soon as the card is
+#      mounted;
+#   5. a wait for /dev/fb0, and the input devices found.
 # Then init starts runsvdir (/etc/inittab). Nothing of Shanling's userspace runs: the scripts in /vendor are
 # insmod lines run by this image's BusyBox.
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
@@ -109,6 +111,14 @@ else
     step "modules: no /vendor/module_driver (an image composed without the vendor set)"
 fi
 
+# The card's recovery-update/ back first (docs/pkgd.md#the-rescue-copy): Shanling's recovery removes it once it has
+# flashed an install, so until this runs the owner's Previous and Centre have nothing to restore. The card comes with
+# the modules (its controller, soc_msc); nothing else of the boot runs before it.
+i=0
+while [ $i -lt 50 ] && ! grep -q ' /mnt/mmc ' /proc/mounts; do sleep 0.1; i=$((i + 1)); done
+if [ -e /mnt/mmc/.vamp/rescue/pending ]; then
+    if /usr/bin/q2pkgd restore > /dev/null 2>&1; then step "rescue: recovery-update/ restored"; else step "rescue: restore FAILED"; fi
+fi
 if wait_for /dev/fb0 50; then step "fb0: present"; else step "fb0: missing"; fi
 for e in /dev/input/event*; do
     [ -e "$e" ] && step "input: ${e##*/} $(cat "/sys/class/input/${e##*/}/device/name" 2>/dev/null)"

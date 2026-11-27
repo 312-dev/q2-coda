@@ -99,8 +99,13 @@ def rescue_checks(binary, card, want):
           "install: recovery-update/ holds the staged image beside the rescue's own xImage")
     code, said = pkgd(binary, 'install', '--card', card)  # again, pending: the rescue copy must stay the stock one
     check(code == 0 and {n: (rescue/n).read_bytes() for n in kept if (rescue/n).exists()} == kept, 'a second install while pending keeps the first rescue copy')
+    # the recovery flashes and removes recovery-update/ (seen on a Q2); the next boot's rcS runs restore first
+    shutil.rmtree(card/'recovery-update')
+    code, said = pkgd(binary, 'restore', '--card', card)
+    check(code == 0 and recovery(card) == kept and (rescue/'pending').exists(),
+          'restore, after the recovery removed recovery-update/: the rescue copy back, the install still pending')
     code, said = pkgd(binary, 'confirm', '--card', card)
-    check(code == 0 and recovery(card) == kept and not (rescue/'pending').exists(), 'confirm: recovery-update/ holds the rescue copy again')
+    check(code == 0 and recovery(card) == kept and not (rescue/'pending').exists(), 'confirm: recovery-update/ holds the rescue copy, nothing pending')
     code, _ = pkgd(binary, 'confirm', '--card', card)
     check(code == 0 and recovery(card) == kept, 'confirm with nothing pending changes nothing')
 

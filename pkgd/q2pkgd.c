@@ -2,7 +2,8 @@
  *
  *     q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR]    a release checked, composed, staged beside the rescue copy
  *     q2pkgd install [--card DIR]                             the staged image put where Shanling's recovery reads it
- *     q2pkgd confirm [--card DIR]                             after a good boot: the rescue copy put back
+ *     q2pkgd restore [--card DIR]                             at boot, first: the rescue copy put back in recovery-update/
+ *     q2pkgd confirm [--card DIR]                             after a good boot: the same, and the install no longer pending
  *
  * The card's recovery-update/ (xImage and rootfs.squashfs, stock's) is the owner's only way back when a boot fails:
  * hold Previous and power on with Centre, and Shanling's recovery flashes it. So nothing here leaves the card without a
@@ -19,8 +20,11 @@
  *            byte (or found there already, when an install is pending), then the staged rootfs.squashfs put into
  *            recovery-update/ beside the rescue's xImage, and .vamp/rescue/pending written. Any failure leaves
  *            recovery-update/ as it was.
- *   confirm  with an install pending: .vamp/rescue/'s files put back in recovery-update/ (written beside and renamed),
- *            pending removed. Vamp OS's boot runs it once its services are up (/etc/sv/q2pkgd-confirm).
+ *   restore  with an install pending: .vamp/rescue/'s files put back in recovery-update/ (written beside and renamed),
+ *            unless they are there already. Shanling's recovery removes recovery-update/ once it has flashed it (seen on a
+ *            Q2: the folder gone after each install), so the card has no recovery at all until this runs: rcS runs it as
+ *            soon as the card is mounted, before anything else that can fail.
+ *   confirm  restore, then pending removed. Vamp OS runs it once its services have been up a minute (/etc/sv/q2pkgd-confirm).
  *
  * It writes no flash and marks nothing for the recovery: flashing is Shanling's recovery's, started by the owner's keys.
  */
@@ -345,29 +349,30 @@ static int install(const char *card) {
         return fail("cannot write %s", a);
     }
     printf("installed: %s holds the staged image; hold Previous and power on with Centre to flash it. Vamp OS puts the "
-           "rescue copy back once it has booted (q2pkgd confirm)\n", rec);
+           "rescue copy back as soon as it has the card (q2pkgd restore, from rcS)\n", rec);
     return 0;
 }
 
-static int confirm(const char *card) {
+static int restore(const char *card, int and_confirm) {
     char rec[600], rescue[600], pending[700], a[800], b[800];
     snprintf(rec, sizeof rec, "%s/recovery-update", card);
     snprintf(rescue, sizeof rescue, "%s/.vamp/rescue", card);
     snprintf(pending, sizeof pending, "%s/pending", rescue);
     if (access(pending, F_OK)) return 0; /* nothing installed since the last confirm */
+    if (mkdirs(rec)) return fail("cannot make %s", rec);
     for (unsigned i = 0; i < 2; ++i) {
         snprintf(a, sizeof a, "%s/%s", rec, RECOVERY_FILES[i]);
         snprintf(b, sizeof b, "%s/%s", rescue, RECOVERY_FILES[i]);
-        if (put(b, a)) return fail("cannot put the rescue copy back into %s", a);
+        if (!same_file(a, b) && put(b, a)) return fail("cannot put the rescue copy back into %s", a);
     }
-    unlink(pending);
-    printf("confirmed: %s holds the rescue copy again\n", rec);
+    if (and_confirm) unlink(pending);
+    printf("%s: %s holds the rescue copy again\n", and_confirm ? "confirmed" : "restored", rec);
     return 0;
 }
 
 int main(int argc, char **argv) {
     const char *rootfs = "/", *card = "/mnt/mmc", *usage =
-        "usage: q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR] | install [--card DIR] | confirm [--card DIR]\n";
+        "usage: q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR] | install | restore | confirm [--card DIR]\n";
     if (argc < 2) return fputs(usage, stderr), 2;
     int first = !strcmp(argv[1], "stage") ? 3 : 2;
     if (first > argc) return fputs(usage, stderr), 2;
@@ -380,6 +385,7 @@ int main(int argc, char **argv) {
     snprintf(out, sizeof out, "%s/.vamp/stage/recovery-update", card);
     if (!strcmp(argv[1], "stage")) return stage(argv[2], rootfs, out);
     if (!strcmp(argv[1], "install")) return install(card);
-    if (!strcmp(argv[1], "confirm")) return confirm(card);
+    if (!strcmp(argv[1], "restore")) return restore(card, 0);
+    if (!strcmp(argv[1], "confirm")) return restore(card, 1);
     return fputs(usage, stderr), 2;
 }
