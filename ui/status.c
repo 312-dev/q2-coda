@@ -246,8 +246,9 @@ void status_step(void) {
 }
 
 /* Wi-Fi's fan: a quarter circle standing on its point, cut into a dot and two bands, the lit ones
- * in ink and the rest in the gray a control that is off has. Drawn a pixel at a time by how far it
- * is from the point and how far off upright, its edges smoothed over a pixel. */
+ * in ink and the rest in the same ink at UNLIT, iOS's rule (tools/art.py STATUS_UNLIT). Drawn a pixel
+ * at a time by how far it is from the point and how far off upright, its edges smoothed over a pixel. */
+#define UNLIT 0.3f
 static void fan(float right, float base, int lit, uint32_t ink) {
     static const float from[] = { 0, 5.0f, 8.7f }, to[] = { 3.6f, 7.3f, 11.0f };
     float ax = right - 7.8f, ay = base;
@@ -260,8 +261,8 @@ static void fan(float right, float base, int lit, uint32_t ink) {
             for (int k = 0; k < 3 && side > 0; ++k) {
                 float cov = clampf(r - from[k] + 0.5f, 0, 1) * clampf(to[k] - r + 0.5f, 0, 1) * side;
                 if (cov <= 0) continue;
-                uint32_t *p = canvas + y * SCREEN_W + x, rgb = k < lit ? ink : tok(TOK_OFF);
-                *p = 0xff000000 | rgb_mix(*p & 0xffffff, rgb, cov);
+                uint32_t *p = canvas + y * SCREEN_W + x;
+                *p = 0xff000000 | rgb_mix(*p & 0xffffff, ink, k < lit ? cov : cov * UNLIT);
             }
         }
 }

@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Status row: the Wi-Fi bars a weak signal leaves unlit are a faint shade of the icon's own colour (faint white on black, faint black in Light Mode), as on an iPhone, where they were a solid grey that stood out in Light Mode.
   - Light Mode: a Q2 that has never chosen a Light Mode (a new install, or after Reset Settings) is now on **Auto**, light from 7:00 to 19:00 and dark at night, instead of dark all day. A Light Mode you chose stays as you set it.
   - Scanning: letting go of a held Previous or Next, or changing the scan's direction, is heard within about 0.15 s, where it could take half a second, so the song goes on nearer where you let go.
   - Car Audio: Radio, Internet Radio and Videos keep their own speed while the car is not taking the sound, where each short pause the Q2 took added up and could slow them down.

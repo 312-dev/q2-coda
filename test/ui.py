@@ -1544,6 +1544,12 @@ def status(binary, work):
     fan = lambda p: sum(1 for y in range(16, 29) for x in range(250, 281) if p.at(x, y) == WHITE)  # noqa: E731
     good &= check("Wi-Fi's fan is lit by its signal: all of it strong, its dot alone weak, none when not connected",
                   fan(strong) > fan(weak) * 2 > 0 and fan(half) == 0, f'{fan(strong)} {fan(weak)} {fan(half)}')
+    # the bands the signal does not light are the fan's own ink at 30% (iOS's rule), white's 30% over black here: grey
+    # 77 inside them, and nothing of another hue
+    rest = [weak.at(x, y) for y in range(16, 29) for x in range(250, 281) if weak.at(x, y) not in ((0, 0, 0), WHITE)]
+    faint = sum(1 for c in rest if max(abs(v - 77) for v in c) <= 1)
+    good &= check("the fan's unlit bands are its ink at 30% (grey 77 on black), no other grey", faint >= 6 and all(len(set(c)) == 1 for c in rest),
+                  f'{faint} {sorted(set(rest))[:6]}')
     return good & told(binary, work)
 
 

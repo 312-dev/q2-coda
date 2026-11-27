@@ -260,11 +260,11 @@ def wifi_fan(w):
             [(ax + r0 * math.cos(t), ay + r0 * math.sin(t)) for t in reversed(angles)] for r0, r1 in STATUS_FAN]
 
 
-def status_wifi(level, lit, unlit):
+def status_wifi(level, ink):
     """The status row's Wi-Fi at level (1 to 3 lit of wifi_fan's dot and bands, from the dot), a STATUS_WIFI_W x
-    STATUS_PX PNG: the lit part in lit, the rest in unlit, so the shape keeps its size at every level."""
+    STATUS_PX PNG: the lit part in ink, the rest in ink at STATUS_UNLIT, so the shape keeps its size at every level."""
     w, box = STATUS_WIFI_W, (0, 0, STATUS_WIFI_W, STATUS_PX)
-    return png(w, STATUS_PX, laid(w, STATUS_PX, [(coverage_nonzero([band], box), lambda x, y, c=lit if i < level else unlit: (c, 1))
+    return png(w, STATUS_PX, laid(w, STATUS_PX, [(coverage_nonzero([band], box), lambda x, y, a=1 if i < level else STATUS_UNLIT: (ink, a))
                                                  for i, band in enumerate(wifi_fan(w))]))
 
 
@@ -307,7 +307,7 @@ STATE_INKS = inks('primary', 'd', 'l')
 # square, or wider where the ink is (wifi-x, the car); the volume pill's speakers among them. The Bluetooth rune dims while
 # a device connects (BT_SPIN_INKS).
 # Wi-Fi is iOS's fan, drawn here (wifi_fan): its levels light 1 to 3 of the dot and two bands over the rest in
-# STATUS_UNLIT. The play state and the padlock are 13 px boxes drawn as they were (their ink 10.6 and 11 px); the
+# the same ink at STATUS_UNLIT's opacity (iOS's rule; the owner's, 2026-11-27). The play state and the padlock are 13 px boxes drawn as they were (their ink 10.6 and 11 px); the
 # sync arrows turn through STATUS_SPIN frames of a half turn (the glyph repeats every half turn), sized by their
 # longer side as they turn, in Text Primary (the user's, 2026-11-20); the download's arrow sits in its ring, white.
 STATUS_PX = 14
@@ -323,7 +323,7 @@ STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W),
               'status_headphones': ('headphones-bold', STATUS_PX), 'status_car': ('car-profile-bold', STATUS_CAR_W),
               # the volume pill's speaker, and muted at 0 (vol_pill.c)
               'status_vol': ('speaker-simple-high-fill', STATUS_PX), 'status_mute': ('speaker-simple-x-fill', STATUS_PX)}
-STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
+STATUS_UNLIT = 0.3  # the fan's unlit bands: its ink's opacity there (ui/status.c fan's UNLIT)
 # The Bluetooth rune, wired headphones and the deaf ear shown with no output connected (status_row.c SR_RUNE_W,
 # SR_GLYPH, SR_EAR_W) stand as tall as the battery's body, STATUS_TALL px from the box's top row, so rows 16 to 27,
 # their ink centred on row 21.5 with the battery's and the fan's (the user's mockups, 2026-11-25); each box as wide as
@@ -742,7 +742,7 @@ def status_images(prefix):
     """The status row's glyphs (STATUS_GLYPHS and the rest of its role), {name: PNG bytes}, per half."""
     out = {f'{prefix}_{n}_{k}': phosphor(g, px, c, ink) for n, (g, px, ink) in STATUS_GLYPHS.items() for k, c in STATE_INKS.items()}
     out |= {f'{prefix}_{n}_{k}': status_glyph(g, w, c) for n, (g, w) in STATUS_FIT.items() for k, c in STATE_INKS.items()}
-    out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, c, STATUS_UNLIT[k])
+    out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, c)
             for n in (1, 2, 3) for k, c in STATE_INKS.items()}
     # the Bluetooth slot while a device connects: the rune in Text Tertiary per half (status_row.c headset_paint)
     out |= {f'{prefix}_{n}_{k}': status_glyph(g, w, c, STATUS_TALL, 0) for n, (g, w) in STATUS_TALL_FIT.items()
