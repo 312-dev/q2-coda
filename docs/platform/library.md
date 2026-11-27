@@ -5,13 +5,15 @@
 | File | Tables |
 | --- | --- |
 | `/mnt/data/vamp/library.db` | the card's songs, their covers, the card's playlists |
-| `/mnt/mmc/.vamp/catalogue.db` | the signed-in servers' songs, less those that are card songs, and their offline copies |
+| `/mnt/mmc/.vamp/catalogue.db` | the signed-in servers' songs, less those that are card songs, their offline copies, and the servers' playlists |
 
 **Ids.** A card song's id is below `0x40000000` and stays while its path does. A server song's is `0x40000000 + slot * 0x01000000 + n`, slot 0 to 3 its app's place among the signed-in apps by name: stable while the app's catalogue is, not across a sign-out. [Q2PLAY/1](playback.md) plays either kind by id.
 
 **Paths.** `fileurl` is the path as the Q2 names it (`/mnt/mmc/...`). A server row's is `/mnt/mmc/.<app>/cat/<album id>/<sid>.<suffix>`, a name and not a file: the app fetches it ([server-library](../server-library.md)). A cover's `file` is a JPEG or PNG on the card.
 
 **Offline copies.** `servermeta` has a row for each `servertable` row: its `id`, its app's `app` id, the server's `sid`, and `local`, the path of a whole copy on the card (the app's Stream Cache) or NULL. A server song with a copy plays from it when its app does not answer ([q2playd: Offline copies](../playd.md#offline-copies)).
+
+**Server playlists.** `serverpl` holds each (`app`, `pid` the server's id, `name`); `serveritem` its songs (`app`, `pid`, `pos` from 0 in order, `sid`, and `path`: a synced song's card file, else NULL and the song is the `servermeta` row of that `app` and `sid`).
 
 **Playlists.** `playlist` holds a header row for each (`id` and `cd_num` its number, 1 to 100, `name` its name) and its songs (`id` from 101 in order, `cd_num` the playlist's, the other columns the song's `songtable` row).
 
@@ -30,4 +32,6 @@ playlist: id filename fileurl album songer style name composer albumsonger year 
 servertable: id filename fileurl album songer style name composer albumsonger year track cd_num time time_end time_create Initial bitdepth samprate
 serverdup: id fileurl
 servermeta: id app sid local
+serverpl: app pid name
+serveritem: app pid pos sid path
 ```

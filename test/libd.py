@@ -294,6 +294,22 @@ def test_as_a_service_new_avail_lines_are_applied_in_place_within_seconds(binary
         p.wait(10)
 
 
+# ---- the servers' playlists (docs/libd.md#the-servers-playlists) ----
+
+def test_the_servers_playlists_and_their_items_in_order(binary, card):
+    catalogue(card, 'subsonic', [S1, 'p\tpl1\tMix', 'i\tpl1\tsid2\t', 'i\tpl1\tsid1\t', 'i\tpl1\tsidX\t/mnt/mmc/Music/Bob/b.mp3',
+                                 S2, 'p\tpl2\tLate%09Night', 'i\tpl2\tsid1\t/mnt/mmc/../etc/passwd'])
+    catalogue(card, 'zshort', ['p\tpl9\tGone', 'i\tpl9\tsid1\t'], rows=5)
+    scan(binary, card)
+    db = sqlite3.connect(card/'mnt/mmc/.vamp/catalogue.db')
+    assert db.execute('select app, pid, name from serverpl order by rowid').fetchall() == [
+        ('subsonic', 'pl1', 'Mix'), ('subsonic', 'pl2', 'Late\tNight')], 'a cut-short catalogue keeps none'
+    assert db.execute('select app, pid, pos, sid, path from serveritem order by app, pid, pos').fetchall() == [
+        ('subsonic', 'pl1', 0, 'sid2', None), ('subsonic', 'pl1', 1, 'sid1', None),
+        ('subsonic', 'pl1', 2, 'sidX', '/mnt/mmc/Music/Bob/b.mp3'), ('subsonic', 'pl2', 0, 'sid1', None)], \
+        "each item in the file's order, a synced song's card path, an off-card path none"
+
+
 # ---- Vamp API 1 (docs/platform/library.md) ----
 
 def test_conformance_library(binary, card):

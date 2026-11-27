@@ -10,7 +10,8 @@
  *     On the card, as today's Vamp keeps its own (/mnt/data is too small for a large server), but a file of Vamp OS's
  *     own, so today's Vamp's catalogue.db is never touched either. A server song that is a card song is left out
  *     (serverdup names it). servermeta gives each server song's app, sid and offline copy (docs/libd.md#offline-copies):
- *     the catalogue's local path, then catalogue.avail's lines.
+ *     the catalogue's local path, then catalogue.avail's lines. serverpl and serveritem are the servers' playlists
+ *     and their songs in order (docs/libd.md#the-servers-playlists).
  *   - Besides: each album's cover in /mnt/mmc/.vamp/covers/ (vamp_cover names each song's), and the card's M3U
  *     playlists (/mnt/mmc/_explaylist_data/) in library.db's playlist, stock's table.
  *
@@ -454,9 +455,11 @@ static int card_path(const char *p) {
 }
 
 /* One app's catalogue.tsv into servertable (ins) and servermeta (meta: its copy, the local path when it is a card
- * path), ids from base. Its rows=, counted over s, p and i lines, must be
+ * path), ids from base; its p and i rows into serverpl (pl) and serveritem (item, each at the next pos of its
+ * playlist, its path a synced song's card file or NULL). Its rows=, counted over s, p and i lines, must be
  * met, so a file cut short is not taken for a smaller library: -1 then, and nothing of it is kept. */
-static int import_app(sqlite3 *d, sqlite3_stmt *st, sqlite3_stmt *meta, const char *id, unsigned base) {
+static int import_app(sqlite3 *d, sqlite3_stmt *st, sqlite3_stmt *meta, sqlite3_stmt *pl, sqlite3_stmt *item, const char *id,
+                      unsigned base) {
     char p[300], *line = malloc(LINE + 2), *f[20];
     snprintf(p, sizeof p, "/mnt/mmc/.%s/catalogue.tsv", id);
     FILE *in = line ? fopen(path(p), "r") : 0;
@@ -482,6 +485,20 @@ static int import_app(sqlite3 *d, sqlite3_stmt *st, sqlite3_stmt *meta, const ch
         }
         if ((line[0] == 's' || line[0] == 'p' || line[0] == 'i') && line[1] == '\t') ++counted;
         int n = split(line, f, 20);
+        if (!strcmp(f[0], "p") && n >= 3) { /* p pid name */
+            sqlite3_bind_text(pl, 1, id, -1, SQLITE_TRANSIENT), sqlite3_bind_text(pl, 2, f[1], -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(pl, 3, f[2], -1, SQLITE_TRANSIENT);
+            sqlite3_step(pl), sqlite3_reset(pl);
+            continue;
+        }
+        if (!strcmp(f[0], "i") && n >= 3) { /* i pid sid [card path] */
+            sqlite3_bind_text(item, 1, id, -1, SQLITE_TRANSIENT), sqlite3_bind_text(item, 2, f[1], -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(item, 3, f[2], -1, SQLITE_TRANSIENT);
+            if (n > 3 && card_path(f[3])) sqlite3_bind_text(item, 4, f[3], -1, SQLITE_TRANSIENT);
+            else sqlite3_bind_null(item, 4);
+            sqlite3_step(item), sqlite3_reset(item);
+            continue;
+        }
         /* s sid title artist albumartist album albumid year disc track seconds genre suffix [local size mbid] */
         if (strcmp(f[0], "s") || n < 13 || !plain(f[1]) || !plain(f[6]) || !plain(f[12])) continue;
         if (next - base >= CAT_APP_SPAN) break;
@@ -651,22 +668,27 @@ static int scan_catalogue(void) {
     mkdir(path("/mnt/mmc/.vamp"), 0755);
     unlink(tmp);
     sqlite3 *d;
-    sqlite3_stmt *st = 0, *meta = 0;
+    sqlite3_stmt *st = 0, *meta = 0, *pl = 0, *item = 0;
     if (sqlite3_open(tmp, &d) != SQLITE_OK ||
         exec_sql(d, "create table servertable(id int, filename, fileurl, album, songer, style, name, composer, albumsonger,"
                     " year int, track int, cd_num int, time int, time_end int, time_create int, Initial int, bitdepth int,"
                     " samprate int); create table servermeta(id integer primary key, app, sid, local);"
-                    " create index servermeta_sid on servermeta(app, sid); begin") ||
+                    " create index servermeta_sid on servermeta(app, sid);"
+                    " create table serverpl(app, pid, name); create table serveritem(app, pid, pos int, sid, path);"
+                    " create index serveritem_pid on serveritem(app, pid); begin") ||
         sqlite3_prepare_v2(d, "insert into servermeta values (?,?,?,?)", -1, &meta, 0) != SQLITE_OK ||
+        sqlite3_prepare_v2(d, "insert into serverpl values (?,?,?)", -1, &pl, 0) != SQLITE_OK ||
+        sqlite3_prepare_v2(d, "insert into serveritem select ?1, ?2, (select count(*) from serveritem where app = ?1 and pid = ?2),"
+                              " ?3, ?4", -1, &item, 0) != SQLITE_OK ||
         sqlite3_prepare_v2(d, "insert into servertable(id, filename, fileurl, album, songer, style, name, albumsonger, year, track,"
                               " cd_num, time, Initial) values (?,?,?,?,?,?,?,?,?,?,?,?,?)", -1, &st, 0) != SQLITE_OK)
-        return sqlite3_finalize(meta), sqlite3_close(d), -1;
+        return sqlite3_finalize(meta), sqlite3_finalize(pl), sqlite3_finalize(item), sqlite3_close(d), -1;
     memcpy(cat_ids, ids, sizeof ids), cat_n = n;
     for (int i = 0; i < n; ++i) {
-        import_app(d, st, meta, ids[i], CAT_ID_BASE + (unsigned)i * CAT_APP_SPAN);
+        import_app(d, st, meta, pl, item, ids[i], CAT_ID_BASE + (unsigned)i * CAT_APP_SPAN);
         avail_at[i] = apply_avail(d, i, 0); /* the whole file again: the catalogue's paths, then its lines */
     }
-    sqlite3_finalize(st), sqlite3_finalize(meta);
+    sqlite3_finalize(st), sqlite3_finalize(meta), sqlite3_finalize(pl), sqlite3_finalize(item);
     int ok = !exec_sql(d, "commit");
     if (ok) dups(d); /* after the commit: an attach cannot be made inside a transaction */
     sqlite3_close(d);
