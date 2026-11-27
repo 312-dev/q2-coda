@@ -36,7 +36,7 @@ The same verbs from the FIFO (`<seq> <verb>`) and from Q2PLAY/1:
 | `output dac`, `output bluetooth`, `output bluetooth soft` | Where the music goes ([The output](#the-output)) | `mcl-setoutputway`, `mcl-setvol`, and a song loaded again where it is |
 | `stop` | Nothing plays | `mcl-stop` |
 
-The FIFO alone has Car Remote's `jump LINE ID` (`coda_rc.c` `queue_item`, the shim's `cr_jump`): line LINE of the queue file as last written plays if it still holds song ID, the one playing played on (resumed if paused); else answer 3. The shim's other Car Remote verbs, `mode`, `rate`, `scan`, `radio` and `find`, are refused (1) until `q2playd` has repeat, ratings, Car Audio's scan, song radio and Find My Vamp.
+The FIFO alone has `q2ui`'s Play Next and Play Last, `queue next N` and `queue last N` (`ui/player.c` `player_enqueue`; the shim's, `library_pages.c` `queue_apply`): the list file's N ids put after the song playing in the play order (a shuffle's too) or after the last, the song playing left alone; with nothing queued they are loaded as the queue, not started (a `resume` plays the first); a source's URL and a server list's answer, which keep their own queue, refuse it (1). It also has Car Remote's `jump LINE ID` (`coda_rc.c` `queue_item`, the shim's `cr_jump`): line LINE of the queue file as last written plays if it still holds song ID, the one playing played on (resumed if paused); else answer 3. The shim's other Car Remote verbs, `mode`, `rate`, `scan`, `radio` and `find`, are refused (1) until `q2playd` has repeat, ratings, Car Audio's scan, song radio and Find My Vamp.
 
 Q2PLAY/1 alone has `source` and `focus` ([Sources and audio focus](#sources-and-audio-focus)): a URL needs a holder to tell when it ends, and the FIFO has no answer channel.
 

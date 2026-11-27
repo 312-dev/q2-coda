@@ -1070,6 +1070,30 @@ static int jump(int line, int id) {
     return start_at(at) ? 1 : 0;
 }
 
+/* q2ui's Play Next and Play Last (ui/player.c player_enqueue, the shim's "queue next|last N": library_pages.c
+ * queue_apply), the FIFO's alone: the list file's N ids put after the song playing in the play order (next) or after
+ * the last (last), the song playing left alone; with nothing queued, loaded as the queue and not started. A source's
+ * URL and a server list's answer, which keep their own queue, refuse it, as stock's streams do. */
+static int enqueue(int next, int n) {
+    if (src.on || q.paths || n <= 0) return -1;
+    if (n > QUEUE_MAX - q.n) n = QUEUE_MAX - q.n;
+    if (n <= 0) return -1;
+    int got = read_list(pending_ids);
+    if (got < n) n = got;
+    if (n <= 0) return -1;
+    memcpy(q.ids + q.n, pending_ids, (size_t)n * sizeof *q.ids);
+    if (!q.n) { /* nothing queued: loaded, stopped at its first song */
+        for (int i = 0; i < n; ++i) q.order[i] = i;
+        q.n = n, q.at = 0, q.shuffle = 0, q.errors = 0, ++q.list, ++q.seq;
+        return 0;
+    }
+    int at = next ? q.at + 1 : q.n;
+    memmove(q.order + at + n, q.order + at, (size_t)(q.n - at) * sizeof *q.order);
+    for (int i = 0; i < n; ++i) q.order[at + i] = q.n + i;
+    q.n += n, ++q.seq;
+    return 0;
+}
+
 static char cq[2048];
 static size_t cq_n;
 static void cmdq_read(void) {
@@ -1080,7 +1104,12 @@ static void cmdq_read(void) {
     while ((nl = memchr(p, '\n', cq_n - (size_t)(p - cq)))) {
         *nl = 0;
         char *verb = strchr(p, ' ');
-        int a, b, r = !verb ? -1 : sscanf(verb + 1, "jump %d %d", &a, &b) == 2 ? jump(a, b) : command(verb + 1, 0, 0);
+        char where[8];
+        int a, b, r = !verb                                                     ? -1
+                      : sscanf(verb + 1, "jump %d %d", &a, &b) == 2               ? jump(a, b)
+                      : sscanf(verb + 1, "queue %7s %d", where, &a) == 2 && (!strcmp(where, "next") || !strcmp(where, "last"))
+                          ? enqueue(where[0] == 'n', a)
+                          : command(verb + 1, 0, 0);
         if (verb && r) logf_("refused: %s", verb + 1);
         if (verb) ack(strtoul(p, 0, 10), r == 3 ? 3 : r ? 1 : 0);
         p = nl + 1;

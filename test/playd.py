@@ -1318,3 +1318,53 @@ def test_a_jump_plays_that_line_of_the_queue_and_a_stale_one_is_refused(run):
     send(root, '44 jump 2 3')  # the one playing, paused: it plays on where it was
     pl.pump()
     assert wait_for_value(lambda: acks(root)[:1], [(44, 0)]) and pl.names()[-1] == 'mcl-play', pl.got[-3:]
+
+
+# ---- Play Next and Play Last (q2ui's hold menu: ui/player.c player_enqueue, the shim's "queue next|last N") ----
+
+def enqueue(root, ids, where, seq):
+    (root/'tmp/coda-rc.list').write_text(''.join(f'{i}\n' for i in ids))
+    send(root, f'{seq} queue {where} {len(ids)}')
+
+
+def test_play_next_goes_after_the_song_playing_and_play_last_at_the_end(run):
+    """library_pages.c queue_apply: the list's ids inserted after the song playing (next) or after the last (last),
+    the song playing left alone"""
+    root, pl = run
+    play_list(root, [1, 2, 3], 0)
+    pl.pump()
+    enqueue(root, [5], 'next', 50)
+    assert wait_for_value(lambda: acks(root)[:1], [(50, 0)]), acks(root)
+    enqueue(root, [6], 'last', 51)
+    assert wait_for_value(lambda: acks(root)[:1], [(51, 0)]), acks(root)
+    assert [s for _, s in pl.songs()] == ['/mnt/mmc/Music/a.flac'], 'the song playing goes on'
+    for _ in range(4):
+        pl.say('player-status', 'exit')
+        pl.pump()
+    assert [s for _, s in pl.songs()] == ['/mnt/mmc/Music/a.flac', '/mnt/mmc/Music/e.dsf', '/mnt/mmc/Music/b.mp3',
+                                          '/mnt/mmc/Music/c%0x7dd.flac', '/mnt/mmc/Music/f.flac'], pl.songs()
+    assert queue_file(root)[1] == ['1', '5', '2', '3', '6']
+
+
+def test_play_last_with_nothing_queued_loads_the_songs_without_playing(run):
+    """queue_apply with no queue: mclLoadPlayList(add, 0, ...), loaded and not started"""
+    root, pl = run
+    enqueue(root, [2, 3], 'last', 60)
+    assert wait_for_value(lambda: acks(root)[:1], [(60, 0)]), acks(root)
+    pl.pump()
+    n = now(root)
+    assert pl.songs() == [] and n['state'] == '0' and n['qlen'] == '2', (pl.got, n)
+    send(root, '61 resume')
+    pl.pump()
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/b.mp3')]
+
+
+def test_play_next_into_a_shuffle_comes_next_in_its_order(run):
+    root, pl = run
+    play_list(root, [1, 2, 3], 1, shuffle=1)
+    pl.pump()
+    enqueue(root, [6], 'next', 70)
+    assert wait_for_value(lambda: acks(root)[:1], [(70, 0)]), acks(root)
+    pl.say('player-status', 'exit')
+    pl.pump()
+    assert pl.songs()[-1][1] == '/mnt/mmc/Music/f.flac', pl.songs()
