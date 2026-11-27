@@ -235,6 +235,19 @@ def scripts(binary, work):
     good &= check('and is between rows on most of its frames', between >= 30, f'{between} of the first 40')
     good &= check('and ends on a whole row', glide[-1] % ROW_H == 0, str(glide[-1]))
 
+    # spun up into the pinned row at a pace where the wheel's acceleration moves two rows a tick and more (a tick every
+    # 50 ms), from different rows, so that some last steps pass over the first song: the songs come to rest with their
+    # first row under the pinned one, never a row higher with a song in Shuffle's place
+    ends, jumped = [], False
+    for start in range(8, 14):
+        trace, _, _ = script(binary, work, 300, ['rest'] + ['tick 1', 'rest'] * (start - 1) + ['tick -1', 'run 34'] * 14 + ['rest'])
+        sels = [t['sel'] for t in trace]
+        ends.append((start, trace[-1]['sel'], trace[-1]['scroll']))
+        jumped |= 1 not in sels[sels.index(start):]
+    good &= check('some spins up reach the pinned row without stopping on the first song', jumped)
+    good &= check('and every one leaves the songs at their top', all(sel == 0 and scroll == 0 for _, sel, scroll in ends),
+                  str([e for e in ends if e[1:] != (0, 0)]))
+
     # the focus layer is above the pinned row and the foot's fade
     lines = ['rest', 'shot @rest.ppm', 'tug -1', 'run 500', 'shot @up.ppm', 'tug 0', 'rest'] + \
             ['tick 1', 'rest'] * 5 + ['tug 1', 'run 500', 'shot @down.ppm']

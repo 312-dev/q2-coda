@@ -1,5 +1,5 @@
 # Built by tools/ui.py, which passes the compiler, stb_truetype's folder, SQLite's header and library:
-#   make OUT=build/host CC=cc STB=DIR STBI=DIR SQLITE_INC=DIR SQLITE_LIB=/usr/lib/x86_64-linux-gnu/libsqlite3.so.0
+#   make OUT=build/host CC=cc STB=DIR STBI=DIR SQLITE_INC=DIR SQLITE_LIB=/usr/lib/<arch>-linux-gnu/libsqlite3.so.0
 #   make OUT=build/mips CC="mips-mti-linux-gnu-gcc -EL ..." STB=DIR STBI=DIR SQLITE_INC=DIR SQLITE_LIB=ROOTFS/usr/lib/libsqlite3.so.0.8.6
 OUT ?= build/host
 STRIP ?= strip

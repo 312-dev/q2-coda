@@ -157,7 +157,9 @@ static void kick(ui_list *l) {
 
 static void retarget(ui_list *l) {
     int p = l->src.pinned;
-    if (l->top < p) l->top = p;
+    /* on a pinned row the rows under it are at their top: the wheel reaches a pinned row from the
+     * first of them, whether it stopped there on the way or a fast turn passed over it */
+    if (l->top < p || l->sel < p) l->top = p;
     if (l->sel >= p) {
         if (l->sel < l->top) l->top = l->sel;
         if (l->sel >= l->top + l->rows) l->top = l->sel - l->rows + 1;

@@ -13,6 +13,7 @@ SHA-256 below; it is not in this repository.
 """
 import os
 import pathlib
+import platform
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -26,7 +27,8 @@ STB = ('1.26', 'https://raw.githubusercontent.com/nothings/stb/f0569113c93ad0954
 # stb_image 2.30, from the same commit: PNG (the theme's glyphs) and JPEG (covers)
 STB_IMAGE = ('2.30', 'https://raw.githubusercontent.com/nothings/stb/f0569113c93ad095470c54bf34a17b36646bbbb5/stb_image.h',
              '594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3')
-HOST_SQLITE = pathlib.Path('/usr/lib/x86_64-linux-gnu/libsqlite3.so.0')
+# this machine's own SQLite, in its architecture's library folder (x86_64-linux-gnu, aarch64-linux-gnu)
+HOST_SQLITE = pathlib.Path(f'/usr/lib/{platform.machine()}-linux-gnu/libsqlite3.so.0')
 
 
 def stb():
