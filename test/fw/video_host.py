@@ -18,8 +18,8 @@ There is no second process. When fork's stub answers a pid, the harness first ru
 here: ffmpeg() again with ffmpeg()'s own arguments, read off its frame at the offsets its debug info
 gives (-O0 keeps each parameter there), its fork answering 0, so the child's moves and its execv reach
 the stubs; its _exit comes back to the parent's fork, which then answers the pid. A fork the stub
-answers 0 makes the caller itself the child, as ever. Finding that frame takes x86-64's layout (its
-CFA two words above the frame pointer), so the harness refuses to compile for anything else."""
+answers 0 makes the caller itself the child, as ever. The unwinder finds that frame's CFA (_Unwind_GetCFA),
+which is where the debug info's offsets count from on any machine."""
 import json
 import os
 import re
@@ -34,11 +34,9 @@ HARNESS = {'_exit': 'fw_video_exit', 'poll': 'fw_video_poll', 'usleep': 'fw_vide
 # video.c's ffmpeg(), whose child's half the harness runs: its parameters and their types, in order.
 CHILD = ('ffmpeg', [('args', 'const char **'), ('a', 'int'), ('at_a', 'int'), ('b', 'int'), ('at_b', 'int')])
 HARNESS_SOURCE = r'''
-#ifndef __x86_64__
-#error "fw_video_fork finds ffmpeg() arguments by x86-64 frame layout (CFA = frame pointer + 16): port it first"
-#endif
 #include <setjmp.h>
 #include <stdlib.h>
+#include <unwind.h>
 int video_main(int, char **);
 void *video__writer(void *);
 int video__ffmpeg(const char **, int, int, int, int);
@@ -56,11 +54,23 @@ void fw_video_exit(int s) {
     if (!running) abort(); /* no run to end: a test reached an exit outside fw_video_run */
     end(s);
 }
+/* ffmpeg()'s CFA, fw_video_fork's caller's. libgcc's _Unwind_GetCFA gives a context the CFA of the frame it was
+   unwound from, its callee's (the stack pointer at the call): frame 0 (in fw_video_fork) has _Unwind_Backtrace's,
+   frame 1 (in ffmpeg()) fw_video_fork's, frame 2 ffmpeg()'s, on x86-64 and arm64 alike. */
+struct caller { int skip; char *cfa; };
+static _Unwind_Reason_Code caller_frame(struct _Unwind_Context *c, void *arg) {
+    struct caller *w = arg;
+    if (w->skip--) return _URC_NO_REASON;
+    w->cfa = (char *)_Unwind_GetCFA(c);
+    return _URC_END_OF_STACK;
+}
 int fw_video_fork(void) {
     if (child) return 0;
     int pid = (int)fw_fork(0, 0, 0, 0, 0, 0);
     if (pid > 0) {
-        char *cfa = (char *)__builtin_frame_address(1) + 2 * sizeof(void *); /* ffmpeg()'s */
+        struct caller w = { 2, 0 };
+        _Unwind_Backtrace(caller_frame, &w);
+        char *cfa = w.cfa; /* ffmpeg()'s */
         child = 1;
         if (!setjmp(child_done)) video__ffmpeg(CHILD_ARGS);
         child = 0;
@@ -136,7 +146,7 @@ def build(out, extra=()):
     undefined = {r[-1] for r in rows if len(r) == 2 and r[0] == 'U'}
     local = [r[-1] for r in rows if len(r) == 3 and r[1] in 'tdbr' and re.fullmatch(r'[A-Za-z_]\w*', r[-1])]
     system = {'__stack_chk_fail', '_GLOBAL_OFFSET_TABLE_', *PURE}
-    system |= {n for n in undefined if n.startswith(('__gcov', '__asan', '__ubsan', '__lsan'))}
+    system |= {n for n in undefined if n.startswith(('__gcov', '__asan', '__ubsan', '__lsan', '__aarch64_'))}  # __aarch64_: arm64's atomics (libgcc)
     if [n for n in system if 'fork' in n or 'exec' in n]:  # gcov's __gcov_fork would start a real process
         raise RuntimeError(f'{SOURCE.name}: a process call reaches no stub: {sorted(system)}')
     calls = sorted(undefined - system)
@@ -148,9 +158,7 @@ def build(out, extra=()):
     subprocess.run(['objcopy', *renames, '--redefine-sym', 'main=video_main', str(obj)], check=True)
     stubs = [f'fw_{name}' for name in calls]
     (out/'fw_stubs.c').write_text(host.stubs_source(stubs, {}) + HARNESS_SOURCE.replace('CHILD_ARGS', child))
-    # A frame pointer, so fw_video_fork finds its caller's frame.
-    subprocess.run(['cc', '-O1', '-fPIC', '-fno-omit-frame-pointer', '-w', '-c', str(out/'fw_stubs.c'), '-o', str(out/'fw_stubs.o')],
-                   check=True)
+    subprocess.run(['cc', '-O1', '-fPIC', '-w', '-c', str(out/'fw_stubs.c'), '-o', str(out/'fw_stubs.o')], check=True)
     library = out/'q2video.so'
     # -Bsymbolic: video.c's own names (scale, swap, overlay) bind to themselves, never to a namesake loaded first.
     subprocess.run(['cc', '-shared', '-Wl,-Bsymbolic', *extra, str(obj), str(out/'fw_stubs.o'), '-o', str(library)], check=True)

@@ -21,7 +21,7 @@ import subprocess
 import time
 import urllib.parse
 
-from conftest import O, claim, high_halves, libc, low_map
+from conftest import O, claim, code_at, high_halves, libc, low_map, ret_code
 
 ADDR = '10.77.0.1'  # the fake server's, on the namespace's own loopback: an RFC 1918 address the app takes http:// to
 PORT = 4533
@@ -145,7 +145,7 @@ class Firmware:
         # stock's toolsFreeStSongInfo, which addon.c calls at its address (want_show), not through a stub: a return
         # there, as stock_memory zeroes these pages before each test (the record it frees is the C's own)
         claim(0x5d2e10)
-        C.memmove(0x5d2e10, b'\xc3', 1)
+        code_at(0x5d2e10, ret_code())
         (self.root/'other/proc').mkdir(parents=True, exist_ok=True)
         (self.root/'other/proc/mounts').write_bytes(b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n')
 

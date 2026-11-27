@@ -17,7 +17,7 @@ import typing
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, stock_prop_str, stock_start_with, threads_now, ui_name
+from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, callback_code, claim, code_at, high_halves, libc, returns_code, stock_prop_str, stock_start_with, threads_now, ui_name
 
 STRINGS = dict(re.findall(r'^#define (\w+) "([^"]*)"', (host.ROOT/'patch/offsets.inc').read_text(), re.M))
 BT_GLYPH = STRINGS['BT_GLYPH']
@@ -1736,13 +1736,15 @@ def test_a_relayout_puts_a_padded_list_s_scroll_back_before_any_frame_draws_it(f
     paint()
     # stock's layouter: the rows' foot as the content, and AWTK's clamp of the scroll to it
     content, scroll = (C.addressof(view.int_at(O[k])) for k in ('VIEW_CONTENT_H', 'SCROLL_Y'))
-    code = (b'\x48\xb8' + struct.pack('<Q', content) + b'\xc7\x00' + struct.pack('<i', rows * h) +
-            b'\x48\xb8' + struct.pack('<Q', scroll) + b'\xc7\x00' + struct.pack('<i', rows * h - box) +
-            b'\xb8' + struct.pack('<i', 6) + b'\xc3')  # movabs rax; mov dword [rax], imm (twice); mov eax, 6; ret
+    def layouter(*_):
+        C.c_int.from_address(content).value = rows * h
+        C.c_int.from_address(scroll).value = rows * h - box
+        return 6
+    code = callback_code(layouter)
     address = O['LIST_VIEW_LAYOUT']
     claim(address)
     saved = C.string_at(address, len(code))
-    C.memmove(address, code, len(code))
+    code_at(address, code)
     try:
         fw.mock('window_manager_is_animating', lambda *_: animating)
         layout = fw.fn('ipod_list_layout', C.c_int, C.c_void_p, C.c_void_p)
@@ -1752,7 +1754,7 @@ def test_a_relayout_puts_a_padded_list_s_scroll_back_before_any_frame_draws_it(f
             paint()
             assert view.int_at(O['SCROLL_Y']).value == end_top
     finally:
-        C.memmove(address, saved, len(saved))
+        code_at(address, saved)
 
 
 def test_a_list_cut_above_the_list_end_has_no_fade(fw, st):
@@ -3158,16 +3160,17 @@ LYRIC_ROWS = 0x53b67c  # stock's rebuild of scroll_lrc's rows, which ringnav_lyr
 
 
 def rows_rebuilt(fw, win, result=0):
-    """ringnav_lyric_rows over stock's builder at its address: x86-64 standing in, returning result,
+    """ringnav_lyric_rows over stock's builder at its address: a stand-in returning result,
     and the page as conftest's map had it again after (bytes and protection), as nothing else runs there."""
     page = LYRIC_ROWS & ~0xfff
-    saved = C.string_at(LYRIC_ROWS, 6)
+    code = returns_code(result)
+    saved = C.string_at(LYRIC_ROWS, len(code))
     claim(LYRIC_ROWS)
-    C.memmove(LYRIC_ROWS, b'\xb8' + struct.pack('<I', result) + b'\xc3', 6)  # mov eax, result; ret
+    code_at(LYRIC_ROWS, code)
     try:
         return fw.fn('ringnav_lyric_rows', C.c_int, C.c_void_p)(win.addr)
     finally:
-        C.memmove(LYRIC_ROWS, saved, 6)
+        code_at(LYRIC_ROWS, saved)
         assert not libc.mprotect(page, 0x2000, 3)
 
 
