@@ -1,12 +1,16 @@
 # Our names for the stock functions Vamp touches that Shanling leaves unnamed, at stock V1.36's addresses. docs/rebasing.md
 binary	address	size	name	what
+demo	0x47b06c	0x348	tidal_quality_record_click	Tidal's quality picker: a row's (label_record_%d) handler, closing the keyboard by its name (navigator_close kb_default_t9) as it goes.
+demo	0x47b3b4	0x468	tidal_quality_search_close	Tidal's quality picker, after search_edit: closes the keyboard by its name (navigator_close kb_default_t9).
 demo	0x484514	0x180	tidal_favourite_request	Tidal's favourites added and removed (addFavouriteTrack, removeFavourite*): a curl request with stock's TLS checks off, which tools/build.py STOCK_TLS_CALLS turns on
 demo	0x4847c8	0x17c	tidal_playlist_track_request	A Tidal playlist's tracks added and removed (addTrackToPlaylist, removeTrackFromPlaylist): a curl request with stock's TLS checks off, which tools/build.py STOCK_TLS_CALLS turns on
 demo	0x48713c	0xa54	tidal_stream_url_thread	Tidal stream-URL thread: waits for the track flag, fetches playbackinfo for the song id, decodes the manifest, starts the player
 demo	0x499548	0x4c	checkfw_update_from_mmc	Starts the firmware update from /mnt/mmc/update.tar and stores its result in the check-firmware state.
 demo	0x499b9c	0xcc	confirminfo_dialog_on_keyup	Key-up handler of the confirm dialog, which dialog_confirminfo_dialog_init binds: with the backlight on, Return quits the dialog with code 4, the wheel keys stop there, and Centre clicks the focused widget and stops.
+demo	0x49a760	0x194	editwifi_dialog_bind_edits	Edit Wi-Fi dialog: finds its two edits by the keyboards' names (keyboard_netname, keyboard_password) and fills them.
 demo	0x49ab34	0xd4	kbwifiadd_name_row_on_click	Add Network's network-name row (dialog_editwifi_dialog_init's handler): reads edit_wifiname, opens dialog/editwifi_dialog with context 0 (the name, EDITWIFI_PASSWORD clear), writes the text back.
 demo	0x49ad30	0x11c	kbwifiadd_password_row_on_click	Add Network's password row (dialog_editwifi_dialog_init's handler): reads edit_passwd, opens dialog/editwifi_dialog with context 1 (the password, EDITWIFI_PASSWORD set), writes the text back.
+demo	0x49b028	0x190	kbwifiadd_dialog_bind_edit	Add Wi-Fi dialog: finds its password edit by the keyboard's name (keyboard_password).
 demo	0x49b5f0	0x8c	msginfo_dialog_on_foreground	Window-to-foreground handler: if no timer id is stored under timer_idex (or it is -1), quits the dialog.
 demo	0x49b67c	0x38	msginfo_dialog_on_timer	One-shot timer of the msginfo dialog: calls dialog_quit on the dialog and returns 7 (remove).
 demo	0x49b6b4	0xdc	msginfo_dialog_timer_stop	Removes the dialog's timer if one is stored and resets timer_idex to -1.
@@ -277,6 +281,7 @@ demo	0x4d3594	0x4ec	systemset_sysset_row_build	Builds one System settings row, w
 demo	0x4d3a80	0xc8	systemset_sysset_timer_start	Adds the 500 ms page timer once, storing its id in the timer_idex prop; callback 4d323c.
 demo	0x4d3b48	0x60	systemset_sysset_page_on_foreground	Page handler for window to foreground: shows the play gif, sets the wheel-mode focus keys, starts the page timer.
 demo	0x4d418c	0xb8	systemset_system_item_on_click	New in V1.34. System row click: opens systemset/fwupdate_page, reset_page or about_page by the row's name.
+demo	0x4d56c0	0xc8	wifimenu_scan_timer_add	Wi-Fi page: adds its 200 ms scan timer (widget_add_timer, timer_idex), the one that reads the scan's results.
 demo	0x4d5950	0x82c	wifimenu_rows_build	Rebuilds the Wi-Fi page list: switch row, scan results with signal icons, add network.
 demo	0x4d61e0	0xf8	wifimenu_switch_row	The Wi-Fi page's switch and Scanning rows' click, by the row's name: wifi_switch, or wifi_scan.
 demo	0x4d62d8	0x210	wifimenu_network_row	A Wi-Fi network row's click: check_wifinextaction's Forget, Disconnect, join, or the password entry.
@@ -296,6 +301,7 @@ demo	0x5063f0	0x24	song_track_order_less	Comparator: sets the output to 1 when t
 demo	0x506428	0x370	db_song_row_callback	SQLite row callback: builds a song record from a row and pushes it onto the result deque.
 demo	0x506798	0x16c	db_albumartist_row_callback	SQLite row callback for GetAllAlbumArtist: pushes a record of the album-artist name (id from column 0) onto the result deque.
 demo	0x506e94	0x22c	album_row	getAllAlbum's sqlite3_exec callback: id, album, artist and file to a record on the deque.
+demo	0x52c660	0x1b0	airplay_cover_set	AirPlay's settings page: hands the player the cover info (player_set_coverinfo).
 demo	0x52d73c	0xec	bigcover_page_on_pointer_up	Pointer-up handler of the Enlarged Art page: removes the page timer kept in timer_idex, then closes the window.
 demo	0x52d828	0x1ec	bigcover_page_set_cover	Picks the cover file (coverpic, externpic, tidal or default) by cover type and sets it on img_bigcover.
 demo	0x52da14	0xac	bigcover_page_set_title	Sets the title label (scrlabel_title) to g_song_name, or a default line when empty, and restarts its horizontal scroll at the configured speed.
@@ -436,6 +442,7 @@ demo	0x5d6520	0xb7c	tools_scan_folder_list	Library scan folder walk: lists a fol
 demo	0x5da07c	0x818	tools_insert_song_to_db	Reads a song tags and inserts it into the song table inside a BEGIN/COMMIT transaction. Since V1.36, after each 100 songs' commit, a full /mnt/data (toolsGetFreeSpace) sets the scan's stop flag to 2.
 demo	0x5dcbac	0x278	table_client_load_rows	Sets each virtual table row index, shows and moves it, and calls the page on_load_data callback.
 demo	0x5ddb5c	0x580	table_view_on_event	table_view event handler: switch over pointer and key events, ensures children on window open.
+demo	0x5e06ec	0x20c	widget_open_action	A widget's open action: window_open_and_close or window_open of the window its asset names.
 demo	0x5fb148	0x9c	hscroll_label_inner_width	Text area width of a scrolling label: the cached width if set, else its width less margin_left and margin_right.
 demo	0x5fb1e4	0xe4	hscroll_label_text_edge_x	Returns the label's scroll offset plus its left or right text edge, using the margin_left and margin_right styles. Since V1.36 a label that doesn't yoyo adds its loop_interval_distance, when it has one, to the range it scrolls.
 demo	0x5fb658	0x70	hscroll_label_on_delay_timer	Delay timer callback: clears the label's waiting flag, starts scrolling and removes the timer.
@@ -454,6 +461,7 @@ demo	0x606290	0x114	slide_menu_scroll_to	Starts a scroll animator moving a slide
 demo	0x6064e4	0xc8	slide_menu_on_scroll_done	A slide_menu's scroll animator end: fixes the index and sets the value.
 demo	0x612618	0x350	text_selector_on_event	text_selector event handler: pointer down, move and up with velocity tracking and grab, plus window-open case.
 demo	0x6136a8	0x164	text_selector_sync_selected_with_yoffset	Callback that wraps the text_selector yoffset, derives the selected option index from it and applies it.
+demo	0x61c894	0x400	combo_box_open_popup	combo_box's popup: window_open of the window its open_window property names.
 demo	0x6223f0	0x80	edit_on_idle	Idle callback: selects all of an edit text and puts the cursor at 0 when a flag is set.
 demo	0x626f4c	0x1d8	edit_set_text_from_value	Converts a value to a wide string, clamps its length, sets it as the edit text and moves the cursor.
 demo	0x627c6c	0x328	image_on_paint_self	Paints an image widget: loads the bitmap and draws it, using vgcanvas transform for icon draw type.
@@ -471,6 +479,7 @@ demo	0x6521dc	0x2c	dialog_close_window	Event callback: closes the window of the 
 demo	0x657e70	0x2b0	image_manager_load_bitmap	Looks up an image in the cache, else loads it from assets or the loader into a bitmap and adds it.
 demo	0x672bf8	0x68	widget_dispatch_keydown	Keydown helper: runs widget_dispatch, then the vtable on_keydown, and returns 0 when it returns 3.
 demo	0x67ee90	0x1f8	window_base_move_focus_on_key	Key handler for 35-keys mode: Return toggles moving_focus_mode, arrow keys move focus.
+demo	0x68322c	0x34	window_open_stubs	The two short entries to window_open_and_close and window_open, each opening the window its caller names.
 demo	0x6945bc	0xe4	image_loader_stb_load	Image loader entry: decodes an image via stb_load_image into a bitmap using its pixel format.
 demo	0x6954e0	0x120	widget_animator_scroll_update	Animator update: sets xoffset and yoffset props to from plus (to minus from) times progress when each differs.
 demo	0x6989cc	0x50	window_manager_default_clear_refs	Clears the window manager references (+0x4c, +0x50, +0x58) that point at the given window.
@@ -493,6 +502,7 @@ demo	0x69d194	0x3a4	window_manager_default_close_window	The window manager's clo
 demo	0x69d538	0x280	window_manager_default_paint_normal	Normal paint of the window manager: finds the lowest full-screen window from the top, draws the dialog highlighter, paints windows from there up, then the system bar. Name is ours.
 demo	0x69e6bc	0x22c	main_loop_simple_step	One step of the simple main loop: receives events, dispatches input, timers and idles, and paints.
 demo	0x69f148	0xd4	input_method_default_on_win_close	Keyboard window close callback: clears the input method window and frees the context.
+demo	0x69f638	0xc6c	input_method_default_request	AWTK's input_method_default_request (static, its frame 0xd8): opens the keyboard window for an edit and sets its open_anim_hint.
 demo	0x6a4f54	0xf8	lcd_mem_create_with_three_fbs	Creates an lcd_mem through the shared create helper, stores two extra frame buffers at +0x114 and +0x118 and registers them with the dirty rects: the three-buffer twin of the double-fb creators.
 demo	0x6a504c	0x70	lcd_mem_get_height	Returns the lcd height: the stored +0xb4, or +0xb0 when the system rotation is 90 or 270 degrees.
 demo	0x6a50bc	0x70	lcd_mem_get_width	Returns the lcd width: the stored +0xb0, or +0xb4 when the system rotation is 90 or 270 degrees.
