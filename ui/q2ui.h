@@ -326,7 +326,7 @@ typedef struct ui_source {
     void (*chosen)(void *ctx, int i);           /* Centre */
     void (*held)(void *ctx, int i);             /* Centre held; 0: nothing */
     void (*focus)(void *ctx, int i);            /* the selection came to row i; 0: nothing */
-    /* A grabbed ROW_SLIDER row turned: steps up (+) or down (-), more a tick on a fast spin. The
+    /* A grabbed ROW_SLIDER row turned: steps up (+, clockwise) or down (-), more a tick on a fast spin. The
      * source sets its level and calls list_rows_changed. */
     void (*adjust)(void *ctx, int i, int steps);
     void *ctx;

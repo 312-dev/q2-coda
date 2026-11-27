@@ -371,15 +371,16 @@ def scripts(binary, work):
                   sum(1 for k in knob if 0.02 < k < 0.98) >= 10 and pics['sliding'].rgb not in (pics['on'].rgb, pics['off'].rgb),
                   f'{sum(1 for k in knob if 0.02 < k < 0.98)} frames between its ends in two flips')
     good &= check('a chevron stands at the right column', pics['on'].at(342, BAR_H + ROW_H + 16) != (0, 0, 0) and pics['open'].at(342, BAR_H + ROW_H + 16) != ACCENT)
-    # an inline slider row (ROW_SLIDER): Centre grabs it and the wheel then sets it (up is more), Centre or Return sets it down
-    lines = ['rest', 'tick 12', 'rest', 'key centre', 'run 50', 'tick -2', 'tick 1', 'run 50', 'shot @grabbed.ppm', 'key centre', 'run 50',
-             'tick -1', 'rest', 'tick 1', 'rest', 'key centre', 'run 50', 'tick -1', 'key return', 'rest', 'rows @rows.txt', 'tick -1',
+    # an inline slider row (ROW_SLIDER): Centre grabs it and the wheel then sets it (clockwise, down a list, is more, as
+    # demo's sliders: patch/inline_slider.c, KEY_NEXT), Centre or Return sets it down
+    lines = ['rest', 'tick 12', 'rest', 'key centre', 'run 50', 'tick 2', 'tick -1', 'run 50', 'shot @grabbed.ppm', 'key centre', 'run 50',
+             'tick -1', 'rest', 'tick 1', 'rest', 'key centre', 'run 50', 'tick 1', 'key return', 'rest', 'rows @rows.txt', 'tick -1',
              'run 50']
     trace, pics, _, (_, _, d) = script(binary, work, 1, lines, '--page', 'gallery', queue=True)
     level = [r for r in (d/'rows.txt').read_text().splitlines() if r.startswith('Level')] if (d/'rows.txt').exists() else []
     grabs = [t['grab'] for t in trace]
-    good &= check('Centre grabs the slider (the wheel then sets it: up two, down one) and sets it down, the wheel moving the '
-                  'selection again; grabbed once more, up one, Return sets it down with the page kept', level == ['Level\t42%'] and 12 in grabs and grabs[-1] == -1 and trace[-1]['sel'] == 11,
+    good &= check('Centre grabs the slider (the wheel then sets it: clockwise two, back one) and sets it down, the wheel moving the '
+                  'selection again; grabbed once more, clockwise one, Return sets it down with the page kept', level == ['Level\t42%'] and 12 in grabs and grabs[-1] == -1 and trace[-1]['sel'] == 11,
                   f'{level} {trace[-1]}')
     g = pics['grabbed']
     rows = [y for y in range(BAR_H, H) if g.at(205, y) == (255, 255, 255) and g.at(270, y) == (0x7d, 0xa2, 0xea)]
@@ -439,8 +440,9 @@ def pages(binary, work):
     _, later, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'shot @now.ppm'], *home, now=NOW.replace('pos=14000', 'pos=120000'))
     good &= check('and further on later in the song', later['now'].at(200, 231) == ACCENT and later['now'].rgb != pics['now'].rgb)
     _, _, _, (sent, _, _) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'key centre', 'run 100', 'tick 1', 'run 100'], *home, now=NOW, queue=True)
-    good &= check('there Centre is play and pause, and a tick down the wheel is one step quieter',
-                  [line.split(' ', 1)[1] for line in sent] == ['toggle', 'volume 39'], str(sent))
+    good &= check("there Centre is play and pause, and a tick clockwise (down a list) is one step louder, as demo's wheel "
+                  '(patch/playback.c: x falling is KEY_NEXT; patch/volume.c vol_next: KEY_NEXT is up)',
+                  [line.split(' ', 1)[1] for line in sent] == ['toggle', 'volume 41'], str(sent))
     # a title too long for its column rests, slides to its end, and comes back
     # a picture every quarter second for ten: at rest 2.75 s, sliding, held 1.5 s at its end, then back at rest
     long = NOW.replace('title=A Made-Up Song', 'title=A Made-Up Song Again X').replace('state=1', 'state=2')
@@ -464,7 +466,7 @@ def pages(binary, work):
         for name, rgb in (('mode_shuffle_d', (90, 90, 90)), ('mode_shuffle_on', (0, 0, 250)), ('mode_repeat_d', (90, 90, 90)),
                           ('mode_repeat_on', (0, 0, 250)), ('mode_repeat1_on', (0, 250, 0)), ('mode_radio_d', (90, 90, 90)),
                           ('mode_queue_d', (90, 90, 90)), ('np_fav_d', (250, 0, 0)), ('np_unfav_d', (90, 90, 90)),
-                          ('np_more_d', (0, 250, 250))):
+                          ('np_more_d', (0, 250, 250)), ('vol_lo_d', (250, 250, 0)), ('vol_hi_d', (250, 0, 250))):
             png(d/f'oled_{name}.png', 16, 16, rgb)
     icons = pathlib.Path(tempfile.mkdtemp(dir=work))
     glyphs(icons)
@@ -502,6 +504,16 @@ def pages(binary, work):
     level, bar = pics['volume'].at(80, 231), pics['after'].at(36, 231)
     good &= check('a tick on Now Playing shows the volume in the bar, then the bar comes back',
                   level == (255, 255, 255) and pics['volume'].at(36, 231) != ACCENT and bar == ACCENT, f'{level} {bar}')
+    # demo's speakers at the bar's ends while it shows the volume (patch/volume.c vol_paint): 16 px, centred 8 px in from
+    # each end of the progress bar (VOL_SPK_X), the track VOL_SPK_INSET (24 px) in from each end between them
+    _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 1', 'run 200', 'shot @volume.ppm'], *home,
+                        '--icons', icons, now=NOW)
+    v = pics['volume']
+    ends = [v.at(x, 231) for x in (25, 32, 39, 336, 343, 350)]
+    gaps = [v.at(x, 231) for x in (41, 47, 328, 334)]
+    good &= check("the volume in the bar's place has demo's quiet and loud speakers at its ends, the track 24 px in",
+                  ends == [(250, 250, 0)] * 3 + [(250, 0, 250)] * 3 and gaps == [(0, 0, 0)] * 4
+                  and v.at(48, 231) != (0, 0, 0) and v.at(326, 231) != (0, 0, 0), f'{ends} {gaps}')
     # Library > Artists > the first artist's songs > Centre on the second: that artist's songs are the queue
     walk = ['rest', 'key centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'run 200']
     _, _, _, (sent, ids, d) = script(binary, work, 60, walk, *home, queue=True)
@@ -867,13 +879,14 @@ def control_center_sheet(binary, work, home):
     p = pics['light']
     good &= check("Light Mode: the block in Raised's light half and the sliders' fill dark, as demo's flip makes them",
                   p.at(25, 100) == (0xe3, 0xe3, 0xe1) and p.at(230, 181) == (0x1a, 0x1a, 0x15), f'{p.at(25, 100)} {p.at(230, 181)}')
-    # the sliders: Centre on one gives it the wheel (its ring the accent), up the wheel is more, Centre or Return gives it back
+    # the sliders: Centre on one gives it the wheel (its ring the accent), clockwise is more (demo's cc_wheel), Centre or
+    # Return gives it back
     lines = ['rest', 'hold return', 'rest', 'tick 1', 'run 50', 'tick 6', 'run 50', 'shot @on.ppm', 'key centre', 'run 50', 'shot @grabbed.ppm',
-             'tick -2', 'tick 1', 'key centre', 'run 50', 'tick 1', 'run 50', 'key centre', 'run 50', 'tick -5', 'key return', 'run 300',
+             'tick 2', 'tick -1', 'key centre', 'run 50', 'tick 1', 'run 50', 'key centre', 'run 50', 'tick 5', 'key return', 'run 300',
              'shot @set.ppm', 'tick 1', 'run 50']
     trace, pics, stats, (sent, _, _), said = script(binary, work, 60, lines, *home, '--told', told, queue=True, ctl=True)
     verbs = [line.split(' ', 1)[1] for line in sent]
-    good &= check("Brightness, grabbed, goes up two and down one down the pipe; Volume, grabbed, up to demo's top (33) down the "
+    good &= check("Brightness, grabbed, goes up two clockwise and down one back down the pipe; Volume, grabbed, clockwise up to demo's top (33) down the "
                   'queue and no further', said == ['set bright 41', 'set bright 42', 'set bright 41'] and
                   verbs == ['volume 31', 'volume 32', 'volume 33'], f'{said} {verbs}')
     good &= check('Return gave Volume back and the sheet stayed; with no cable the next tick stays on Volume, the last stop',

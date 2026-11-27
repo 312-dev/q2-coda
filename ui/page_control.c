@@ -222,7 +222,7 @@ static void cc_event(void *st, const input_t *e) {
         if (wake(s)) return;
         if (s->grab >= 0) {
             int step = wheel_accel(&s->accel, s, e->value, e->ms, 0);
-            adjust(s, s->grab, -e->value * (step < 1 ? 1 : step > SLIDER_STEPS ? SLIDER_STEPS : step)); /* up the wheel is more */
+            adjust(s, s->grab, e->value * (step < 1 ? 1 : step > SLIDER_STEPS ? SLIDER_STEPS : step)); /* clockwise is more, as demo's cc_wheel */
             return;
         }
         int next = s->focus + e->value;

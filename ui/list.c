@@ -522,7 +522,7 @@ void list_event(ui_list *l, const input_t *e) {
     if (e->type == IN_TICK && l->grab >= 0) { /* a grabbed slider's: the selection stays */
         int step = wheel_accel(&l->accel, l, e->value, e->ms, 0);
         step = step < 1 ? 1 : step > SLIDER_STEPS ? SLIDER_STEPS : step;
-        if (l->src.adjust) l->src.adjust(l->src.ctx, l->grab, -e->value * step); /* down the wheel is less */
+        if (l->src.adjust) l->src.adjust(l->src.ctx, l->grab, e->value * step); /* clockwise is more, as demo's sliders (patch/inline_slider.c) */
         ui_mark(l->focus_was);
     } else if (e->type == IN_TICK) {
         int dir = e->value, step = wheel_accel(&l->accel, l, dir, e->ms, l->n), old = l->sel;
