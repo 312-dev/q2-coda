@@ -328,7 +328,8 @@ static int key_code(const char *name) {
                                      : atoi(name);
 }
 /* Lines: tick N | tug SHARE | key NAME | down NAME | up NAME | hold NAME | run MS | rest |
- * shot FILE | record DIR | record off | page songs|depth. Each input goes in with the next frame. */
+ * shot FILE | record DIR | record off | plays FILE (what plays is read from FILE from here on).
+ * Each input goes in with the next frame. */
 static int script(const char *path) {
     FILE *f = fopen(path, "r");
     char line[400], arg[320];
@@ -362,6 +363,9 @@ static int script(const char *path) {
             for (uint64_t until = fake_us + (uint64_t)atoi(arg) * 1000u; fake_us < until;) script_frame(0, 0);
         } else if (!strncmp(line, "rest", 4)) {
             for (int k = 0; k < 900 && (ui_moving() || ui_wake_pending()); ++k) script_frame(0, 0);
+        } else if (sscanf(line, "plays %319s", arg) == 1) {
+            now_file = strdup(arg); /* what plays is now this file's: as demo writing a new one */
+            now_read();
         } else if (sscanf(line, "shot %319s", arg) == 1) {
             ppm(arg);
         } else if (sscanf(line, "record %255s", arg) == 1) {

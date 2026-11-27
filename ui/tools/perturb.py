@@ -56,6 +56,7 @@ CASES = {
  'battery-never-red': ('ui/status.c', "S.cable ? tok(TOK_POSITIVE) : S.level < LOW ? tok(TOK_NEGATIVE) : ink;", "S.cable ? tok(TOK_POSITIVE) : ink;", 'status', 'under a fifth it is red'),
  'no-play-glyph': ('ui/status.c', "    if (play != S.play) S.play = play, ui_mark(glyphs_rect());", "    (void)play;", 'status', 'a song playing puts three bars'),
  'fan-always-full': ('ui/status.c', "        wifi = quality >= 45 ? 3 : quality >= 25 ? 2 : 1;", "        wifi = 3;", 'status', "Wi-Fi's fan is lit by its signal"),
+ 'no-volume-in-row': ('ui/status.c', "        S.volume_at = ui_time();\n        ui_mark(volume_rect());", "        ui_mark(volume_rect());", 'status', 'a volume change shows its level'),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

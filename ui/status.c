@@ -2,7 +2,8 @@
  * fill, drawn after the page so its glyphs stand over whatever runs under them. At the left the
  * clock, Inter Medium 15 from x 62, its figures on rows 17 to 27, in Text Secondary, and in Text
  * Primary on Home. At the right, right to left, each only while it has something to say: the
- * battery, its nub ending 62 px from the edge; the play state; Wi-Fi's fan.
+ * battery, its nub ending 62 px from the edge; the play state; Wi-Fi's fan. Between them, for a
+ * moment after the volume changes, its level.
  *
  * Where each comes from, all read here with no help from demo: the battery from the kernel's
  * power supply files; the play state from what plays (now.c); Wi-Fi from wlan0's state and its
@@ -38,8 +39,15 @@ static struct {
     int level, cable; /* the battery's percent, -1 unknown; 1 on a cable that charges or holds it */
     int wifi;         /* 0 not connected, 1 to 3 the fan's lit parts */
     int play;         /* 0 stopped, 1 playing, 2 paused */
+    int volume;       /* the level last seen, -1 before the first */
+    uint64_t volume_at; /* when it last changed on a page with no display of its own, 0: not shown */
     unsigned seen;    /* now_seq() when play was read */
-} S = { .level = -1 };
+} S = { .level = -1, .volume = -1 };
+
+#define VOLUME_SHOW_US 1500000u
+#define VOLUME_X 150 /* its track, between the clock and the glyphs */
+#define VOLUME_W 76
+static rect_t volume_rect(void) { return (rect_t){ VOLUME_X - 2, 18, VOLUME_W + 4, 10 }; }
 
 /* The clock reads hhmm whatever the time: a script's, so a picture is the same on every run. */
 void status_clock_fixed(const char *hhmm) {
@@ -88,6 +96,16 @@ void status_step(void) {
     int play = now_get()->playing ? 1 : now_get()->paused ? 2 : 0;
     static int read_once;
     if (play != S.play) S.play = play, ui_mark(glyphs_rect());
+    /* the volume, whoever changed it (the side buttons, a headset, a phone): its level shows in the
+     * row for a moment on every page but Now Playing, which shows it in its own bar */
+    int volume = now_get()->read_us ? now_get()->volume : -1;
+    if (S.volume >= 0 && volume >= 0 && volume != S.volume && strcmp(ui_top_name(), "now")) {
+        S.volume_at = ui_time();
+        ui_mark(volume_rect());
+        ui_wake_ms(VOLUME_SHOW_US / 1000u);
+    }
+    if (volume >= 0) S.volume = volume;
+    if (S.volume_at && ui_time() - S.volume_at >= VOLUME_SHOW_US) S.volume_at = 0, ui_mark(volume_rect());
     if (!read_once) read_once = 1, read_glyphs();
     if (S.fixed) return;
     time_t t = time(0);
@@ -128,6 +146,10 @@ void status_draw(rect_t r) {
     if (!S.run.n || run_stale(&S.run)) run_make(&S.run, FACE_MEDIUM, TYPE(15), S.clock, -1);
     /* on Home the clock stands over the list in Text Primary (docs/oled-design.md#status-row) */
     run_draw(&S.run, INSET, CLOCK_Y, tok(home ? TOK_PRIMARY : TOK_SECONDARY), 256);
+    if (S.volume_at) {
+        fill_round((rectf_t){ VOLUME_X, 21, VOLUME_W, 4 }, 2, 0, tok(TOK_TRACK), 1, 0);
+        if (S.volume > 0) fill_round((rectf_t){ VOLUME_X, 21, 4 + (VOLUME_W - 4) * (float)S.volume / 100, 4 }, 2, 0, ink, 1, 0);
+    }
     float x = RIGHT;
     if (S.level >= 0) {
         /* the nub, the body's outline, and the charge 2 px inside it to the level */

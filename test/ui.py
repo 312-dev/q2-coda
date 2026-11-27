@@ -479,6 +479,14 @@ def status(binary, work):
     good &= check('a song playing puts three bars left of the battery, a paused one two wider bars, nothing stopped',
                   len({x for x, _ in box(playing)}) == 6 and len({x for x, _ in box(paused)}) == 6 and box(playing) != box(paused) and not box(half),
                   f'{sorted({x for x, _ in box(playing)})} {sorted({x for x, _ in box(paused)})}')
+    # the volume changed from elsewhere (a side button): its level shows in the row for a moment, on a list
+    d = pathlib.Path(tempfile.mkdtemp(dir=work))
+    (d/'louder').write_text(NOW.replace('volume=40', 'volume=80'))
+    _, pics, _ = script(binary, work, 5, ['rest', 'shot @before.ppm', f'plays {d}/louder', 'run 200', 'shot @shown.ppm', 'run 2000', 'shot @after.ppm'], now=NOW)
+    bar = lambda p: [x for x in range(150, 226) if p.at(x, 23) == WHITE]  # noqa: E731
+    good &= check('a volume change shows its level in the status row, four fifths of the track, and then goes',
+                  not bar(pics['before']) and 55 <= len(bar(pics['shown'])) <= 64 and not bar(pics['after']),
+                  f"{len(bar(pics['before']))} {len(bar(pics['shown']))} {len(bar(pics['after']))}")
     strong, weak = row(50, wifi=60), row(50, wifi=10)
     fan = lambda p: sum(1 for y in range(16, 29) for x in range(250, 281) if p.at(x, y) == WHITE)  # noqa: E731
     good &= check("Wi-Fi's fan is lit by its signal: all of it strong, its dot alone weak, none when not connected",
