@@ -358,6 +358,8 @@ int lib_groups(int kind);                             /* how many artists, or al
 const char *lib_group_name(int kind, int g);
 const char *lib_group_artist(int g);                  /* an album's artist (its first song's) */
 const int *lib_group_songs(int kind, int g, int *n);  /* the group's songs, as numbers for lib_title */
+int lib_playlists(int *ids, char (*names)[64], int room); /* the playlists, On-The-Go (100) first while it has songs */
+int lib_playlist_songs(int list, int *songs, int room);    /* a playlist's songs in its order, as numbers for lib_title */
 
 /* ---- now.c: what plays ---- */
 typedef struct {

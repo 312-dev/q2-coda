@@ -25,6 +25,8 @@ static struct {
         int *order;  /* the songs, group by group */
     } groups[LIB_KINDS];
     int n, rows;
+    char path[256];  /* the database, opened again for a playlist */
+    int *by_id;      /* the songs' numbers in their ids' order, made when a playlist first asks */
 } lib;
 
 static unsigned keep(const unsigned char *s) {
@@ -86,6 +88,7 @@ int lib_open(const char *path, const char *catalogue, int limit) {
     sqlite3 *db;
     sqlite3_stmt *q;
     if (sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) return -1;
+    snprintf(lib.path, sizeof lib.path, "%s", path);
     int server = 0;
     if (catalogue && sqlite3_prepare_v2(db, "attach ? as cat", -1, &q, 0) == SQLITE_OK) {
         sqlite3_bind_text(q, 1, catalogue, -1, SQLITE_STATIC);
@@ -121,4 +124,64 @@ int lib_open(const char *path, const char *catalogue, int limit) {
     sqlite3_finalize(q);
     sqlite3_close(db);
     return 0;
+}
+
+/* ---- playlists: stock's table playlist in the same database (patch/playlists.c). A list is a row
+ * with an id of 100 or less, its name in filename; its songs are the rows over 100 whose cd_num is
+ * the list's id, in id order, each naming its song by fileurl. On-The-Go is cd_num 100 with no row
+ * of its own. Read when asked, as they change while q2ui runs (demo edits them). ---- */
+static int by_id_cmp(const void *a, const void *b) {
+    int x = lib.id[*(const int *)a], y = lib.id[*(const int *)b];
+    return (x > y) - (x < y);
+}
+static int song_of(int id) {
+    if (!lib.by_id) {
+        lib.by_id = malloc((size_t)(lib.n ? lib.n : 1) * sizeof *lib.by_id);
+        for (int i = 0; i < lib.n; ++i) lib.by_id[i] = i;
+        qsort(lib.by_id, (size_t)lib.n, sizeof *lib.by_id, by_id_cmp);
+    }
+    int lo = 0, hi = lib.n - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2, v = lib.id[lib.by_id[mid]];
+        if (v == id) return lib.by_id[mid];
+        if (v < id) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return -1;
+}
+int lib_playlists(int *ids, char (*names)[64], int room) {
+    sqlite3 *db;
+    sqlite3_stmt *q;
+    int n = 0;
+    if (sqlite3_open_v2(lib.path, &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) return 0;
+    /* On-The-Go first while it has songs, then the lists in the order they were made */
+    if (sqlite3_prepare_v2(db, "select 100, 'On-The-Go' where exists (select 1 from playlist where id > 100 and cd_num = 100) "
+                               "union all select id, filename from (select id, filename from playlist where id < 100 order by id)",
+                           -1, &q, 0) == SQLITE_OK) {
+        while (n < room && sqlite3_step(q) == SQLITE_ROW) {
+            ids[n] = sqlite3_column_int(q, 0);
+            snprintf(names[n], 64, "%s", sqlite3_column_text(q, 1) ? (const char *)sqlite3_column_text(q, 1) : "");
+            ++n;
+        }
+        sqlite3_finalize(q);
+    }
+    sqlite3_close(db);
+    return n;
+}
+int lib_playlist_songs(int list, int *songs, int room) {
+    sqlite3 *db;
+    sqlite3_stmt *q;
+    int n = 0;
+    if (sqlite3_open_v2(lib.path, &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) return 0;
+    if (sqlite3_prepare_v2(db, "select s.id from playlist p join songtable s on s.fileurl = p.fileurl "
+                               "where p.id > 100 and p.cd_num = ? order by p.id", -1, &q, 0) == SQLITE_OK) {
+        sqlite3_bind_int(q, 1, list);
+        while (n < room && sqlite3_step(q) == SQLITE_ROW) {
+            int song = song_of(sqlite3_column_int(q, 0));
+            if (song >= 0) songs[n++] = song; /* a song past --limit is not listed */
+        }
+        sqlite3_finalize(q);
+    }
+    sqlite3_close(db);
+    return n;
 }

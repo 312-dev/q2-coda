@@ -438,11 +438,12 @@ def pages(binary, work):
     good &= check("an album's songs are its tracks in order", len(sent) == 1 and ids == want, f'{ids} for {want}')
     # Library > Albums: two-line rows, each led by its cover from Cover Flow's thumbnails, else the placeholder
     good &= album_covers(binary, work, home)
+    good &= playlists(binary, work, home)
     # a row whose page is demo's: the page is named for demo and q2ui ends with the code that says so
     _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'tick 1', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check('Centre on Radio asks demo for its page and ends with code 3', asked == 'tuner_page\n' and sent == [], repr(asked))
-    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 4', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 5', 'rest', 'key centre', 'run 100'], *home, code=3, queue=True)
     asked = (d/'ask').read_text() if (d/'ask').exists() else ''
     good &= check("and Ratings, in the Library, for demo's Ratings", asked == 'ratings_page\n', repr(asked))
     # the last row leaves q2ui for demo's menus: the program ends, with the code of a plain end
@@ -458,6 +459,29 @@ def art_key(artist, album):
             h = (h ^ b) * 16777619 & 0xffffffff
         return h * 16777619 & 0xffffffff
     return fnv(fnv(2166136261, artist), album)
+
+
+def playlists(binary, work, home):
+    """Library > Playlists (ui/page_library.c): stock's table playlist, On-The-Go first while it has songs, then the
+    lists in the order made; a list's songs in its own order, and Centre plays them from the row."""
+    def made(d):
+        db = sqlite3.connect(d/'library.db')
+        songs = db.execute('select id, fileurl from songtable order by name collate nocase desc limit 3').fetchall()
+        db.execute("insert into playlist(id, filename) values (1, 'Road')")
+        for k, (_, url) in enumerate(songs):  # the songs in reverse title order: not the library's
+            db.execute('insert into playlist(id, cd_num, fileurl) values (?, 1, ?)', (101 + k, url))
+        db.execute('insert into playlist(id, cd_num, fileurl) values (110, 100, ?)', (songs[0][1],))
+        db.commit()
+        return [str(i) for i, _ in songs]
+    # script() makes its own folder: its library is made-up the same every time, so the ids are known from a probe
+    want = made(folder(work, 60))
+    lines = ['rest', 'key centre', 'rest', 'tick 3', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest',
+             'tick 1', 'rest', 'key centre', 'run 200']
+    d = folder(work, 60)
+    made(d)
+    _, _, _, (sent, ids, _) = script(binary, work, 60, lines, *home, '--db', d/'library.db', queue=True)
+    return check("Playlists lists On-The-Go and then Road; Centre on Road's second song plays Road's songs in its order from it",
+                 len(sent) == 1 and sent[0].split()[1:3] == ['play', '1'] and ids == want, f'{sent} {ids} for {want}')
 
 
 def album_covers(binary, work, home):
