@@ -77,12 +77,12 @@ A standing UI requirement (the owner, 2026-11-27: a `q2ui` that exits is restart
 
 ## The vendor set
 
-The files of Shanling's the image needs at run time: the 24 modules, their 25 scripts, the radio's 4 firmware and table files and the MCU's firmware, 54 files. [`os/vendor/V1.36.tsv`](../os/vendor/V1.36.tsv) names each by its stock path, SHA-256 and mode (made by `tools/vampos.py vendor-manifest ZIP`); the hashes are facts about the files, and the files are never committed or shipped ([study hygiene](vamp-os.md#study-hygiene)). `vampos.squashfs` has no `/vendor`; `tools/vampos.py compose` copies the image and appends one with `mksquashfs` (one thread, owners root, the base image's time on every file), from either source:
+The files of Shanling's the image needs at run time: the 24 modules, their 25 scripts, the radio's 4 firmware and table files, the MCU's firmware and one program, `rtk_hciattach` (the RTL8733BS's Bluetooth attach, [Bluetooth](#bluetooth)), 55 files. [`os/vendor/V1.36.tsv`](../os/vendor/V1.36.tsv) names each by its stock path, SHA-256 and mode (made by `tools/vampos.py vendor-manifest ZIP`); the hashes are facts about the files, and the files are never committed or shipped ([study hygiene](vamp-os.md#study-hygiene)). `vampos.squashfs` has no `/vendor`; `tools/vampos.py compose` copies the image and appends one with `mksquashfs` (one thread, owners root, the base image's time on every file), from either source:
 
 - `--zip ZIP`: the user's own stock firmware download, checked against the manifest's ZIP hash; for tests and a first install from stock with a computer.
 - `--rootfs DIR`: an unpacked root filesystem, which on a Q2 is its own `/`: the installer's step 2 ([How an image is made on the device](vamp-os.md#how-an-image-is-made-on-the-device)). A file whose hash is not the manifest's stops the compose with its name.
 
-`/vendor/module_driver`, `/vendor/firmware` and `/vendor/mcu` hold them; `/module_driver` and `/firmware` are links there, the paths the scripts, the Wi-Fi driver and `rtk_hciattach` name. `rtk_hciattach` and `cmd_mcu` are not in the set yet: nothing here starts Bluetooth or the MCU.
+`/vendor/module_driver`, `/vendor/firmware`, `/vendor/mcu` and `/vendor/bin` hold them; `/module_driver` and `/firmware` are links there, the paths the scripts, the Wi-Fi driver and `rtk_hciattach` name. `cmd_mcu` is not in the set yet: nothing here starts the MCU.
 
 ## The emulator, and what it cannot stand in for
 
@@ -141,7 +141,7 @@ In the order it is needed:
 5. **The rest of q2sysd** ([Needs a Q2](sysd.md#needs-a-q2) first): Standby, the screen's idle timeout, the jack and the DAC's power and volume, Charge Limit, heat, USB modes.
 6. **The rest of the installer** ([q2pkgd](pkgd.md)): its first slice checks, composes and stages a signed release (the image's own `mksquashfs` composes the build machine's bytes under QEMU); the download, the automatic hand-off to the recovery and packages are not built.
 7. q2ui's icons: it looks for `oled_*_w.png` in `--icons`, stock's art, which the image does not have; the pages draw without them.
-8. Bluetooth, Wi-Fi, USB modes, the MCU's firmware load, the splash.
+8. Bluetooth's client ([Bluetooth](#bluetooth)): `q2btd` (pairing, the agent, on and off), and AAC; Wi-Fi, USB modes, the MCU's firmware load, the splash.
 
 ## Needs a device
 

@@ -25,6 +25,16 @@ define VAMP_BLUEALSA_VAMP_PATCHES
 endef
 VAMP_BLUEALSA_POST_PATCH_HOOKS += VAMP_BLUEALSA_VAMP_PATCHES
 
+# src/Makefile.am ends AM_CFLAGS with -static, which plain libtool takes, at the daemon's link, as "the uninstalled
+# libtool libraries statically"; Buildroot's libtool makes -static a fully static link, which this image's shared
+# glibc, D-Bus and GLib refuse ("attempted static link of dynamic object"). The daemon's own convenience library is
+# static either way.
+define VAMP_BLUEALSA_NOT_STATIC
+	sed -i '/^AM_CFLAGS = /,/^$$/{/^\t-static$$/d}' $(@D)/src/Makefile.am
+	! grep -q '^[[:space:]]-static$$' $(@D)/src/Makefile.am
+endef
+VAMP_BLUEALSA_POST_PATCH_HOOKS += VAMP_BLUEALSA_NOT_STATIC
+
 # upstream names its daemon bluealsad; the image's services, like today's Q2 and its callers, call it bluealsa
 define VAMP_BLUEALSA_NAME
 	mv $(TARGET_DIR)/usr/bin/bluealsad $(TARGET_DIR)/usr/bin/bluealsa
