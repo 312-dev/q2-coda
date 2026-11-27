@@ -1,5 +1,6 @@
 /* Control Center (docs/oled-design.md#control-center), q2ui's own while it has the screen: opened
- * by holding Return on any page (main.c), closed by Return. Drawn as demo's sheet is
+ * on any page by a finger pulled down from the top edge (ui.c ui_on_pull) or by holding Return
+ * (main.c), closed by Return or a swipe up. Drawn as demo's sheet is
  * (patch/control_center.c cc_paint, the numbers its CC_* are): under the status row, a block of
  * six circles two by three, each named under it (Wi-Fi, Bluetooth / AirPlay, Car / Smart Wi-Fi,
  * EQ); at the right Now Playing (the cover, title and artist over the transport), and under it the
@@ -28,9 +29,12 @@
  * Centre held on a toggle (the toolkit's KEY_HOLD_MS) closes the sheet and opens its settings, as
  * demo's cc_hold: Wi-Fi and Smart Wi-Fi q2ui's Wi-Fi page, Bluetooth q2ui's Bluetooth page, and
  * demo's for AirPlay (Network services), Car Remote and the EQ.
+ * A finger, as on demo's sheet (touch): a tap acts as Centre does, the transport's glyphs press
+ * Previous, Play/Pause and Next down the queue, a toggle held QUICK_HOLD_MS opens its settings, a
+ * finger on a slider sets the level where it is, and a swipe up closes the sheet; touch never
+ * brings the ring.
  * ponytail: names are drawn at Inter's advances without demo's caption tracking (text.c has none),
- * and none scrolls as a marquee (the six fit); the screen has no taps here, so the transport is
- * drawn and not pressed. */
+ * and none scrolls as a marquee (the six fit). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
