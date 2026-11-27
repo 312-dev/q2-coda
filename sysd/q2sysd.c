@@ -74,7 +74,7 @@ static int read_int(const char *p, int *v) {
 static void read_word(const char *p, char *out, size_t room) {
     FILE *f = fopen(p, "r");
     out[0] = 0;
-    if (f && fgets(out, (int)room, f)) out[strcspn(out, "\r\n ")] = 0;
+    if (f && fgets(out, (int)room, f)) out[strcspn(out, "\r\n")] = 0;
     if (f) fclose(f);
 }
 
@@ -135,9 +135,19 @@ static int set_brightness(int pct) {
 struct battery { int level, mv, cable; char status[24]; };
 static struct battery bat = {-1, -1, -1, ""};
 
-static void battery_text(char *out, size_t room, const char *sep) {
-    snprintf(out, room, "level=%d%smv=%d%sstatus=%s%scable=%d", bat.level, sep, bat.mv, sep, bat.status[0] ? bat.status : "unknown", sep,
-             bat.cable);
+/* The charger's status is the kernel's text ("Not charging" has a space): on Q2SYS/1 percent-encoded as Q2PLAY/1's
+ * free-text fields are (docs/sysd.md#q2sys1), every byte below 0x21, '%', '"', '=' and 0x7f as %XX; in the file, one
+ * key=value a line, as it is. */
+static void battery_text(char *out, size_t room, const char *sep, int encode) {
+    static const char hex[] = "0123456789ABCDEF";
+    char st[80];
+    size_t j = 0;
+    for (const unsigned char *p = (const unsigned char *)(bat.status[0] ? bat.status : "unknown"); *p && j + 4 < sizeof st; ++p)
+        if (encode && (*p < 0x21 || *p == '%' || *p == '"' || *p == '=' || *p == 0x7f))
+            st[j++] = '%', st[j++] = hex[*p >> 4], st[j++] = hex[*p & 15];
+        else st[j++] = (char)*p;
+    st[j] = 0;
+    snprintf(out, room, "level=%d%smv=%d%sstatus=%s%scable=%d", bat.level, sep, bat.mv, sep, st, sep, bat.cable);
 }
 
 static void read_battery(void) {
@@ -149,14 +159,14 @@ static void read_battery(void) {
     bat.cable = read_int(path("/sys/class/power_supply/ac/online"), &v) ? -1 : v;
     if (memcmp(&was, &bat, sizeof bat)) {
         char text[160], tmp[420];
-        battery_text(text, sizeof text, "\n");
+        battery_text(text, sizeof text, "\n", 0);
         snprintf(tmp, sizeof tmp, "%s.q2sysd", path("/run/vamp/battery"));
         FILE *f = fopen(tmp, "w");
         if (f) {
             fprintf(f, "%s\n", text);
             if (!fclose(f)) rename(tmp, path("/run/vamp/battery"));
         }
-        battery_text(text, sizeof text, " ");
+        battery_text(text, sizeof text, " ", 1);
         tell("battery %s", text);
     }
 }
@@ -251,7 +261,7 @@ static void client_line(struct client *c, const char *line) {
     } else if (!strcmp(line, "battery")) {
         char text[160];
         read_battery();
-        battery_text(text, sizeof text, " ");
+        battery_text(text, sizeof text, " ", 1);
         client_say(c, "battery %s", text);
     } else if (!strcmp(line, "screen")) {
         client_say(c, "screen %s", screen_on ? "on" : "off");

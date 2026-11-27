@@ -148,6 +148,10 @@ def test_q2sys1(run):
     put(root, '/sys/devices/i2c-0/0-0062/cw2015_capacity', '72\n')
     a.say('battery')
     assert a.line() == 'battery level=72 mv=3912 status=Discharging cable=0'
+    put(root, '/sys/class/power_supply/battery/status', 'Not charging\n')
+    a.say('battery')  # the kernel's text has a space: percent-encoded, so the line still splits into four fields
+    assert a.line() == 'battery level=72 mv=3912 status=Not%20charging cable=0'
+    assert 'status=Not charging' in read(root, '/run/vamp/battery').splitlines()
     a.say('watch')
     assert a.line() == 'ok'
     press(keys)

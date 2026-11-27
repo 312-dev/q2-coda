@@ -336,15 +336,32 @@ static void cmdq_read(void) {
 
 /* ---- what plays, written for q2ui and told to Q2PLAY/1's watchers ---- */
 
-static void now_text(char *out, size_t room, const char *sep) {
+/* A free-text field (a title, an artist, an album: from tags, so anything) for one line: Q2PLAY/1's percent-encoding
+ * (docs/playd.md#q2play1), every byte below 0x21, '%', '"', '=' and 0x7f as %XX, so a value holds no space, no line
+ * end and no '=' and a client splits on spaces safely; or, for the now file, whose format is demo's shim's (one
+ * key=value a line, read by ui/now.c), only line ends and other control bytes made spaces. */
+static void field(char *out, size_t room, const char *in, int encode) {
+    static const char hex[] = "0123456789ABCDEF";
+    size_t j = 0;
+    for (const unsigned char *p = (const unsigned char *)in; *p && j + 4 < room; ++p) {
+        if (encode && (*p < 0x21 || *p == '%' || *p == '"' || *p == '=' || *p == 0x7f))
+            out[j++] = '%', out[j++] = hex[*p >> 4], out[j++] = hex[*p & 15];
+        else out[j++] = !encode && *p < 0x20 ? ' ' : (char)*p;
+    }
+    out[j] = 0;
+}
+
+static void now_text(char *out, size_t room, const char *sep, int encode) {
+    char t[800], a[800], b[800];
     int id = q.n ? q.ids[q.order[q.at]] : 0;
-    snprintf(out, room, "title=%s%sartist=%s%salbum=%s%sstate=%d%spos=%d%slen=%d%svolume=%d%sid=%d", q.title, sep, q.artist,
-             sep, q.album, sep, q.state, sep, q.pos_ms, sep, q.len_s, sep, q.volume, sep, id);
+    field(t, sizeof t, q.title, encode), field(a, sizeof a, q.artist, encode), field(b, sizeof b, q.album, encode);
+    snprintf(out, room, "title=%s%sartist=%s%salbum=%s%sstate=%d%spos=%d%slen=%d%svolume=%d%sid=%d", t, sep, a, sep, b, sep,
+             q.state, sep, q.pos_ms, sep, q.len_s, sep, q.volume, sep, id);
 }
 
 static void now_write(void) {
-    char text[1100], tmp[340];
-    now_text(text, sizeof text, "\n");
+    char text[2600], tmp[340];
+    now_text(text, sizeof text, "\n", 0);
     snprintf(tmp, sizeof tmp, "%s.q2playd", path(now_path_rel));
     FILE *f = fopen(tmp, "w");
     if (!f) return;
@@ -353,9 +370,10 @@ static void now_write(void) {
 }
 
 static struct client { int fd, hello, watch; char in[LINE]; size_t n; int want_ids, got_ids, a, b; } cl[CLIENTS];
+#define SAY_MAX 2700 /* a line out: three encoded fields at most 3 x 255 x 3 bytes, and the rest */
 
 static void client_say(struct client *c, const char *fmt, ...) {
-    char line[LINE + 64];
+    char line[SAY_MAX];
     va_list ap;
     va_start(ap, fmt);
     int n = vsnprintf(line, sizeof line - 1, fmt, ap);
@@ -367,8 +385,8 @@ static void client_say(struct client *c, const char *fmt, ...) {
 }
 
 static void tell_watchers(void) {
-    char text[1100];
-    now_text(text, sizeof text, " ");
+    char text[2600];
+    now_text(text, sizeof text, " ", 1);
     for (int i = 0; i < CLIENTS; ++i)
         if (cl[i].fd >= 0 && cl[i].watch) client_say(&cl[i], "now %s", text);
 }
@@ -399,8 +417,8 @@ static void client_line(struct client *c, char *line) {
         return;
     }
     if (!strcmp(line, "now")) {
-        char text[1100];
-        now_text(text, sizeof text, " ");
+        char text[2600];
+        now_text(text, sizeof text, " ", 1);
         client_say(c, "now %s", text);
     } else if (!strcmp(line, "watch")) {
         c->watch = 1;

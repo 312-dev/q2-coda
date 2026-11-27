@@ -48,18 +48,20 @@ The socket the UI is meant to move to, the shape the roadmap gives every service
 < ok
 > watch                    from now on, a "now" line at each change (as the now file's, at most twice a second)
 < ok
-< now title=Beta artist=Bob album=First state=1 pos=0 len=0 volume=24 id=12
+< now title=Beta artist=Bob album=First%20Light state=1 pos=0 len=0 volume=24 id=12
 > volume 30
 < ok
 > bogus
 < err bogus
 ```
 
-`now` alone answers one such line. At most 8 clients at once; a line is 512 bytes at most. The socket is mode 0600, root's: the permission check is the file's ([Permissions and isolation](vamp-os.md#permissions-and-isolation) will give it a group). Fields are space-separated `key=value` with the title, artist and album as they are: ponytail, a title with ` state=` in it would confuse a parser that splits on spaces; Q2PLAY/2 should quote them, before anything but this repository's own client depends on it.
+`now` alone answers one such line. At most 8 clients at once; a line from a client is 512 bytes at most. The socket is mode 0600, root's: the permission check is the file's ([Permissions and isolation](vamp-os.md#permissions-and-isolation) will give it a group).
+
+**Fields.** A `now` line is `now` and then `key=value` fields separated by single spaces, in this order: `title`, `artist`, `album`, `state`, `pos`, `len`, `volume`, `id`. The free-text values (`title`, `artist`, `album`, which come from tags and can hold anything) are percent-encoded: every byte below `0x21` (space, line ends, other controls), `%`, `"`, `=` and `0x7f` is `%` and two upper-case hex digits; every other byte, UTF-8 included, is as it is. So no value holds a space, a line end or an `=`: a client splits the line on spaces, each field at its first `=`, and URL-decodes the value (`urllib.parse.unquote`, `decodeURIComponent`). A title `Cut state=2` is `title=Cut%20state%3D2`. The numbers are plain decimal. Commands carry no free text, so nothing a client sends is decoded. The now file for `q2ui` keeps the shim's format, a field a line and no encoding, with any line end or other control byte in a value made a space.
 
 ## Tests
 
-`python3 test/playd.py` (pytest) builds `q2playd` for this machine against its own SQLite and runs it under a temporary root with a stand-in for `q2player` on its socket: a play from the FIFO and list file and its `set-songurl` byte for byte, the cache by kind and the brace's escape, an end playing the next and the queue's end stopping, a failed song and a missing id passed over, `next` cutting without a double advance, `toggle`, `previous`'s two ways, the position and length from `media-info`, the volume's range, a player that goes away and one that comes back, shuffle's order, and Q2PLAY/1's greeting, refusal of another version, play, `now` and `watch`. Copies of `q2playd.c` with the escape, the advance at a song's end, the cut or the watchers' message removed each fail it (`Q2PLAYD_SOURCE`). `test/os_image.py`'s boot runs the image's own `q2playd` and `q2player` under QEMU: `q2player` connects, and a play asked for over Q2PLAY/1 reaches it and its end comes back (here "did not play": the emulator has no sound card). With the `q2playd` service replaced (`--perturb playd-off`) both checks fail.
+`python3 test/playd.py` (pytest) builds `q2playd` for this machine against its own SQLite and runs it under a temporary root with a stand-in for `q2player` on its socket: a play from the FIFO and list file and its `set-songurl` byte for byte, the cache by kind and the brace's escape, an end playing the next and the queue's end stopping, a failed song and a missing id passed over, `next` cutting without a double advance, `toggle`, `previous`'s two ways, the position and length from `media-info`, the volume's range, a player that goes away and one that comes back, shuffle's order, and Q2PLAY/1's greeting, refusal of another version, play, `now` and `watch`, and a title holding ` state=`, `=`, `%` and a line end that a client splits back exactly while the now file keeps it on one line. Copies of `q2playd.c` with the escape, the advance at a song's end, the cut, the watchers' message or the field encoding removed each fail it (`Q2PLAYD_SOURCE`). `test/os_image.py`'s boot runs the image's own `q2playd` and `q2player` under QEMU: `q2player` connects, and a play asked for over Q2PLAY/1 reaches it and its end comes back (here "did not play": the emulator has no sound card). With the `q2playd` service replaced (`--perturb playd-off`) both checks fail.
 
 ## What is missing
 

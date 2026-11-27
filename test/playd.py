@@ -5,6 +5,7 @@ song ends, is cut or fails, what it writes for q2ui in /tmp/coda-rc.now, and wha
 The player's side, the real q2player against q2playd, is test/os_image.py's boot. Run it as python3 test/playd.py
 (pytest). Q2PLAYD_SOURCE builds another copy of q2playd.c, to show a broken one fails here."""
 import os
+import urllib.parse
 import pathlib
 import re
 import socket
@@ -18,7 +19,8 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE = pathlib.Path(os.environ.get('Q2PLAYD_SOURCE') or ROOT/'playd/q2playd.c')
 SONGS = [(1, '/mnt/mmc/Music/a.flac', 'Alpha', 'Ann', 'First'), (2, '/mnt/mmc/Music/b.mp3', 'Beta', 'Bob', 'First'),
-         (3, '/mnt/mmc/Music/c}d.flac', 'Gamma', 'Cy', 'Second'), (5, '/mnt/mmc/Music/e.dsf', 'Epsilon', 'Eve', 'Third')]
+         (3, '/mnt/mmc/Music/c}d.flac', 'Gamma', 'Cy', 'Second'), (5, '/mnt/mmc/Music/e.dsf', 'Epsilon', 'Eve', 'Third'),
+         (6, '/mnt/mmc/Music/f.flac', 'Cut state=2 id=9 50%\nsecond line', 'A "B" C', 'x=y')]
 
 
 @pytest.fixture(scope='session')
@@ -283,6 +285,33 @@ def test_q2play1_watchers_hear_each_change(run):
     pl.pump()
     line = a.line()
     assert line.startswith('now title=Beta ') and ' state=1 ' in line and line.endswith(' id=2')
+
+
+def fields(line):
+    """A Q2PLAY/1 now line's fields, split on spaces and percent-decoded, as a client would"""
+    words = line.split(' ')
+    assert words[0] == 'now'
+    return {k: urllib.parse.unquote(v) for k, v in (w.split('=', 1) for w in words[1:])}
+
+
+def test_q2play1_free_text_is_percent_encoded_and_cannot_forge_a_field(run):
+    root, pl = run
+    a = Api(root)
+    assert a.line() == 'Q2PLAY/1 ok'
+    a.say('play 0 0 1')
+    a.say('6')
+    assert a.line() == 'ok'
+    pl.pump()
+    a.say('now')
+    line = a.line()
+    assert '\n' not in line and line.count(' state=') == 1 and line.count('=') == 8
+    got = fields(line)
+    assert (got['title'], got['artist'], got['album']) == ('Cut state=2 id=9 50%\nsecond line', 'A "B" C', 'x=y')
+    assert (got['state'], got['id']) == ('1', '6')
+    time.sleep(1)  # the now file: twice a second at most
+    text = (root/'tmp/coda-rc.now').read_text().splitlines()
+    assert 'title=Cut state=2 id=9 50% second line' in text  # one line: its line end a space
+    assert [l for l in text if l.startswith('state=')] == ['state=1'] and [l for l in text if l.startswith('id=')] == ['id=6']
 
 
 if __name__ == '__main__':
