@@ -226,6 +226,22 @@ void shade_rows(int y0, int y1, int a0, int a1) {
             if (*p & 0xffffff) *p = dim16(*p, keep, noise[x & 63]);
     }
 }
+/* The same toward the page's ground (Canvas, Light Mode's paper too): a list's ends fading into the
+ * screen. shade_rows darkens, which over art is what a vignette is for; over paper it would be a
+ * dark band. */
+void fade_rows(int y0, int y1, int a0, int a1) {
+    rect_t c, band = { 0, y0, SCREEN_W, y1 - y0 };
+    if (!rect_meet(band, clip, &c)) return;
+    uint32_t ground = tok(TOK_CANVAS) & 0xffffff;
+    int span = y1 - y0 - 1 > 0 ? y1 - y0 - 1 : 1;
+    for (int y = c.y; y < c.y + c.h; ++y) {
+        unsigned keep = (unsigned)((a0 * 257 * (span - (y - y0)) + a1 * 257 * (y - y0)) / span);
+        const uint8_t *noise = dither64 + (y & 63) * 64;
+        uint32_t *p = canvas + y * SCREEN_W + c.x;
+        for (int x = c.x; x < c.x + c.w; ++x, ++p)
+            if ((*p & 0xffffff) != ground) *p = px_mix16(ground, *p, keep, noise[x & 63]);
+    }
+}
 void shade_cols(int x0, int x1, int a0, int a1) {
     rect_t c, band = { x0, 0, x1 - x0, SCREEN_H };
     if (!rect_meet(band, clip, &c)) return;

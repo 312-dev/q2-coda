@@ -399,14 +399,14 @@ void list_draw(ui_list *l, rect_t r) {
         /* the list's ends: rows fade into the screen's foot, and into its top once scrolled */
         if (full || p) {
             int foot = l->box.y + l->box.h;
-            shade_rows(foot, FOOT_END, FOOT_KEEP, 0);
+            fade_rows(foot, FOOT_END, FOOT_KEEP, 0);
             fill((rect_t){ frame.x, FOOT_END, frame.w, SCREEN_H - FOOT_END }, tok(TOK_CANVAS));
         }
         if (p)
-            shade_rows(l->y0, l->y0 + PIN_FADE, 0, 255);
+            fade_rows(l->y0, l->y0 + PIN_FADE, 0, 255);
         else if (full && l->scroll.x > 0) {
             fill((rect_t){ frame.x, 0, frame.w, TOP_BLACK }, tok(TOK_CANVAS));
-            shade_rows(TOP_BLACK, LIST_TOP - TOP_CLEAR, 0, 255);
+            fade_rows(TOP_BLACK, LIST_TOP - TOP_CLEAR, 0, 255);
         }
     }
     clip_set(part);

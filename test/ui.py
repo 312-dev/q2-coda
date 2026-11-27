@@ -355,6 +355,8 @@ def scripts(binary, work):
     # Light Mode: paper under the same list
     _, pics, _ = script(binary, work, 30, ['rest', 'shot @light.ppm'], '--light')
     good &= check('Light Mode is black on white, the platter still blue', pics['light'].at(5, 200) == (255, 255, 255) and pics['light'].blue(200, BAR_H + ROW_H + 3))
+    foot = [pics['light'].at(5, y) for y in (290, 300, 310)]
+    good &= check("in Light Mode the list's foot fades to the paper, not to black", all(p == (255, 255, 255) for p in foot), str(foot))
     ini = pathlib.Path(tempfile.mkdtemp(dir=work))/'config.ini'
     ini.write_text('[IPOD]\nLIGHT=1\n')
     _, pics, _ = script(binary, work, 30, ['rest', 'shot @light.ppm'], '--config', ini)

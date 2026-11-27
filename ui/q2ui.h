@@ -112,6 +112,7 @@ void fill_disc(float cx, float cy, float radius, uint32_t rgb, float alpha);
 /* Rows y0..y1 of the clip scaled toward black: a0/255 of the picture left at y0, a1/255 at y1,
  * dithered so the ramp shows no bands. */
 void shade_rows(int y0, int y1, int a0, int a1);
+void fade_rows(int y0, int y1, int a0, int a1);  /* the same toward the page's ground, not black: a list's ends */
 /* the same across columns */
 void shade_cols(int x0, int x1, int a0, int a1);
 void shade_all(rect_t r, unsigned keep); /* keep/255 of the picture left */
