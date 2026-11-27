@@ -1637,7 +1637,10 @@ def test_stock_s_favorites_are_taken_as_likes_once(run):
 
 
 def test_a_source_s_url_has_no_stars_and_refuses_rate_and_like(run):
+    """the queue put aside: its song is not what plays"""
     root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
     a = api(root)
     a.say('source http://192.0.2.1/a.flac title=Far')
     assert a.line() == 'ok'
@@ -1646,4 +1649,139 @@ def test_a_source_s_url_has_no_stars_and_refuses_rate_and_like(run):
     assert (n['hearts'], n['liked']) == ('-1', '-1'), n
     send(root, '95 rate 3 0', '96 like 0')
     assert wait_for_value(lambda: acks(root)[:2], [(96, 3), (95, 3)]), acks(root)
+
+
+# ---- play counts (docs/playd.md#play-counts) ----
+
+def card_in(root, mounted=True):
+    """root/proc/mounts, which q2playd reads for the card (as q2libd does)"""
+    (root/'proc').mkdir(exist_ok=True)
+    (root/'proc/mounts').write_text('/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n' if mounted else 'ubi0:data /mnt/data ubifs rw 0 0\n')
+    (root/'mnt/mmc').mkdir(parents=True, exist_ok=True)
+
+
+def heard(root, pl, length, secs):
+    """the player at each second of secs in turn, each told at once by a push (docs/internals.md#player-status-push)"""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    for sec in secs:
+        pl.info = f'900000|44100|{length}|{sec}|FLAC|16'
+        s.sendto(b'1', str(root/'tmp/q2player.push'))
+        pl.pump(0.06)
+    s.close()
+
+
+def plays(root, rel='mnt/mmc/.q2pod/ringnav-plays'):
+    data = (root/rel).read_bytes()
+    pairs = struct.unpack(f'<{len(data) // 4}I', data)
+    return [(pairs[i], pairs[i + 1]) for i in range(0, len(pairs), 2)]
+
+
+def test_a_listen_counts_once_half_the_song_is_heard_and_a_repeat_counts_again(run):
+    """docs/internals.md#play-counts: half the length (a song over 30 s) heard counts once a play, in the card's
+    .q2pod/ringnav-plays, 512 key/count pairs, 4 KB, the song counted moved first; back under 2 s from past 30 s is a
+    new play"""
+    root, pl = run
+    card_in(root)
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    heard(root, pl, 62, range(0, 31))
+    assert not (root/'mnt/mmc/.q2pod/ringnav-plays').exists(), '30 s of 62: not yet'
+    heard(root, pl, 62, range(31, 40))
+    p = plays(root)
+    assert len(p) == 512 and p[0] == (listen_key('/mnt/mmc/Music/a.flac'), 1) and p[1] == (0, 0), p[:2]
+    heard(root, pl, 62, range(40, 62))
+    assert plays(root)[0][1] == 1, 'once a play'
+    heard(root, pl, 62, range(0, 32))
+    assert plays(root)[0] == (listen_key('/mnt/mmc/Music/a.flac'), 2), 'played again from its start'
+
+
+def test_seeks_pauses_and_short_songs_count_nothing(run):
+    root, pl = run
+    card_in(root)
+    play_list(root, [2, 1], 0)
+    pl.pump()
+    heard(root, pl, 62, [0, 20] + list(range(21, 33)))
+    assert not (root/'mnt/mmc/.q2pod/ringnav-plays').exists(), 'a seek of 20 s is no listen: 12 s heard'
+    fifo(root, 'pause')
+    pl.pump()
+    heard(root, pl, 62, range(33, 60))
+    assert not (root/'mnt/mmc/.q2pod/ringnav-plays').exists(), 'paused'
+    fifo(root, 'next')
+    pl.pump()
+    heard(root, pl, 30, range(0, 30))
+    assert not (root/'mnt/mmc/.q2pod/ringnav-plays').exists(), 'a song of 30 s never counts'
+
+
+def test_a_long_song_counts_after_four_minutes(run):
+    root, pl = run
+    card_in(root)
+    play_list(root, [1], 0)
+    pl.pump()
+    heard(root, pl, 900, range(0, 238, 3))
+    assert not (root/'mnt/mmc/.q2pod/ringnav-plays').exists()
+    heard(root, pl, 900, [240, 243])
+    assert plays(root)[0] == (listen_key('/mnt/mmc/Music/a.flac'), 1)
+
+
+def test_a_full_table_replaces_the_least_recently_played_of_the_lowest_counts(run):
+    """playback_power.c play_count: the slot replaced is the furthest back of the lowest counts"""
+    root, pl = run
+    card_in(root)
+    table = [(1000 + i, 5) for i in range(512)]
+    table[300], table[400] = (7, 2), (8, 2)
+    (root/'mnt/mmc/.q2pod').mkdir(parents=True)
+    (root/'mnt/mmc/.q2pod/ringnav-plays').write_bytes(struct.pack('<1024I', *[w for pair in table for w in pair]))
+    play_list(root, [1], 0)
+    pl.pump()
+    heard(root, pl, 62, range(0, 33))
+    p = plays(root)
+    assert p[0] == (listen_key('/mnt/mmc/Music/a.flac'), 1) and (8, 2) not in p and (7, 2) in p, p[:2]
+    assert p[1:301] == table[:300] and p[302:401] == table[301:400], 'the rest moved down one, in order'
+
+
+def test_the_flash_file_of_a_release_before_is_read_until_the_card_has_one(run):
+    """card_store.c card_blob_read: no card copy, /mnt/data/ringnav-plays read and copied to the card, left as it was"""
+    root, pl = run
+    card_in(root)
+    old = struct.pack('<1024I', listen_key('/mnt/mmc/Music/a.flac'), 4, *[0] * 1022)
+    (root/'mnt/data/ringnav-plays').write_bytes(old)
+    play_list(root, [1], 0)
+    pl.pump()
+    heard(root, pl, 62, range(0, 33))
+    assert plays(root)[0] == (listen_key('/mnt/mmc/Music/a.flac'), 5)
+    assert (root/'mnt/data/ringnav-plays').read_bytes() == old
+
+
+def test_with_the_card_away_a_count_waits_for_it(run):
+    root, pl = run
+    card_in(root, mounted=False)
+    play_list(root, [1], 0)
+    pl.pump()
+    heard(root, pl, 62, range(0, 33))
+    assert not (root/'mnt/mmc/.q2pod/ringnav-plays').exists(), 'nothing written where no card is'
+    card_in(root)
+    assert wait_for(root/'mnt/mmc/.q2pod/ringnav-plays', 5)
+    assert plays(root)[0] == (listen_key('/mnt/mmc/Music/a.flac'), 1)
+
+
+def test_podcasts_audiobooks_and_m4b_files_are_not_counted(run):
+    """navigation.c spoken: under the card's Podcasts or Audiobooks, or an M4B"""
+    root, pl = run
+    card_in(root)
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    db.executemany('insert into songtable values (?, ?, ?, ?, ?, 0)', [
+        (20, '/mnt/mmc/podcasts/ep.mp3', 'Ep', 'Host', 'Show'), (21, '/mnt/mmc/Music/book.M4B', 'Book', 'Au', 'B')])
+    db.commit()
+    db.close()
+    play_list(root, [20, 21, 1], 0)
+    pl.pump()
+    heard(root, pl, 62, range(0, 33))
+    fifo(root, 'next')
+    pl.pump()
+    heard(root, pl, 62, range(0, 33))
+    assert not (root/'mnt/mmc/.q2pod/ringnav-plays').exists()
+    fifo(root, 'next')
+    pl.pump()
+    heard(root, pl, 62, range(0, 33))
+    assert plays(root)[0] == (listen_key('/mnt/mmc/Music/a.flac'), 1)
 

@@ -374,6 +374,8 @@ static void ended(int error) {
     ++q.seq;
 }
 
+static void listen_tick(int sec, int len);
+
 static void player_message(const char *name, const char *arg) {
     if (!strcmp(name, "player-status")) {
         if (!strcmp(arg, "exit") || !strcmp(arg, "error")) {
@@ -387,6 +389,7 @@ static void player_message(const char *name, const char *arg) {
         if (sscanf(arg, "%*d|%d|%d|%d", &rate, &len, &pos) == 3 && q.loaded) {
             if (len != q.len_s) q.len_s = len, ++q.seq;
             if (pos * 1000 != q.pos_ms) q.pos_ms = pos * 1000, ++q.seq;
+            listen_tick(pos, len);
         }
     }
 }
@@ -1163,8 +1166,9 @@ static int rate_keep(unsigned key, int n) {
     return -1;
 }
 
-/* What is rated: the queue's song (not a source's URL), by its server row's fileurl for an offline copy */
-static const char *rated_path(void) { return src.on || !q.n || !*q.file ? 0 : *q.row_url ? q.row_url : q.file; }
+/* What is rated: the queue's song, by its server row's fileurl for an offline copy; a source's URL has an empty queue
+ * (its own put aside: source_take) */
+static const char *rated_path(void) { return !q.n || !*q.file ? 0 : *q.row_url ? q.row_url : q.file; }
 static unsigned listen_key(const char *p) { /* listen_key's: the path's FNV-1a and fnv's separator, never 0 */
     unsigned k = fnv(2166136261u, p, strlen(p)) * 16777619u;
     return k | !k;
@@ -1250,6 +1254,97 @@ static int like_cmd(int id) {
     if (!ok) return logf_("like not saved"), 1;
     lk.key = listen_key(p), lk.v = !was, ++q.seq;
     return 0;
+}
+
+/* ---- play counts (docs/playd.md#play-counts) ----
+ * Today's Vamp's (docs/internals.md#play-counts, playback_power.c play_count), in its file: a song over LISTEN_MIN_S
+ * counts once half of it, or LISTEN_MAX_S, has been heard, a step of up to 3 s between the player's seconds while it
+ * plays (a longer one is a seek, a pause hears nothing); a new song, or back under 2 s from past LISTEN_MIN_S (a
+ * repeat, a seek to the start), is a new play. PLAYS_SLOTS key/count pairs, 4 KB, the card's .q2pod/ringnav-plays,
+ * read at the first count and written whole: the song counted moves first, and with no free slot the furthest back of
+ * the lowest counts is replaced. A song is keyed as its rating is (rated_path); Podcasts, Audiobooks and M4B files
+ * are not counted (navigation.c spoken). With no card copy the flash file a release before wrote,
+ * /mnt/data/ringnav-plays, is read and copied to the card once, never written; with the card away the counts are
+ * kept here and written once it is back (card_store.c's blob). */
+#define LISTEN_MIN_S 30
+#define LISTEN_MAX_S 240
+#define PLAYS_SLOTS 512
+#define CARD_LOOK_MS 2000 /* a count kept while the card is away: the card looked for this often */
+static const char *plays_card_rel = "/mnt/mmc/.q2pod/ringnav-plays", *plays_flash_rel = "/mnt/data/ringnav-plays";
+static struct { unsigned key, n; } plays[PLAYS_SLOTS];
+static struct { int read, held, moved; unsigned key; int sec, heard, done; unsigned long long looked; } pc;
+
+static int card_mounted(void) { /* the card's mount line in /proc/mounts, as q2libd reads it */
+    char line[600];
+    int on = 0;
+    FILE *f = fopen(path("/proc/mounts"), "r");
+    while (f && !on && fgets(line, sizeof line, f)) on = strstr(line, " /mnt/mmc ") != 0;
+    if (f) fclose(f);
+    return on;
+}
+
+static int plays_card_save(void) {
+    char dir[640];
+    snprintf(dir, sizeof dir, "%s/mnt/mmc/.q2pod", root);
+    mkdir(dir, 0755);
+    return blob_save(path(plays_card_rel), plays, sizeof plays);
+}
+
+static void plays_load(void) {
+    if (pc.read) return;
+    pc.read = 1;
+    int card = card_mounted(), n = -1;
+    FILE *f = card ? fopen(path(plays_card_rel), "rb") : 0;
+    if (f) n = (int)fread(plays, 1, sizeof plays, f), fclose(f);
+    else if ((f = fopen(path(plays_flash_rel), "rb"))) { /* no card copy yet: the flash file, copied there once */
+        n = (int)fread(plays, 1, sizeof plays, f), fclose(f);
+        if (n == (int)sizeof plays && card) pc.moved = plays_card_save();
+    }
+    if (n != (int)sizeof plays) memset(plays, 0, sizeof plays);
+}
+
+static void plays_write(void) { /* on the card, or kept for it */
+    pc.held = !card_mounted() || !plays_card_save();
+    if (!pc.held) pc.moved = 1;
+    if (pc.held) logf_("play counts kept for the card");
+}
+
+static void play_count(unsigned key) {
+    plays_load();
+    int i = 0;
+    for (int j = 0; j < PLAYS_SLOTS && plays[i].key != key; j++)
+        if (plays[j].key == key || plays[j].n <= plays[i].n) i = j;
+    unsigned n = plays[i].key == key ? plays[i].n + 1 : 1;
+    for (; i > 0; i--) plays[i] = plays[i - 1];
+    plays[0].key = key, plays[0].n = n;
+    plays_write();
+}
+
+static int spoken(const char *p) { /* under the card's Podcasts or Audiobooks, or an M4B */
+    const char *ext = strrchr(p, '.'), *in = "/mnt/mmc/";
+    if (ext && !strcasecmp(ext, ".m4b")) return 1;
+    if (strncmp(p, in, strlen(in))) return 0;
+    p += strlen(in);
+    return (!strncasecmp(p, "Podcasts", 8) && (!p[8] || p[8] == '/')) || (!strncasecmp(p, "Audiobooks", 10) && (!p[10] || p[10] == '/'));
+}
+
+/* The player's second (media-info's) for the song playing, len its length */
+static void listen_tick(int sec, int len) {
+    const char *p = rated_path();
+    if (!p || spoken(q.file)) return;
+    unsigned key = listen_key(p);
+    if (key != pc.key || (sec < 2 && pc.sec > LISTEN_MIN_S)) pc.key = key, pc.sec = sec, pc.heard = pc.done = 0;
+    int d = sec - pc.sec;
+    if (d > 0 && d <= 3 && q.state == PLAYING) pc.heard += d;
+    pc.sec = sec;
+    int listen = len / 2 < LISTEN_MAX_S ? len / 2 : LISTEN_MAX_S;
+    if (!pc.done && len > LISTEN_MIN_S && pc.heard >= listen) pc.done = 1, play_count(key);
+}
+
+static void plays_flush(unsigned long long t) { /* counts kept while the card was away: written once it is back */
+    if (!pc.held || t < pc.looked + CARD_LOOK_MS) return;
+    pc.looked = t;
+    if (card_mounted() && plays_card_save()) pc.held = 0, pc.moved = 1;
 }
 
 static int command(const char *verb, const int *ids, int n_ids) {
@@ -1911,6 +2006,7 @@ int main(int argc, char **argv) {
         t = now_ms();
         if (q.loaded && t >= polled + POLL_MS) ask_status(), polled = t;
         if (volume_dirty_at && t >= volume_dirty_at + VOLUME_SAVE_MS) volume_save(), volume_dirty_at = 0;
+        plays_flush(t);
         if (q.seq != now_written_seq && t >= now_written_at + NOW_EVERY_MS) {
             now_write(), tell_watchers();
             now_written_seq = q.seq, now_written_at = t;
