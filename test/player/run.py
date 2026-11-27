@@ -3314,6 +3314,29 @@ def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, t
     return f'3 s of sound dropped in {took:.2f} s'
 
 
+def test_car_feed_drops_at_the_source_rate_when_wakes_are_late(player, songs, tmp):
+    """test_car_feed_does_not_block_a_source_the_car_does_not_take with every sleep of the player's waking up to
+    10 ms late (a timer slack of 10 ms, as a busy Q2 or an idle virtual machine wakes a thread late): the drop keeps
+    to the source's rate over the whole run, so 3 s of sound is still done in about 3 s. A drop paced only by a sleep
+    of each read's length adds every wake's lateness to the source's time: 4.6 to 5 s here."""
+    car, feed = tmp/'feed6.audio', tmp/'feed6.fifo'
+    wrap = tmp/'feed6.py'  # prctl(PR_SET_TIMERSLACK), kept across the exec and by every thread the player makes
+    wrap.write_text(f'#!{sys.executable}\nimport ctypes, os\nctypes.CDLL(None).prctl(29, 10_000_000, 0, 0, 0)\n'
+                    f'os.execv({car_player()!r}, [{car_player()!r}])\n')
+    wrap.chmod(0o755)
+    src, f = tone(3.0), Feeder(feed)
+    s = fakedemo.Session(tmp/'feed6')
+    s.music = songs
+    s.run([(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (6.5, None)],
+          fakedemo.launch_host(str(wrap), str(songs), 1, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
+                                                                        'Q2PLAYER_FEED': str(feed)}), 1)
+    assert not list((tmp/'feed6/pcm').glob('*.raw'))
+    assert len(f.runs) == 1, 'the source finished'
+    took = f.runs[0][1] - f.runs[0][0]
+    assert 2.5 < took < 3.8, f'{took:.2f} s for 3 s of sound, the player\'s wakes up to 10 ms late'
+    return f'3 s of sound dropped in {took:.2f} s, the player\'s wakes up to 10 ms late'
+
+
 # Tests that read another's output, run after it in its folder: {test: the test whose folder it reads}.
 AFTER = {'test_exact_mp3_no_step_at_the_cut': 'test_exact_mp3_gapless'}
 # Tests that run alone, after everything else, each tried again when it failed on a run the machine starved:
@@ -3323,7 +3346,8 @@ AFTER = {'test_exact_mp3_no_step_at_the_cut': 'test_exact_mp3_gapless'}
 # asserts on the host's own /tmp/notsupport, which any player whose song fails writes.
 SERIAL = ('test_scan', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_car_trace', 'test_car_feed_reaches_the_car', 'test_car_feed_hands_over_both_ways',
           'test_car_feed_paused_is_silence_not_a_stall', 'test_car_feed_source_gone_leaves_the_song_resumable',
-          'test_car_feed_does_not_block_a_source_the_car_does_not_take', 'test_preload_outrun', 'test_click_idle',
+          'test_car_feed_does_not_block_a_source_the_car_does_not_take',
+          'test_car_feed_drops_at_the_source_rate_when_wakes_are_late', 'test_preload_outrun', 'test_click_idle',
           'test_a_failure_already_replaced_is_not_reported',
           # fix/stream-start's: a song with a cover opened by 3.0 s, the feed's 150 ms lead, the feed reader's wakeups
           # counted over seconds, the car's PCM fds read from /proc right after each release
