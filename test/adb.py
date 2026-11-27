@@ -14,7 +14,8 @@ are refused. A key `adb keygen` makes is checked too when adb and openssl are in
 usleep stubbed: the gadget it makes, park, unpark, and that a parked gadget is never bound. adb over Wi-Fi: the
 same adbd with --tcp on a loopback port, driven by tools/vamp.py's client (authorization, no UI socket, the
 Smart Wi-Fi use file, exec:, q2remote's commands through vamp, push and pull, the 8-connection cap), and
-q2adb-wifi (patch/adb_wifi.sh) under the host's sh with stand-ins for adbd and q2adb-mdns. Needs bwrap and a
+q2adb-wifi (patch/adb_wifi.sh) under the host's sh with stand-ins for adbd and q2adb-mdns; with BUILD, its
+q2adb-mdns too, found by vamp's browse. Needs bwrap and a
 qemu-mipsel (qemu-user) for adbd; unsquashfs with BUILD.
 """
 import base64, hashlib, os, pathlib, secrets, shutil, struct, subprocess, sys, tempfile, threading, time
@@ -684,6 +685,36 @@ def wifi_checks():
                     os.kill(int(pid), 9)
 
 
+def mdns_checks(qemu, build):
+    """BUILD's q2adb-mdns under qemu-mipsel, found by vamp's browse by its Bluetooth name. On this machine's
+    first IPv4 interface, not loopback: qemu-user refuses IP_MULTICAST_IF, so its answers leave by the route."""
+    import vamp
+    out = subprocess.run(['ip', '-4', '-o', 'addr', 'show', 'scope', 'global'], capture_output=True, text=True).stdout.split()
+    if 'inet' not in out:
+        print('skip q2adb-mdns: no IPv4 interface but loopback')
+        return
+    ifname, addr = out[1], out[out.index('inet') + 1].split('/')[0]
+    with tempfile.TemporaryDirectory(prefix='q2-adb-mdns-') as d:
+        d = pathlib.Path(d)
+        (d/'mnt/data').mkdir(parents=True)
+        (d/'mnt/data/config.ini').write_text('[Q2POD]\nBTNAME=Desk Q2\n')
+        m = d/'q2adb-mdns'
+        m.write_bytes(subprocess.run(['unsquashfs', '-cat', str(build/'rootfs.squashfs'), 'usr/bin/q2adb-mdns'],
+                                     capture_output=True, check=True).stdout)
+        m.chmod(0o755)
+        p = subprocess.Popen([*qemu, str(m), '--if', ifname, '--root', str(d)], stderr=subprocess.DEVNULL)
+        try:
+            time.sleep(2)
+            found = vamp.browse(3.0, [addr])
+            ident = (d/'mnt/data/coda-rc/id').read_bytes().hex() if (d/'mnt/data/coda-rc/id').exists() else None
+            expect('q2adb-mdns: vamp finds the Q2 by its Bluetooth name, port 5555, its id Car Remote\'s',
+                   [(q['name'], q['ip'], q['port'], q['id']) for q in found] == [('Desk Q2', addr, 5555, ident)], found)
+        finally:
+            p.terminate()
+            p.wait(10)
+        expect('q2adb-mdns ends on SIGTERM (after its goodbye)', p.returncode == 0, p.returncode)
+
+
 def main(argv):
     args = list(argv)
     qemu = shutil.which('qemu-mipsel')
@@ -712,6 +743,8 @@ def main(argv):
     else:
         adbd_checks([qemu, '-L', str(libs)], adbd)
         tcp_checks([qemu, '-L', str(libs)], adbd)
+        if args:
+            mdns_checks([qemu, '-L', str(libs)], build)
     print(f'{len(failures)} failed' if failures else 'all passed')
     return 1 if failures else 0
 

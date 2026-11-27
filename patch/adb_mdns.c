@@ -54,9 +54,10 @@ uint32_t crc_now_ms(void) {
 
 int crc_tcp_port(void) { return port; }
 
-static int read_bytes(const char *path, void *buf, size_t n) {
+/* path's first n bytes; under --root's directory unless raw (/dev/urandom is the machine's) */
+static int read_bytes(const char *path, void *buf, size_t n, int raw) {
     char p[320];
-    int fd = open(crc_path(p, sizeof p, path), O_RDONLY | O_CLOEXEC), got = 0;
+    int fd = open(raw ? path : crc_path(p, sizeof p, path), O_RDONLY | O_CLOEXEC), got = 0;
     if (fd < 0) return -1;
     while ((size_t)got < n) {
         int r = (int)read(fd, (char *)buf + got, n - got);
@@ -70,8 +71,8 @@ static int read_bytes(const char *path, void *buf, size_t n) {
 /* coda-rc's id (coda_rc.c device_id), or a new one written the way it writes it */
 static int device_id(void) {
     char p[320], t[330];
-    if (read_bytes(ID_FILE, crc_device_id, 8) == 8) return 1;
-    if (read_bytes("/dev/urandom", crc_device_id, 8) != 8) return 0;
+    if (read_bytes(ID_FILE, crc_device_id, 8, 0) == 8) return 1;
+    if (read_bytes("/dev/urandom", crc_device_id, 8, 1) != 8) return 0;
     mkdir(crc_path(p, sizeof p, "/mnt/data/coda-rc"), 0700);
     crc_path(p, sizeof p, ID_FILE);
     snprintf(t, sizeof t, "%s.new", p);
