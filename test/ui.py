@@ -476,13 +476,15 @@ def pages(binary, work):
     glyphs(icons)
     marks, dots = {}, {}
     # demo's file says repeat 0 off, 1 one, 2 all (patch/coda_rc_shim.c cr_modes)
-    for what, text in (('off', NOW), ('one', NOW.replace('id=5', 'id=5\nshuffle=1\nrepeat=1\nhearts=1')),
+    for what, text in (('off', NOW.replace('id=5', 'id=5\nhearts=5\nliked=0')),
+                       ('one', NOW.replace('id=5', 'id=5\nshuffle=1\nrepeat=1\nliked=1')),
                        ('all', NOW.replace('id=5', 'id=5\nrepeat=2'))):
         _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'run 600', 'shot @np.ppm'], *home, '--icons', icons, now=text)
         marks[what] = [pics['np'].at(64, 286), pics['np'].at(228, 286), pics['np'].at(200, 160)]
         # the on dot: 4 px, its centre 15 px under the glyph's (patch/np_bar.c NP_DOT, NP_DOT_DY), in the accent
         dots[what] = [pics['np'].at(x, y) for x in (64, 228) for y in (300, 301)] + [pics['np'].at(x, 304) for x in (64, 228)]
-    good &= check("Now Playing's shuffle, repeat and heart are drawn by what is set: Repeat One its own glyph, All the lit one",
+    good &= check("Now Playing's shuffle, repeat and heart are drawn by what is set: Repeat One its own glyph, All the lit one, "
+                  "the heart full by the song's like (liked=1) and empty for five stars without it",
                   marks['off'] == [(90, 90, 90)] * 3 and marks['one'] == [(0, 0, 250), (0, 250, 0), (250, 0, 0)]
                   and marks['all'][1] == (0, 0, 250), str(marks))
     good &= check('a lit shuffle or repeat has the accent dot under it, an unlit one none',
@@ -631,7 +633,8 @@ def now_cycle(binary, work, home):
                   and stages[-1] == 0 and 3 in stages and trace[-1]['scrub'] == 0, f'{sent} {sorted(set(stages))}')
     # repeat All steps to One, then Off; shuffle on goes off
     for now, ticks, want in ((NOW.replace('id=5', 'id=5\nrepeat=2'), 1, 'mode -1 1'), (NOW.replace('id=5', 'id=5\nrepeat=1'), 1, 'mode -1 0'),
-                             (NOW.replace('id=5', 'id=5\nshuffle=1'), 0, 'mode 0 -1')):
+                             (NOW.replace('id=5', 'id=5\nshuffle=1'), 0, 'mode 0 -1'), (NOW.replace('id=5', 'id=5\nliked=0'), 2, 'like 5'),
+                             (NOW.replace('id=5', 'id=5\nliked=1'), 2, 'like 5')):
         _, _, _, (sent, _, _) = script(binary, work, 60, to_now + ['key centre', 'run 50', 'key centre', 'run 50'] +
                                        ['tick 1', 'run 50'] * ticks + ['key centre', 'run 50'], *home, now=now, queue=True)
         good &= check(f'Centre on the ring steps it: {want}', words(sent)[-1:] == [want], str(sent))
@@ -1559,9 +1562,6 @@ def live(binary, work):
     return good
 
 
-def main():
-    try:  # the build's inputs; a compile that fails with them all there is a failure, not a skip
-        ui.stb(), ui.stb_image(), ui.sqlite_include()
 class Client:
     """A connection to q2ui's Q2UI/1 socket (ui/notice.c), its lines read with a time limit."""
 
@@ -1873,6 +1873,9 @@ def notices(binary, work):
     return good
 
 
+def main():
+    try:  # the build's inputs; a compile that fails with them all there is a failure, not a skip
+        ui.stb(), ui.stb_image(), ui.sqlite_include()
         if not ui.HOST_SQLITE.exists():
             raise SystemExit(f'no {ui.HOST_SQLITE}')
     except (SystemExit, OSError) as e:
@@ -1898,11 +1901,11 @@ def notices(binary, work):
             good &= panel(binary, work)
         if not only or 'status' in only:
             good &= status(binary, work)
+        if not only or 'notices' in only:
+            good &= notices(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
     return 0 if good else 1
 
-        if not only or 'notices' in only:
-            good &= notices(binary, work)
 
 if __name__ == '__main__':
     sys.exit(main())

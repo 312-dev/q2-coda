@@ -536,6 +536,40 @@ def test_rate_hearts_the_playing_song_and_now_playing_shows_them(fw, ui, mcl, re
     assert q2.ack() == b'32 3\n'
 
 
+def test_like_flips_the_playing_songs_heart_as_its_click_does_and_now_playing_shows_it(fw, ui, mcl, recs):
+    """q2ui's ring heart: "like ID" flips the playing song's My Fav as Now Playing's heart click does (ratings.c
+    rate_now_like: stock's manage_myfav, then its notifyFavor), and the now file's liked follows; another song's id is
+    NOT_FOUND, and a song with no heart here (a stream of the player's own) is refused with nothing flipped."""
+    q2 = Q2(fw, ui, recs)
+    q2.queue(at=2)
+    C.c_int.from_address(O['MCL_TYPE']).value = 1
+    kind, fav, notified = [1], [0], []
+
+    def flip(*_):
+        fav[0] ^= 1
+        return 1 if fav[0] else 0
+    fw.mock('mclGetPlayType', lambda *_: kind[0])
+    fw.mock('checkFavExist', lambda *_: fav[0])
+    fw.mock('manage_myfav', flip)
+    fw.mock('notifyFavor', lambda *_: notified.append(1) or 0)
+    q2.tick()
+    assert q2.now()['liked'] == '0' and q2.now()['hearts'] == '0'
+    q2.files[CMD] = b'50 like 12\n'
+    q2.tick()
+    assert q2.ack() == b'50 0\n' and q2.now()['liked'] == '1' and fav == [1] and notified == [1]
+    assert q2.now()['hearts'] == '0'  # the stars left alone
+    q2.files[CMD] = b'51 like 12\n'
+    q2.tick()
+    assert q2.ack() == b'51 0\n' and q2.now()['liked'] == '0' and fav == [0] and notified == [1, 1]
+    q2.files[CMD] = b'52 like 11\n'  # not the playing song
+    q2.tick()
+    assert q2.ack() == b'52 3\n' and fav == [0] and len(notified) == 2
+    kind[0] = 0xf2  # a stream: stock's click refuses it
+    q2.files[CMD] = b'53 like 12\n'
+    q2.tick()
+    assert q2.ack() == b'53 1\n' and fav == [0] and len(notified) == 2 and q2.now()['liked'] == '-1'
+
+
 def test_a_stream_has_no_hearts(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs)
     q2.queue()
