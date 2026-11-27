@@ -53,8 +53,9 @@ BR2_TARGET_ROOTFS_SQUASHFS4_LZO=y
 BR2_TARGET_ROOTFS_SQUASHFS_BS_128K=y
 # BR2_TARGET_ROOTFS_TAR is not set
 
-# Bluetooth (docs/vamp-os-base.md#bluetooth): the system bus, Vamp's own bluetoothd and bluealsa. AAC
+# Bluetooth (docs/vamp-os-base.md#bluetooth): the system bus, Vamp's own bluetoothd and bluealsa, and q2btd. AAC
 # (BR2_PACKAGE_VAMP_BLUEALSA_AAC) waits for a toolchain with C++, which fdk-aac needs.
 BR2_PACKAGE_DBUS=y
 BR2_PACKAGE_VAMP_BLUEZ=y
 BR2_PACKAGE_VAMP_BLUEALSA=y
+BR2_PACKAGE_Q2BTD=y

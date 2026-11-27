@@ -16,4 +16,5 @@ source "$BR2_EXTERNAL_VAMP_PATH/package/vamp-bluez/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/q2-freeaptx/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/q2-ldac/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/vamp-bluealsa/Config.in"
+source "$BR2_EXTERNAL_VAMP_PATH/package/q2btd/Config.in"
 endmenu
