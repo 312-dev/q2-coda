@@ -38,6 +38,12 @@ int player_set(const char *name, int value) {
     return write(player_ctl, line, (size_t)n) == n ? 0 : -1;
 }
 
+/* demo's own click for the wheel and keys q2ui reads (patch/q2ui_gate.c ctl): Key Tone and where the click
+ * sounds stay demo's rule. The pipe never waits (O_NONBLOCK): a click it has no room for is dropped. */
+void player_click(int button) {
+    if (player_ctl >= 0) (void)!write(player_ctl, button ? "click 1\n" : "click 0\n", 8);
+}
+
 int player_play(const int *ids, int n, int at, int shuffle) {
     if (n > PLAY_MAX) { /* the part of the list round the song chosen */
         int from = at - PLAY_MAX / 2 < 0 ? 0 : at - PLAY_MAX / 2;

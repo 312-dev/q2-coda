@@ -591,3 +591,26 @@ def test_q2ui_is_told_abouts_versions(fw, mcl):
     g.poll()
     said = dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines())
     assert said['product'] == 'Vamp' and said['firmware'] == 'V1.36' and said['version'] and 'Muse' not in said['version']
+
+
+def test_q2uis_clicks_down_its_pipe_are_demos_key_tone_one_a_pass(fw):
+    """q2ui reads the wheel and the keys itself, so demo's own click (buzzeer_switch, hooked as ringnav_buzzer: Key
+    Tone, the Clicker's route) never runs for them: q2ui sends "click 0" for a wheel tick and "click 1" for a press,
+    and demo clicks as it would have, a press as a button's sound (clicker_kind). A fast spin's clicks that reach one
+    pass are one click, as the buzzer is busy for them anyway."""
+    kind = fw.var('clicker_kind', C.c_int)
+    clicks = []
+    fw.mock('buzzeer_switch', lambda on, *_: clicks.append((on, kind.value)) or 0)
+    g = Piped(fw)
+    g.poll()
+    g.sent = b'click 0\nclick 0\nclick 0\n'
+    g.poll()
+    assert clicks == [(1, 0)]
+    g.sent = b'click 1\n'
+    g.poll()
+    assert clicks == [(1, 0), (1, 2)] and kind.value == 0
+    g.sent = b'click 0\nclick 1\n'  # both in one pass: one of each
+    g.poll()
+    assert clicks[2:] == [(1, 0), (1, 2)]
+    g.poll()
+    assert len(clicks) == 4

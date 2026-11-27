@@ -21,7 +21,8 @@
  *  - q2ui asks demo to change a setting (Control Center's switches, its Display page's choices) with a
  *    line "set NAME VALUE" down a pipe of its own (ctl): demo makes it once, before the first
  *    start, and hands q2ui its write end, the fd's number after --ctl, so no other program, the
- *    phone's daemon among them, can write it. Car Remote's queue takes no "set".
+ *    phone's daemon among them, can write it. Car Remote's queue takes no "set". Its clicks come
+ *    the same way ("click 0|1"), as demo's own wheel and keys would sound them.
  *  - while q2ui runs, demo says what only it knows for q2ui's status row (where the sound goes,
  *    Bluetooth, Buttons Lock, a card app's sync and server: status_row_state) and Control Center
  *    (its switches' states: q2ui_cc_state) in Q2UI_STATUS, a look every Q2UI_STATUS_MS and a
@@ -216,17 +217,21 @@ static void tell(void) {
 }
 
 /* q2ui's lines down its pipe, each "set NAME VALUE" (control_center.c q2ui_cc_set), acted on in the
- * order sent; another verb, or a line too long, is dropped. Read every pass while it runs and after it
+ * order sent, or "click 0" (a wheel tick's) or "click 1" (a press's), demo's key click for the wheel
+ * and keys q2ui reads itself, at most one of each a pass (the buzzer is busy for a click's length
+ * anyway); another verb, or a line too long, is dropped. Read every pass while it runs and after it
  * ends, so a setting sent just before leaving for a page of demo's is not lost; at most CTL_READS
  * reads a pass, so a q2ui that writes without end cannot hold demo's loop (the rest waits in the pipe). */
 int q2ui_cc_set(const char *name, int on); /* control_center.c */
 void q2ui_cc_poll(void);
+extern int clicker_kind;    /* clicker.c: navigation.h CLICK_KIND_*, 0 the wheel's */
+#define CLICK_BUTTON 2      /* CLICK_KIND_BUTTON */
 static void ctl(void) {
     char word[12];
-    int v;
+    int v, clicks = 0; /* bit 0 a wheel's click asked for this pass, bit 1 a press's */
     for (int k = 0; k < CTL_READS; ++k) {
         int n = (int)read(qu.ctl[0], qu.line + qu.carry, sizeof qu.line - qu.carry);
-        if (n <= 0) return; /* nothing waiting (EAGAIN) */
+        if (n <= 0) break; /* nothing waiting (EAGAIN) */
         unsigned end = qu.carry + (unsigned)n, from = 0;
         for (unsigned i = 0; i < end; ++i) {
             if (qu.line[i] != '\n') continue;
@@ -235,13 +240,18 @@ static void ctl(void) {
                 char what[32];
                 tk_snprintf(what, sizeof what, q2ui_cc_set(word, v) ? "set %s refused," : "set %s", word);
                 said(what, v);
-            }
+            } else if (__isoc99_sscanf(qu.line + from, "click %d", &v) == 1)
+                clicks |= v ? 2 : 1;
             from = i + 1;
         }
         qu.carry = end - from;
         if (qu.carry == sizeof qu.line) qu.carry = 0; /* no line is this long: dropped */
         if (from && qu.carry) memmove(qu.line, qu.line + from, qu.carry);
     }
+    /* each as demo's own wheel or key would click it: Key Tone and the Clicker's route are
+     * ringnav_buzzer's (docs/internals.md#key-tone) */
+    if (clicks & 1) buzzeer_switch(1);
+    if (clicks & 2) clicker_kind = CLICK_BUTTON, buzzeer_switch(1), clicker_kind = 0;
 }
 
 /* every UI loop pass */

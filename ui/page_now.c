@@ -81,6 +81,7 @@ static void n_event(void *st, const input_t *e) {
         to = to < 0 ? 0 : to > 100 ? 100 : to;
         snprintf(verb, sizeof verb, "volume %d", to);
         player_send(verb);
+        ui_click(0); /* each tick, as stock's volume clicks on every key */
         /* shown at once: the player's answer comes a moment later and says the same */
         s->volume = to, s->volume_at = ui_time();
         ui_mark((rect_t){ 0, BAR_Y - 6, SCREEN_W, 44 });

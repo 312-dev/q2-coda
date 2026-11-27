@@ -61,6 +61,10 @@ void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
 static int hold_key;
 static void (*hold_fn)(void);
 void ui_on_hold(int key, void (*fn)(void)) { hold_key = key, hold_fn = fn; }
+void (*ui_clicker)(int button);
+void ui_click(int button) {
+    if (ui_clicker) ui_clicker(button);
+}
 void ui_on_stack(void (*fn)(void)) { stack_hook = fn; }
 
 void ui_mark(rect_t r) {
@@ -229,6 +233,8 @@ int ui_frame(const input_t *in, int n) {
     if (wake_at && ui_time() >= wake_at) wake_at = 0;
     for (int i = 0; i < n && depth && !quit; ++i) {
         if (in[i].type == IN_TICK) ++ui_stats.ticks;
+        /* every press clicks as it goes down, as stock's keys do (on_wm_keydown) */
+        if (in[i].type == IN_KEY_DOWN && (in[i].value == KEY_UI_CENTRE || in[i].value == KEY_UI_RETURN)) ui_click(1);
         if (in[i].type == IN_KEY_HOLD && hold_fn && in[i].value == hold_key)
             hold_fn();
         else if (stack[depth - 1].page->event)

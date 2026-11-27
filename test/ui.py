@@ -105,11 +105,12 @@ class Picture:
 NOW = 'seq=3\nstate=1\npos=14000\nlen=180\nid=5\nvolume=40\nsource=library\ntitle=A Made-Up Song\nartist=Its Artist\nalbum=Its Album\n'
 
 
-def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=False):
+def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=False, clicks=False):
     """q2ui run over a script; the trace (a dict a frame), the pictures it saved by name, and the stats. now is what
     plays (the text of demo's file for it), code the exit code expected (None: any), and with queue the player's queue is a FIFO
     whose lines come back as a fourth value with the list file's ids. With ctl, q2ui is also given the write end of
-    a pipe as demo gives it one for settings (patch/q2ui_gate.c, --ctl FD), and the lines it wrote come back fifth."""
+    a pipe as demo gives it one for settings (patch/q2ui_gate.c, --ctl FD), and the lines it wrote come back fifth: its
+    settings, or with clicks its key clicks ("click 0|1") alone."""
     d = folder(work, n)
     if now:
         (d/'now').write_text(now)
@@ -128,6 +129,7 @@ def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=
         if pipe:
             os.close(pipe[1])
     settings = os.read(pipe[0], 4096).decode().splitlines() if pipe else []
+    settings = [s for s in settings if s.startswith('click ') == clicks]
     if pipe:
         os.close(pipe[0])
     if code is not None and done.returncode != code:
@@ -590,6 +592,7 @@ def pages(binary, work):
     good &= display(binary, work, home)
     good &= playback(binary, work, home)
     good &= wireless(binary, work, home)
+    good &= clicks(binary, work)
     good &= comebacks(binary, work, home)
     good &= general(binary, work, home)
     return good
@@ -682,6 +685,23 @@ def playback(binary, work, home):
         asked = (out/'ask').read_text() if (out/'ask').exists() else ''
         good &= check(f"its row {ticks + 1} opens demo's {page}", asked == page + '\n', repr(asked))
     return good
+
+
+def clicks(binary, work):
+    """The key click: q2ui reads the wheel and keys itself, so demo's click for them (Key Tone, the Clicker's route:
+    patch/q2ui_gate.c ctl) is asked for down q2ui's pipe, "click 0" for a tick and "click 1" for a press, as demo would
+    click: a list's tick that moves the selection (none at an end, where it stays), every volume tick on Now Playing,
+    every Centre and Return as it goes down."""
+    ticks = (1, -1, -1, -1, -1, 1)
+    lines = ['rest'] + [w for d in ticks for w in (f'tick {d}', 'rest')] + ['key centre', 'run 300', 'tick 1', 'run 100', 'key return', 'run 300']
+    trace, _, _, _, said = script(binary, work, 60, lines, now=NOW, queue=True, ctl=True, clicks=True)
+    sel, moves = int(trace[0]['sel']) if trace else 0, 0
+    for d in ticks:  # the list's, from the row it opened on (Shuffle, row 0, is the top)
+        moves += max(0, sel + d) != sel
+        sel = max(0, sel + d)
+    want = ['click 0'] * moves + ['click 1', 'click 0', 'click 1']
+    return check('a tick that moves the selection clicks and one at the top does not; Centre, a volume tick on Now Playing '
+                 'and Return each click', said == want and 0 < moves < len(ticks), f'{said} {moves}')
 
 
 def wireless(binary, work, home):

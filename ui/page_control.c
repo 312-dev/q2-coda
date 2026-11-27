@@ -220,6 +220,7 @@ static void cc_event(void *st, const input_t *e) {
         }
         s->grab = -1, wake(s);
     } else if (e->type == IN_TICK) {
+        ui_click(0); /* every tick, as on demo's sheet, a dialog whose keys keep stock's click (ringnav_keydown) */
         if (wake(s)) return;
         if (s->grab >= 0) {
             int step = wheel_accel(&s->accel, s, e->value, e->ms, 0);
