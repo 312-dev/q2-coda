@@ -79,11 +79,37 @@ description, as a patch `tools/thirdparty.py` applies, with a test of the behavi
 | The store at `/mnt/data/bluetooth`                                                                                    | pairings in RAM, gone at power off                                                          | done: `BLUEZ_STORAGE` in the recipe                |
 | Vamp's own patches to stock (`bt_meta.c`, the AVRCP record's cover art entry)                                         | no track on the control channel, no cover art                                               | source changes, with `test/bluetoothd.py`'s cases  |
 
-A port of all but the last three to 5.66 exists on the branch `feat/bt-browse` (`tools/bluez/shanling.patch`,
-52 hunks, with a Unicorn suite, `test/bluez_port.py`; paused 2026-11-16, never merged, never run on a Q2).
-Against 5.88, 43 of its hunks still apply and 9 do not, five of them in `avrcp.c` (measured: `patch
---dry-run`). That patch also holds AVRCP browsing for `coda-rc`, which is a feature of its own and stays out
-of the cutover.
+**Ported to 5.88:** `tools/bluez/shanling.patch`, the patch for the stock base alone, which `build_bluez`
+applies after `vamp.patch` while `BLUEZ_BASE` is `stock` (then runs `autoreconf` for what it adds to
+`Makefile.am`, and links stubs of `libbtctl.so` and the seven libraries it leans on, the set stock's binary
+names: measured, the two binaries' `NEEDED` lists are the same). It holds all but the last three rows above,
+brought from `feat/bt-browse`'s port to 5.66 (52 hunks; paused 2026-11-16, never run on a Q2) less its AVRCP
+browsing for `coda-rc`, which is a feature of its own and stays out of the cutover. Of those hunks 43 applied to
+5.88 as they were; what did not, and what 5.88 moved under the ones that did:
+
+- `avrcp.c`: the receiver page's track (PlayInfoChange 0x104) moved into 5.88's attribute callback
+  (`parse_attribute`), for the playing track's two readers alone (`avrcp_player_parse_track`:
+  GetElementAttributes and GetItemAttributes, not a folder's items); demo's notifications
+  (`avrcp_hciplayer_event`) use the registration 5.88 keeps in the target's `struct avrcp_data`, not the
+  session; Shanling's set of events in `target_init` against 5.88's volume check.
+- `avdtp.c`: SyncLink's refused DISCOVER on 5.88's response buffer, `in_resp` (5.88 has two), whose switch
+  reads the header's message type alone.
+- `profiles/shanling`: 5.88's header paths (`bluetooth/` for `lib/`).
+- Browsing taken out with all it needed: `avctp.c`'s deferred replies (`AVCTP_DEFERRED`), `avrcp.c`'s PlayItem
+  and browsing handlers, `src/shanling.c`'s socket to `coda-rc`. The track-information handler that hunk also
+  held (`shanling_get_element_attributes`, from `g_track_meta`) stays.
+
+`python3 test/bluez_port.py [BLUETOOTHD]` (the Unicorn suite, `test/bluez_emu.py`, brought over with 5.88's
+layouts: the registered events in `struct avrcp_data` at 0x14 and 0x16, `struct avdtp_local_sep`'s user data at
+0x14, `struct avdtp`'s buffer after two input buffers) runs each hook as MIPS: GetPlayStatus and
+RegisterNotification from demo's status, demo's notifications to the registered session once, the event
+function set at start, codec order by the Quality page, the phone's track and stream to the receiver page,
+SyncLink's refused DISCOVER, the session cleared at a disconnection, GetElementAttributes from the track demo
+keeps (29 checks). Measured: all pass on the hooked build; on the build without the patch 13 fail.
+`test/bluez_own.py` checks that our daemon owns `shanling.bluez` as stock's does (libbtctl's `bluez_main`,
+run from the stock rootfs's own library; `--own` takes another daemon, and the one without the patch fails it).
+The suite found one fault of its own: it read a signal's data after the call had returned, from a caller's
+stack, which 5.66's build happened to leave intact; it now records the data as the call is made.
 
 ## The LE attribute channel
 
@@ -355,6 +381,12 @@ What settles it: `btmon` (or `hcidump -X`) on a `--dev` build while ours starts 
 
 What phase 2 has done that only a Q2 can confirm, in the order to try it:
 
+0. **Shanling's hooks under ours** (a `--dev --own-bluez` build from this tree, the store copied aside first):
+   step 2 again with `shanling.bluez` there (demo's NotifyChanged reaches it; no hang); step 5's track and play
+   state on a headset and a car (GetElementAttributes, GetPlayStatus, the CHANGED notifications as demo's track
+   changes); a phone playing to the Q2 opens the receiver page with its title; the Quality page's codec is the
+   one chosen at a connection (step 4's three codecs); SyncLink, if it is used at all, holds a phone's A2DP off.
+   The AVRCP browsing that stayed out means a car's browse view lists nothing, as under stock.
 1. **Car Remote over BLE under ours with `[GATT] Server = false`** (step 9): the phone app finds `coda-rc`'s service; `/tmp/coda-rc.log` shows the connection. Also `hciconfig hci0` and `btmgmt info` show LE on, so scanning and the phone's audio pairing are unaffected.
 2. **Not discoverable**: the `btmon` capture of [Not discoverable](#not-discoverable), with the failing command and its status written here.
 3. **Shanling's `hciconfig` calls around ours** (`class`, `sspmode`, `auth`): the class `hciconfig hci0 class` reads after each, and the Q2 still discoverable once the capture's cause is fixed.

@@ -493,7 +493,8 @@ def build_adbd(src, stage, env, log):
     shutil.copy(src/'debian/copyright', stage/'copyright')
 
 
-# bluetoothd links stock's GLib 2.74.4 and D-Bus 1.12, which nothing here builds: it is compiled against their
+# bluetoothd links stock's GLib 2.74.4 and D-Bus 1.12 (and, for the stock base, Shanling's libbtctl.so and the
+# libraries it leans on: BLUEZ_SHANLING_STUBS), which nothing here builds: it is compiled against their
 # own headers (glibconfig.h as GLib's meson writes it for this target, tools/bluez/glibconfig.h;
 # dbus-arch-deps.h filled in below) and linked against stubs that carry each library's soname and every
 # symbol stock's copy exports (tools/bluez/stubs.tsv: library, name, kind, size, read from the stock rootfs),
@@ -505,6 +506,14 @@ STUBS = (BLUEZ_DIR/'stubs.tsv').read_text()
 # Vamp's changes to BlueZ that any base takes (docs/bluez.md#bases): [GATT] Server, so coda-rc keeps the LE
 # attribute channel
 BLUEZ_VAMP_PATCH = (BLUEZ_DIR/'vamp.patch').read_text()
+# The base bluetoothd is built for (docs/bluez.md#bases). 'stock', today's rootfs: Shanling's hooks
+# (tools/bluez/shanling.patch) go on top of vamp.patch, and bluetoothd links libbtctl.so and the libraries it
+# leans on without naming them, as stock's does, against stubs of each (stub_library; libbtctl.so's symbols are
+# in stubs.tsv). Any other base leaves the hooks and those libraries out.
+BLUEZ_BASE = 'stock'
+BLUEZ_SHANLING_PATCH = (BLUEZ_DIR/'shanling.patch').read_text()
+BLUEZ_SHANLING_STUBS = ['libbtctl.so', 'libncurses.so.6', 'libgio-2.0.so.0', 'libgmodule-2.0.so.0',
+                        'libgobject-2.0.so.0', 'libpcre2-8.so.0', 'libffi.so.8', 'libgthread-2.0.so.0']  # stock's NEEDED
 BLUETOOTHD = 'usr/bin/bluetoothd'  # stock's, whose ELF flags and FP ABI the rebuild must have
 # Where stock's bluetoothd keeps its adapter and device records, pairing keys among them (upstream's default
 # is /var/lib/bluetooth, which is not on the Q2's writable partition): one store for both daemons, so a
@@ -589,6 +598,14 @@ def build_bluez(src, stage, env, log):
     vars = dict(env.vars, CFLAGS=f'{env.vars["CFLAGS"]} -fPIC', LDFLAGS=f'{env.vars["LDFLAGS"]} -pie -Wl,-z,now')
     (src/'vamp.patch').write_text(BLUEZ_VAMP_PATCH)
     run('patch', '-p1', '-i', 'vamp.patch', cwd=src, log=log)
+    if BLUEZ_BASE == 'stock':
+        (src/'shanling.patch').write_text(BLUEZ_SHANLING_PATCH)
+        run('patch', '-p1', '-i', 'shanling.patch', cwd=src, log=log)
+        run('autoreconf', '-fi', cwd=src, log=log)  # it adds sources and libraries to Makefile.am
+        stubs = src/'q2-stubs'
+        for lib in BLUEZ_SHANLING_STUBS:
+            stub_library(env, lib, stubs)
+        vars['LDFLAGS'] += f' -L{stubs}'
     run('./configure', f'--host={env.host}', '--prefix=/usr', *BLUEZ_OPTIONS, cwd=src, env=vars, log=log)
     config = src/'config.h'
     text, n = re.subn(r'^#define STORAGEDIR ".*"$', f'#define STORAGEDIR "{BLUEZ_STORAGE}"', config.read_text(), flags=re.M)

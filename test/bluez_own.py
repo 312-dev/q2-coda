@@ -2,7 +2,7 @@
 """Vamp's own bluetoothd (tools/thirdparty.py's `bluez`, docs/bluez.md) beside stock's, each run as MIPS under
 qemu-mipsel on a D-Bus bus of its own, with a stand-in for the kernel: no radio, no Q2.
 
-    python3 test/bluez_own.py BUILD|STOCKFS [--only own|stock] [--keep]
+    python3 test/bluez_own.py BUILD|STOCKFS [--only own|stock] [--own BLUETOOTHD] [--keep]
 
 BUILD is a build (tools/build.py's --out): stock's programs and libraries are unpacked from its stock.squashfs,
 and when it was made with --own-bluez the own daemon is the one its rootfs.squashfs carries; otherwise, and
@@ -468,6 +468,13 @@ def exercise(run):
     n = run.name
     started(run)
     check(f'{n}: starts on Vamp\'s main.conf and owns org.bluez', True)
+    # bluez_main, in libbtctl.so (stock's, from the sysroot): the D-Bus service demo calls, which the own daemon
+    # starts too for the stock base (tools/bluez/shanling.patch, docs/bluez.md#shanlings-changes)
+    for _ in range(50):
+        if run.owns('shanling.bluez'):
+            break
+        time.sleep(0.1)
+    check(f'{n}: owns shanling.bluez, as libbtctl.so\'s bluez_main makes it', run.owns('shanling.bluez'))
     faces = run.interfaces('/org/bluez/hci0')
     check(f'{n}: hci0 has Adapter1 and Media1', NEEDED <= faces, str(sorted(faces)))
     root = run.interfaces('/org/bluez')
@@ -534,7 +541,8 @@ def forget(run):
 def main(argv):
     keep = '--keep' in argv
     only = argv[argv.index('--only') + 1] if '--only' in argv else None
-    args = [a for a in argv if not a.startswith('--') and a != only]
+    own = argv[argv.index('--own') + 1] if '--own' in argv else None  # another own daemon than the build's
+    args = [a for a in argv if not a.startswith('--') and a not in (only, own)]
     if len(args) != 1:
         print(__doc__, file=sys.stderr)
         return 2
@@ -545,6 +553,8 @@ def main(argv):
     tmp = pathlib.Path(tempfile.mkdtemp(prefix='q2-bluez-own-'))
     runs = []
     rig = Rig(pathlib.Path(args[0]).resolve(), tmp)
+    if own:
+        rig.binaries['own'] = pathlib.Path(own)
     try:
         faces, binds = {}, {}
         order = [only] if only else ['own', 'stock']

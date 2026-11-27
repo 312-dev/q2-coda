@@ -575,9 +575,9 @@ def test_a_stub_library_carries_the_soname_and_stocks_symbols(env, calls, tmp_pa
     assert (tmp_path/'lib/liby.so.stub.c').read_text() == 'void other(void) {}\n' and not (tmp_path/'lib/liby.so').exists()
 
 
-def test_the_stub_table_names_glib_and_dbus_only():
+def test_the_stub_table_names_glib_dbus_and_libbtctl_only():
     rows = [r.split('\t') for r in thirdparty.STUBS.splitlines()]
-    assert {r[0] for r in rows} == {'libglib-2.0.so.0', 'libdbus-1.so.3'} and all(len(r) == 4 for r in rows)
+    assert {r[0] for r in rows} == {'libglib-2.0.so.0', 'libdbus-1.so.3', 'libbtctl.so'} and all(len(r) == 4 for r in rows)
     assert {r[2] for r in rows} == {'FUNC', 'OBJECT'} and all(r[3].isdigit() for r in rows)
     names = {r[1] for r in rows}
     assert {'g_main_loop_run', 'g_key_file_load_from_file', 'dbus_connection_send_with_reply'} <= names
@@ -631,13 +631,17 @@ def bluez_tree(tmp_path, config):
     return src
 
 
-def test_bluez_is_upstreams_daemon_on_the_q2s_store(env, calls, tmp_path):
+def test_bluez_is_upstreams_daemon_on_the_q2s_store(env, calls, tmp_path, monkeypatch):
+    # a base other than stock's: Vamp's patch alone, then configure and make (docs/bluez.md#bases)
+    monkeypatch.setattr(thirdparty, 'BLUEZ_BASE', 'buildroot')
     src = bluez_tree(tmp_path, '#define A 1\n#define STORAGEDIR "/var/lib/bluetooth"\n#define B 2\n')
     stage, log = tmp_path/'stage', tmp_path/'log'
     thirdparty.build_bluez(src, stage, env, log)
     vars = dict(env.vars, CFLAGS='-O2 -pipe -fPIC', LDFLAGS=env.vars['LDFLAGS'] + ' -pie -Wl,-z,now')
-    assert calls == [(['./configure', '--host=mipsel-linux-gnu', '--prefix=/usr', *thirdparty.BLUEZ_OPTIONS], src, vars, log),
+    assert calls == [(['patch', '-p1', '-i', 'vamp.patch'], src, None, log),
+                     (['./configure', '--host=mipsel-linux-gnu', '--prefix=/usr', *thirdparty.BLUEZ_OPTIONS], src, vars, log),
                      (['make', '-j7'], src, vars, log)]
+    assert (src/'vamp.patch').read_text() == thirdparty.BLUEZ_VAMP_PATCH and not (src/'shanling.patch').exists()
     assert (src/'config.h').read_text() == '#define A 1\n#define STORAGEDIR "/mnt/data/bluetooth"\n#define B 2\n'
     assert [(stage/f).read_text() for f in ('usr/bin/bluetoothd', 'etc/bluetooth/main.conf', 'COPYING')] == ['elf', 'conf', 'gpl']
     # stock's plugin set and no more: what a headset or a phone could reach stays what it was
@@ -648,11 +652,35 @@ def test_bluez_is_upstreams_daemon_on_the_q2s_store(env, calls, tmp_path):
     assert thirdparty.RECIPES['bluez'] == (thirdparty.build_bluez, ['glib', 'dbus']) and 'bluez' not in thirdparty.INSTALL
 
 
+def test_bluez_for_the_stock_base_takes_shanlings_hooks_and_libbtctl(env, calls, tmp_path):
+    """Vamp's patch, then Shanling's (tools/bluez/shanling.patch), autoreconf for the sources and libraries it adds
+    to Makefile.am, a stub of each library stock's bluetoothd names, and the link told where they are."""
+    assert thirdparty.BLUEZ_BASE == 'stock'
+    src = bluez_tree(tmp_path, '#define STORAGEDIR "/var/lib/bluetooth"\n')
+    stage, log = tmp_path/'stage', tmp_path/'log'
+    thirdparty.build_bluez(src, stage, env, log)
+    stubs = src/'q2-stubs'
+    assert [c[0][:4] for c in calls[:3]] == [['patch', '-p1', '-i', 'vamp.patch'], ['patch', '-p1', '-i', 'shanling.patch'],
+                                              ['autoreconf', '-fi']]
+    assert (src/'shanling.patch').read_text() == thirdparty.BLUEZ_SHANLING_PATCH
+    linked = [c[0][c[0].index('-o') + 1] for c in calls if '-shared' in c[0]]
+    assert linked == [stubs/lib for lib in thirdparty.BLUEZ_SHANLING_STUBS]
+    configure = [c for c in calls if c[0][0] == './configure'][0]
+    assert configure[2]['LDFLAGS'].endswith(f' -pie -Wl,-z,now -L{stubs}')
+    # stock's bluetoothd's NEEDED, less what every build links (glib, dbus, libc's)
+    assert set(thirdparty.BLUEZ_SHANLING_STUBS) == {'libbtctl.so', 'libncurses.so.6', 'libgio-2.0.so.0', 'libgmodule-2.0.so.0',
+                                                    'libgobject-2.0.so.0', 'libpcre2-8.so.0', 'libffi.so.8', 'libgthread-2.0.so.0'}
+    stubbed = {row.split('\t')[1] for row in thirdparty.STUBS.splitlines() if row.startswith('libbtctl.so\t')}
+    assert {'bluez_main', 'bluez_play_info_signal', 'g_play_status', 'g_track_meta', 'g_notify_mutex', 'g_avrcp_event_fun',
+            'g_high_priority_lcodec', 'g_synclink_mode'} <= stubbed  # what shanling.patch calls and reads
+    assert 'coda-rc' not in thirdparty.BLUEZ_SHANLING_PATCH.split('diff --git', 1)[1]  # browsing stays out
+
+
 def test_bluez_stops_when_configure_names_no_store(env, calls, tmp_path):
     src = bluez_tree(tmp_path, '#define A 1\n')
     with pytest.raises(SystemExit, match='no STORAGEDIR'):
         thirdparty.build_bluez(src, tmp_path/'stage', env, tmp_path/'log')
-    assert len(calls) == 1  # configured, never compiled
+    assert calls[-1][0][0] == './configure'  # configured, never compiled
 
 
 def test_the_adbd_patch_is_the_files_text():
