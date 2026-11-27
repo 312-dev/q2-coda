@@ -718,6 +718,63 @@ def test_a_cooler_reading_after_standby_is_no_jump(run):
     assert 'heat nosensor' not in w.lines, '6 C cooler after the suspend: taken, not three jumps'
 
 
+# ---- the jacks (docs/sysd.md#the-jacks): PA07 and PA08 as the kernel's GPIO class gives them, 0 plugged ----
+
+def jack(root, n, plugged):
+    put(root, f'/sys/class/gpio/gpio{n}/value', '0\n' if plugged else '1\n')
+
+
+def jacks(root):
+    a = Api(root)
+    a.line()
+    a.say('jack')
+    got = a.line()
+    a.s.close()
+    return got
+
+
+def test_a_plug_counts_at_once_and_an_unplug_pauses_the_music(run):
+    root, _ = run
+    play, w = Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Watch(root)
+    jack(root, 7, False), jack(root, 8, False)
+    assert until(lambda: jacks(root) == 'jack po=0 bal=0', 2.5), 'PA07 and PA08 read: both out'
+    jack(root, 7, True)
+    assert until(lambda: 'jack po 1' in w.lines, 1.5), 'a plug at the next read'
+    put(root, '/tmp/coda-rc.now', 'title=A\nstate=1\nid=1\n')
+    jack(root, 7, False)
+    assert until(lambda: 'jack po 0' in w.lines, 3), 'an unplug that lasts'
+    assert play.lines == ['pause'], "music playing paused at the unplug, as stock's config_po_output does"
+    jack(root, 8, True)
+    assert until(lambda: 'jack bal 1' in w.lines, 1.5) and jacks(root) == 'jack po=0 bal=1'
+
+
+def test_an_unplugged_read_that_does_not_last_is_no_unplug(run):
+    root, _ = run
+    play, w = Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Watch(root)
+    jack(root, 7, True), jack(root, 8, False)
+    assert until(lambda: jacks(root) == 'jack po=1 bal=0', 2.5)
+    put(root, '/tmp/coda-rc.now', 'title=A\nstate=1\nid=1\n')
+    # out 0.9 s, in 1.2 s, five times: shorter than q2sysd's 1 s between reads, so one read at most each time and never
+    # two running, the DAC's power-up dip; the 2.1 s cycle drifts against the reads, so some land in a dip
+    for _ in range(5):
+        jack(root, 7, False)
+        time.sleep(0.9)
+        jack(root, 7, True)
+        time.sleep(1.2)
+    assert 'jack po 0' not in w.lines and play.lines == [], 'one unplugged read, then plugged: nothing'
+
+
+def test_an_unplug_with_nothing_playing_sends_no_pause(run):
+    root, _ = run
+    play, w = Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Watch(root)
+    jack(root, 7, True), jack(root, 8, False)
+    assert until(lambda: jacks(root) == 'jack po=1 bal=0', 2.5)
+    put(root, '/tmp/coda-rc.now', 'title=A\nstate=2\nid=1\n')
+    jack(root, 7, False)
+    assert until(lambda: 'jack po 0' in w.lines, 3)
+    assert play.lines == [], 'paused already: nothing sent'
+
+
 # ---- Vamp API 1 (docs/platform/system.md) ----
 
 def test_conformance_every_command_is_on_the_page():

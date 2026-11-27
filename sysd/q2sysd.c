@@ -29,11 +29,13 @@
  *     ([SYSSET] STANDBYMODE, SAVEPOWERMODE, docs/sysd.md#auto-standby-and-auto-power-off): Standby, or the power off,
  *     once the Q2 is unused that long, counted as stock's check_to_poweroption counts (music, Car Audio and USB
  *     storage hold both, any cable holds Standby); Auto Power Off with a cable in waits on the charge first.
+ *   - The jacks (docs/sysd.md#the-jacks): PA07 and PA08 read each second, an unplug counted once it lasts and pausing
+ *     music that plays.
  *   - Heat (docs/sysd.md#heat): today's Vamp's overheat guardian, its core and PMIC reader linked in from patch/, its
  *     warnings told and shown through Q2UI/1, its power-off done here; not on a card boot, where today's q2guard runs.
  *
  * Q2SYS/1 on /run/vamp/sys.sock (docs/platform/system.md): screen on|off|toggle, brightness P, battery, usb, usb adb|storage|dac|car,
- * standby, heat, heat cancel, watch, caps.
+ * standby, heat, heat cancel, jack, watch, caps.
  * --root prefixes every path, --poweroff and --reboot name the commands, --heat-file F gives the temperature in place of the PMIC and --time-scale N runs Auto Standby's and Auto Power Off's
  * times N times faster, for test/sysd.py. */
 #define _GNU_SOURCE
@@ -140,6 +142,7 @@ static void use_now(void) { used_at = now_ms(), power_fresh = 1; }
 /* heat's (below): the guardian's state, its Cancel asked, a suspend since its last step, whether it watches */
 static struct guard guard;
 static int heat_cancel, heat_slept, heat_on;
+static int jack_in[2]; /* the jacks' (below) */
 
 static void find_backlight(void) {
     DIR *d = opendir(path("/sys/class/backlight"));
@@ -712,7 +715,7 @@ static void client_line(struct client *c, const char *line) {
         c->hello = 1;
         client_say(c, "Q2SYS/1 ok");
     } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby heat battery watch");
+        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby heat jack battery watch");
     } else if (!strcmp(line, "battery")) {
         char text[160];
         read_battery();
@@ -723,6 +726,8 @@ static void client_line(struct client *c, const char *line) {
     } else if (!strcmp(line, "screen on") || !strcmp(line, "screen off") || !strcmp(line, "screen toggle")) {
         int on = line[7] == 't' ? !screen_on : line[8] == 'n';
         client_say(c, on == screen_on || !set_screen(on) ? "ok" : "err screen");
+    } else if (!strcmp(line, "jack")) { /* the two jacks, 1 plugged, 0 not, -1 not read (docs/sysd.md#the-jacks) */
+        client_say(c, "jack po=%d bal=%d", jack_in[0], jack_in[1]);
     } else if (!strcmp(line, "heat")) { /* the guardian's state (docs/sysd.md#heat) */
         client_say(c, "heat %s", heat_on ? guard_state(&guard) : "off");
     } else if (!strcmp(line, "heat cancel")) { /* the load warning's Cancel, from a UI that is not Q2UI/1's */
@@ -818,6 +823,51 @@ static void idle_poll(unsigned long long t) {
         say("unused %d s: auto standby", standby_s);
         standby();
         use_now(); /* stock's device_standby: the times whole from the resume */
+    }
+}
+
+/* ---- the jacks (docs/sysd.md#the-jacks) ----
+ * Stock's check_headset_status (0x4f335c, once a second): PA07 the 3.5 mm jack, PA08 the 4.4 mm, 0 plugged, read here
+ * through the kernel's GPIO class (port A's base is 0). A plug counts at once; an unplug only when a read at least
+ * JACK_UNPLUG_MS after the first unplugged one still says so (today's Vamp's jack_detect.c: powering the DAC up reads
+ * PA07 unplugged for about 120 ms with a cable in). At an unplug that counts, music playing is paused, as stock's
+ * config_po_output and config_bal_output do whatever the output. */
+#define JACK_UNPLUG_MS 300
+static const int JACK_GPIO[2] = {7, 8};
+static const char *const JACK_WORD[2] = {"po", "bal"}, *const JACK_NAME[2] = {"3.5 mm", "4.4 mm"};
+static int jack_in[2] = {-1, -1};              /* 1 plugged, 0 not, -1 not read yet */
+static unsigned long long jack_out_at[2];      /* the first unplugged read not yet counted, 0 none */
+
+static int gpio_in(int n, int *v) {
+    char p[300];
+    snprintf(p, sizeof p, "%s/gpio%d/value", path("/sys/class/gpio"), n);
+    if (!read_int(p, v)) return 0;
+    char num[8];
+    snprintf(num, sizeof num, "%d", n);
+    write_text(path("/sys/class/gpio/export"), num); /* not exported yet: it stays an input, as it comes */
+    return read_int(p, v);
+}
+
+static void jack_poll(unsigned long long t) {
+    for (int i = 0; i < 2; ++i) {
+        int raw;
+        if (gpio_in(JACK_GPIO[i], &raw)) continue;
+        int plugged = raw == 0;
+        if (jack_in[i] < 0) {
+            jack_in[i] = plugged;
+            say("%s jack %s", JACK_NAME[i], plugged ? "plugged" : "unplugged");
+        } else if (plugged) {
+            if (jack_out_at[i]) say("%s jack: an unplugged read that did not last, ignored", JACK_NAME[i]);
+            jack_out_at[i] = 0;
+            if (!jack_in[i]) jack_in[i] = 1, say("%s jack plugged", JACK_NAME[i]), tell("jack %s 1", JACK_WORD[i]);
+        } else if (jack_in[i] && !jack_out_at[i]) {
+            jack_out_at[i] = t | 1;
+        } else if (jack_in[i] && t >= jack_out_at[i] + JACK_UNPLUG_MS) {
+            jack_in[i] = 0, jack_out_at[i] = 0;
+            say("%s jack unplugged", JACK_NAME[i]);
+            tell("jack %s 0", JACK_WORD[i]);
+            if (music_playing()) ask("/run/vamp/play.sock", "Q2PLAY/1", "pause");
+        }
     }
 }
 
@@ -1073,6 +1123,7 @@ int main(int argc, char **argv) {
                 set_screen(0);
             }
             idle_poll(t);
+            jack_poll(t);
         }
         heat_poll(t);
         if (usb_mode == USB_CAR) car_poll();

@@ -320,6 +320,24 @@ def hot_reload_check(fs, log):
     q2play(fs, 'resume')
     return before, after, bool(pids) and restarted
 
+def sys_heat(fs):
+    """Q2SYS/1's heat answer from the booted image's q2sysd (docs/sysd.md#heat), or what went wrong"""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(10)
+        s.connect(str(fs/'run/vamp/sys.sock'))
+        f = s.makefile('rw')
+        out = []
+        for line in ('Q2SYS/1', 'heat'):
+            f.write(line + '\n')
+            f.flush()
+            out.append(f.readline().strip())
+        s.close()
+        return out[-1]
+    except OSError as e:
+        return repr(e)
+
+
 def sysd_checks(fs, power_key, log):
     """q2sysd in the booted image (docs/sysd.md): the battery's file from the CW2015's, a press of the power key on a
     device of its own (a FIFO: q2ui leaves an unnamed one alone) turning the screen off and on, and a hold of it
@@ -328,8 +346,8 @@ def sysd_checks(fs, power_key, log):
     bl = fs/'sys/class/backlight/lcd/bl_power'
     text = (fs/'run/vamp/battery').read_text() if (fs/'run/vamp/battery').exists() else ''
     check('level=64' in text and 'mv=3800' in text, f'q2sysd: /run/vamp/battery from the CW2015 ({text.split() or "none"})')
-    check(b'q2sysd: heat: /dev/i2c-6 does not open' in log.read_bytes(),
-          "q2sysd: heat watches the load with no PMIC to read (the emulator's)")
+    got = sys_heat(fs)
+    check(got in ('heat pending', 'heat ok', 'heat nosensor'), f"q2sysd: heat watches, with no PMIC to read here ({got})")
     fd = os.open(power_key, os.O_RDWR | os.O_NONBLOCK)
 
     def key(value):  # the guest's input_event: o32 with a 64-bit time_t gets the kernel's 32-bit longs, 16 bytes
@@ -659,8 +677,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             launch_check(fs)
         if card and proc.poll() is None:
             outer_check(outer, emu/'record', outer_adbd)
-            check(b'q2sysd: heat: a card boot' in (emu/'record').read_bytes(),
-                  "q2sysd: no heat of its own on a card boot (today's Vamp's q2guard owns the PMIC's window)")
+            got = sys_heat(fs)
+            check(got == 'heat off', f"q2sysd: no heat of its own on a card boot, today's Vamp's q2guard's ({got})")
             if not outer_adbd:
                 adb_checks(fs, emu/'data/adb_keys')
         if not card and proc.poll() is None:
