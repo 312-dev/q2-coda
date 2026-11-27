@@ -1242,3 +1242,79 @@ def test_the_tap_s_layout_is_peq_h_s():
     assert fields(ours) == fields(peq) and len(fields(peq)) > 20
     for name in ('CAST_MAGIC', 'CAST_RING', 'CAST_STALE'):
         assert re.search(rf'#define {name} (\w+)', ours).group(1) == re.search(rf'#define {name} (\w+)', peq).group(1), name
+
+
+# ---- Car Remote's fields (docs/playd.md#car-remote): what coda-rc reads of the now and queue files ----
+
+def queue_file(root, wait=1.0):
+    time.sleep(wait)  # written with the now file, at most every NOW_EVERY_MS
+    lines = (root/'tmp/coda-rc.queue').read_text().splitlines()
+    return tuple(map(int, lines[0].split())), lines[1:]
+
+
+def send(root, *lines):
+    """FIFO lines with seqs of their own ("<seq> <verb>"), as coda-rc numbers its commands"""
+    fd = os.open(root/'tmp/coda-rc.cmdq', os.O_WRONLY | os.O_NONBLOCK)
+    for line in lines:
+        os.write(fd, f'{line}\n'.encode())
+    os.close(fd)
+
+
+def test_the_now_file_s_seq_moves_with_each_change_and_carries_car_remote_s_fields(run):
+    """coda-rc reads Now Playing again only when seq= moved (coda_rc.c np_read), so q2playd writes it first, as demo's
+    shim does (coda_rc_shim.c cr_now), with the queue's place and length, its generation and list, the modes, the
+    path and hearts -1 (a song q2playd cannot rate)"""
+    root, pl = run
+    play_list(root, [1, 2, 3], 1)
+    pl.pump()
+    text = (root/'tmp/coda-rc.now').read_text()
+    a = now(root)
+    assert text.startswith('seq='), text
+    assert (a['qpos'], a['qlen'], a['shuffle'], a['repeat'], a['hearts']) == ('1', '3', '0', '0', '-1'), a
+    assert a['path'] == '/mnt/mmc/Music/b.mp3' and a['qgen'] == str(queue_file(root)[0][0]), a
+    assert now(root)['seq'] == a['seq'], 'nothing changed: the same seq'
+    fifo(root, 'next')
+    pl.pump()
+    b = now(root)
+    assert int(b['seq']) > int(a['seq']) and b['qpos'] == '2' and b['id'] == '3', b
+    assert b['qlist'] == a['qlist'], 'a next is the same queue'
+    play_list(root, [5, 1], 0)
+    pl.pump()
+    assert now(root)['qlist'] != a['qlist'], 'a new play is another queue'
+
+
+def test_the_queue_file_lists_the_play_order_from_the_song_playing(run):
+    """coda_rc_shim.c cr_queue: "gen place lines", then a song's library id a line, in the order it plays (a shuffle's
+    too), rewritten with gen moved only when it changes; coda-rc's GetQueue reads it (coda_rc_lib.c)"""
+    root, pl = run
+    play_list(root, [1, 2, 3, 5], 2, shuffle=1)
+    pl.pump()
+    (gen, place, lines), ids = queue_file(root)
+    assert (place, lines, ids[0], sorted(ids)) == (0, 4, '3', ['1', '2', '3', '5']), (gen, place, ids)
+    fifo(root, 'next')
+    pl.pump()
+    (gen2, place2, _), ids2 = queue_file(root)
+    assert (gen2, place2, ids2) == (gen + 1, 1, ids), (gen2, place2, ids2)
+    pl.info = '900000|44100|200|12|FLAC|16'
+    pl.pump(1.5)  # the position moves; the queue does not
+    assert queue_file(root)[0] == (gen2, 1, 4)
+
+
+def test_a_jump_plays_that_line_of_the_queue_and_a_stale_one_is_refused(run):
+    """coda_rc.c queue_item sends "jump INDEX ID" for a row of GetQueue's list; the song plays if that line still holds
+    it, else the answer is 3, as the shim's cr_jump gives (the phone's queue is stale)"""
+    root, pl = run
+    play_list(root, [1, 2, 3], 0)
+    pl.pump()
+    queue_file(root)  # the lines the phone was given
+    send(root, '40 jump 2 3')
+    pl.pump()
+    assert wait_for_value(lambda: acks(root)[:1], [(40, 0)]), acks(root)
+    assert pl.songs()[-1][1] == '/mnt/mmc/Music/c%0x7dd.flac' and now(root)['qpos'] == '2'
+    send(root, '41 jump 1 5', '42 jump 7 1')
+    assert wait_for_value(lambda: acks(root)[:2], [(42, 3), (41, 3)]), acks(root)
+    send(root, '43 pause')
+    pl.pump()
+    send(root, '44 jump 2 3')  # the one playing, paused: it plays on where it was
+    pl.pump()
+    assert wait_for_value(lambda: acks(root)[:1], [(44, 0)]) and pl.names()[-1] == 'mcl-play', pl.got[-3:]

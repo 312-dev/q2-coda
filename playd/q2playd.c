@@ -87,7 +87,10 @@ static struct {
     int np;
     int offline;                 /* the list played by q2playd itself: its server rows by their offline copies */
     unsigned seq;                /* moves with every change of what is written */
+    unsigned list;               /* moves with each new queue (a play, a source's start and end): the now file's qlist */
 } q = {.volume = 24};
+/* the queue file's (queue_write): its gen and content's hash, and its lines' first index into the play order and count */
+static struct { unsigned gen, hash; int start, listed; } ql;
 
 /* A server list's answer as it grows (docs/playd.md#the-answer-as-it-grows): the app's m3u, read again when it changes,
  * its entries taken in order up to the first whose file is not there yet (want), as the firmware's m3u_songs. next
@@ -938,7 +941,7 @@ static int play_ids(const int *ids, int n, int at, int shuffle) {
     if (n <= 0 || at < 0 || at >= n) return -1;
     if (n > QUEUE_MAX) n = QUEUE_MAX;
     memcpy(q.ids, ids, (size_t)n * sizeof *ids);
-    q.n = n, q.shuffle = shuffle, q.errors = 0;
+    q.n = n, q.shuffle = shuffle, q.errors = 0, ++q.list;
     for (int i = 0; i < n; ++i) q.order[i] = i;
     if (shuffle) {
         rnd ^= (unsigned)now_ms();
@@ -1039,7 +1042,7 @@ static int command(const char *verb, const int *ids, int n_ids) {
 /* The FIFO: "<seq> <verb>\n" lines (patch/coda_rc_cmdq.h). Each is answered in /tmp/coda-rc.ack as demo's shim answers
  * it (coda_rc_shim.c cr_ack): a "<seq> <code>" line for it and the three before it, newest first, the file replaced
  * whole, so the coda-rc daemon and q2-iap, which wait for their seq there (coda_rc.c ack_poll), each find theirs though
- * they read it once for several. The code is 0 done, 1 not done. */
+ * they read it once for several. The code is 0 done, 1 not done, 3 a jump to a line that no longer holds its song. */
 #define ACKS 4 /* coda_rc_shim.c CR_ACKS */
 static const char *ack_rel = "/tmp/coda-rc.ack";
 static unsigned long acks[ACKS][2];
@@ -1056,6 +1059,17 @@ static void ack(unsigned long seq, int code) {
     if (fclose(f) == 0) rename(tmp, path(ack_rel));
 }
 
+/* Car Remote's "jump INDEX ID" (coda_rc.c queue_item), the FIFO's alone: line INDEX of the queue file played if it
+ * still holds song ID, as a View Queue row plays it (coda_rc_shim.c cr_jump): the one playing plays on, paused or
+ * not; else 3, the phone's queue stale. */
+static int jump(int line, int id) {
+    int at = ql.start + line;
+    if (src.on || line < 0 || line >= ql.listed || at >= q.n || (q.paths ? 0 : q.ids[q.order[at]]) != id) return 3;
+    if (at == q.at && q.loaded) return q.state == PAUSED ? command("resume", 0, 0) : 0;
+    q.errors = 0;
+    return start_at(at) ? 1 : 0;
+}
+
 static char cq[2048];
 static size_t cq_n;
 static void cmdq_read(void) {
@@ -1066,9 +1080,9 @@ static void cmdq_read(void) {
     while ((nl = memchr(p, '\n', cq_n - (size_t)(p - cq)))) {
         *nl = 0;
         char *verb = strchr(p, ' ');
-        int r = verb ? command(verb + 1, 0, 0) : -1;
+        int a, b, r = !verb ? -1 : sscanf(verb + 1, "jump %d %d", &a, &b) == 2 ? jump(a, b) : command(verb + 1, 0, 0);
         if (verb && r) logf_("refused: %s", verb + 1);
-        if (verb) ack(strtoul(p, 0, 10), r ? 1 : 0);
+        if (verb) ack(strtoul(p, 0, 10), r == 3 ? 3 : r ? 1 : 0);
         p = nl + 1;
     }
     cq_n -= (size_t)(p - cq);
@@ -1103,13 +1117,73 @@ static void now_text(char *out, size_t room, const char *sep, int encode) {
              q.state, sep, encode ? q.pos_ms / 1000 : q.pos_ms, sep, q.len_s, sep, q.volume, sep, id);
 }
 
+/* Car Remote's view of the queue (coda_rc_shim.c cr_queue, read by coda_rc_lib.c's GetQueue): /tmp/coda-rc.queue,
+ * "gen place lines" and then a line a song in the order it plays (a shuffle's too), its library id, or for a
+ * played-as-paths song 0 and its path, title and artist after tabs (the names blank: q2playd knows a path's names
+ * only while it plays); a queue past QUEUE_LISTED songs as the QUEUE_LISTED around the one playing. Rewritten, gen
+ * moved, only when that changes; the now file's qpos, qlen and qgen are its place, lines and gen. */
+#define QUEUE_LISTED 5000 /* coda_rc_shim.c CR_QUEUE_MAX */
+static const char *queue_rel = "/tmp/coda-rc.queue";
+
+static unsigned fnv(unsigned h, const void *p, size_t n) {
+    for (size_t i = 0; i < n; ++i) h = (h ^ ((const unsigned char *)p)[i]) * 16777619u;
+    return h;
+}
+
+static void queue_write(void) {
+    int n = q.n, start = 0, listed = n < QUEUE_LISTED ? n : QUEUE_LISTED;
+    if (n > QUEUE_LISTED) {
+        start = q.at - QUEUE_LISTED / 2;
+        if (start > n - QUEUE_LISTED) start = n - QUEUE_LISTED;
+        if (start < 0) start = 0;
+    }
+    unsigned h = fnv(fnv(fnv(2166136261u, &q.list, sizeof q.list), &start, sizeof start), &q.at, sizeof q.at);
+    size_t cap = 40;
+    for (int i = 0; i < listed; ++i) {
+        int id = q.paths ? 0 : q.ids[q.order[start + i]];
+        h = fnv(h, &id, sizeof id);
+        if (q.paths) h = fnv(h, q.paths[start + i], strlen(q.paths[start + i])), cap += strlen(q.paths[start + i]) + 4;
+        cap += 12;
+    }
+    ql.start = start, ql.listed = listed;
+    if (ql.gen && h == ql.hash) return;
+    char *b = malloc(cap), tmp[340];
+    if (!b) return;
+    size_t len = (size_t)snprintf(b, cap, "%u %d %d\n", ql.gen + 1, q.at - start, listed);
+    for (int i = 0; i < listed; ++i) {
+        if (!q.paths) {
+            len += (size_t)snprintf(b + len, cap - len, "%d\n", q.ids[q.order[start + i]]);
+            continue;
+        }
+        b[len++] = '0', b[len++] = '\t';
+        for (const char *c = q.paths[start + i]; *c; ++c) b[len++] = *c == '\t' || *c == '\n' || *c == '\r' ? ' ' : *c;
+        b[len++] = '\t', b[len++] = '\t', b[len++] = '\n';
+    }
+    snprintf(tmp, sizeof tmp, "%s.q2playd", path(queue_rel));
+    FILE *f = fopen(tmp, "w");
+    if (f) {
+        fwrite(b, 1, len, f);
+        if (fclose(f) == 0 && rename(tmp, path(queue_rel)) == 0) ++ql.gen, ql.hash = h;
+    }
+    free(b);
+}
+
+/* The now file: seq= first, a count that moves with each change (coda-rc reads the rest only when it moved:
+ * coda_rc.c np_read), what plays, then Car Remote's fields as demo's shim writes them (coda_rc_shim.c cr_now): the
+ * modes (no repeat here: 0), hearts -1 (no ratings here: a song that cannot be rated), the queue file's place, lines
+ * and gen, qlist (the queue itself), and the playing file's path. */
 static void now_write(void) {
+    static unsigned writes;
     char text[2600], tmp[340];
+    queue_write();
     now_text(text, sizeof text, "\n", 0);
     snprintf(tmp, sizeof tmp, "%s.q2playd", path(now_path_rel));
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "%s\n", text);
+    fprintf(f, "seq=%u\n%s\nshuffle=%d\nrepeat=0\nhearts=-1\nqpos=%d\nqlen=%d\nqgen=%u\nqlist=%u\npath=", ++writes, text,
+            q.shuffle != 0, q.at - ql.start, ql.listed, ql.gen, q.list);
+    for (const char *c = q.file; *c; ++c) fputc(*c == '\n' || *c == '\r' ? ' ' : *c, f);
+    fputc('\n', f);
     if (fclose(f) == 0) rename(tmp, path(now_path_rel)); /* whole or not at all */
 }
 
@@ -1164,7 +1238,7 @@ static void source_end(const char *why) {
     src.on = 0;
     memcpy(q.ids, src.ids, (size_t)src.n * sizeof *q.ids), memcpy(q.order, src.order, (size_t)src.n * sizeof *q.order);
     q.n = src.n, q.at = src.at, q.shuffle = src.shuffle, q.offline = src.offline, q.paths = src.paths, q.np = src.np, src.paths = 0, src.np = 0;
-    q.loaded = 0, q.errors = 0;
+    q.loaded = 0, q.errors = 0, ++q.list;
     q.state = src.state == STOPPED || (why && !strcmp(why, "stop")) || !q.n ? STOPPED : PAUSED;
     q.pos_ms = q.state == PAUSED ? src.pos_ms : 0, q.len_s = q.state == PAUSED ? src.len_s : 0;
     q.title[0] = q.artist[0] = q.album[0] = q.file[0] = q.row_url[0] = 0;
@@ -1205,7 +1279,7 @@ static int source_take(int slot, const char *args) {
         src.paths = q.paths, src.np = q.np, q.paths = 0, q.np = 0;
     } else if (src.holder != slot) tell_holder("taken");
     src.on = 1, src.holder = slot, cp.on = 0;
-    q.n = 0, q.at = 0;
+    q.n = 0, q.at = 0, ++q.list;
     snprintf(q.file, sizeof q.file, "%s", url);
     const char *base = strrchr(url, '/');
     snprintf(q.title, sizeof q.title, "%s", *t ? t : base + 1);
