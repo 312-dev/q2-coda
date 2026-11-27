@@ -26,21 +26,11 @@ Run from the card by today's Vamp ([card boot](vamp-os-base.md#card-boot)), Wi-F
 
 ## Q2NET/1
 
-On `/run/vamp/net.sock` (mode 0600), the shape of [Q2PLAY/1](playd.md#q2play1): `Q2NET/1` first, answered `Q2NET/1 ok`. Free text (SSIDs, passphrases) is percent-encoded both ways, as Q2PLAY/1's fields are.
-
-| Line | Answer |
-| --- | --- |
-| `status` | `status state=off\|searching\|scanning\|associated\|connected ssid=... ip=... smart=0\|1 held=SECONDS` |
-| `scan` | the radio on (a 5 minute hold), then an `ap ssid=... signal=DBM secure=0\|1` line each and `ok` |
-| `networks` | a `network ssid=...` line each saved network, `ok` |
-| `add SSID PASSPHRASE`, `add SSID` | `ok`, `err saved already`, `err network` |
-| `forget SSID` | `ok`, `err no such network` |
-| `wake`, `hold S`, `off`, `smart on\|off` | `ok` |
-| `watch` | `ok`; then `status ...` and `radio on\|off` lines as they change |
+On `/run/vamp/net.sock`: its protocol is Vamp API 1's network page, [Q2NET/1](platform/network.md), with its commands, events, capability words and the transcripts its conformance test replays here.
 
 ## Tests
 
-`python3 test/netd.py` (pytest) runs `q2netd` for this machine with a stand-in `wpa_supplicant` (a Python program on its control socket: `STATUS`, `SCAN`, `SCAN_RESULTS`, `RECONFIGURE`) and logging commands for `ifconfig` and `udhcpc`: the radio on with a saved network and `udhcpc` only after `COMPLETED`, off with none; Smart Wi-Fi going off after the boot hold, `wake`, `hold`, the use mark's 30 minutes and `smart off`; `add` and `forget` against a file whose other lines must survive, with UTF-8 and spaces in a name and each refusal; a scan's names encoded; another version refused. Copies without the idle off, starting `udhcpc` before association, quoting anything, or ignoring the use mark each fail it (`Q2NETD_SOURCE`). Two card-boot cases (today's `wpa_supplicant` running: left alone and `off` refused; none: brought up and kept up past the idle time) are in it too, and copies that ignore the running one or accept `off` fail them. `test/os_image.py`'s boot: the image's `q2netd` answers Q2NET/1, and after the boot's adb check the Wi-Fi adbd's login holds the radio on for about 30 minutes. Its card boot runs as a Q2 would, rcS and `runsvdir` in the sandbox beside stand-ins for today's Vamp's `wpa_supplicant`, `udhcpc` and Wi-Fi adbd on 5555, with networks saved: `q2netd` reports `external`, both stand-ins still run, port 5555 still answers as the outer adbd, there is one `wpa_supplicant` and no `ifconfig` was run. Without `--card-boot` (`--perturb netd-card`) it brings `wlan0` up beside them and both checks fail; `--perturb netd-off` fails the first.
+`python3 test/netd.py` (pytest) runs `q2netd` for this machine with a stand-in `wpa_supplicant` (a Python program on its control socket: `STATUS`, `SCAN`, `SCAN_RESULTS`, `RECONFIGURE`) and logging commands for `ifconfig` and `udhcpc`: the radio on with a saved network and `udhcpc` only after `COMPLETED`, off with none; Smart Wi-Fi going off after the boot hold, `wake`, `hold`, the use mark's 30 minutes and `smart off`; `add` and `forget` against a file whose other lines must survive, with UTF-8 and spaces in a name and each refusal; a scan's names encoded; another version refused. Copies without the idle off, starting `udhcpc` before association, quoting anything, or ignoring the use mark each fail it (`Q2NETD_SOURCE`). Two card-boot cases (today's `wpa_supplicant` running: left alone and `off` refused; none: brought up and kept up past the idle time) are in it too, and copies that ignore the running one or accept `off` fail them. `test/os_image.py`'s boot: the image's `q2netd` answers Q2NET/1, and after the boot's adb check the Wi-Fi adbd's login holds the radio on for about 30 minutes. Its card boot runs as a Q2 would, rcS and `runsvdir` in the sandbox beside stand-ins for today's Vamp's `wpa_supplicant`, `udhcpc` and Wi-Fi adbd on 5555, with networks saved: `q2netd` reports `external`, both stand-ins still run, port 5555 still answers as the outer adbd, there is one `wpa_supplicant` and no `ifconfig` was run. Without `--card-boot` (`--perturb netd-card`) it brings `wlan0` up beside them and both checks fail; `--perturb netd-off` fails the first. Its `test_conformance_*` tests replay [network.md](platform/network.md)'s transcripts against it and check that every capability word is sent by one ([conformance](platform/README.md#conformance)).
 
 ## Needs a Q2
 

@@ -4,6 +4,7 @@
  *     q2pkgd install [--card DIR]                             the staged image put where Shanling's recovery reads it
  *     q2pkgd restore [--card DIR]                             at boot, first: the rescue copy put back in recovery-update/
  *     q2pkgd confirm [--card DIR]                             after a good boot: the same, and the install no longer pending
+ *     q2pkgd app-check DIR                                    an app's folder and its q2app manifest (docs/platform/packages.md)
  *
  * The card's recovery-update/ (xImage and rootfs.squashfs, stock's) is the owner's only way back when a boot fails:
  * hold Previous and power on with Centre, and Shanling's recovery flashes it. So nothing here leaves the card without a
@@ -27,6 +28,12 @@
  *   confirm  restore, then pending removed. Vamp OS runs it once its services have been up a minute (/etc/sv/q2pkgd-confirm).
  *
  * It writes no flash and marks nothing for the recovery: flashing is Shanling's recovery's, started by the owner's keys.
+ *
+ *   app-check  DIR is an app's folder (.<id>). Its q2app is checked as Vamp API 1's manifest: one with none of api=,
+ *            version=, kind=, entry= and permissions= is an API 0 app (today's card apps, run as today); any other names
+ *            api=1, a version of dotted numbers, a known kind, an entry that is a program in the folder (for every kind
+ *            but theme and language), and only known permissions, screen for a game alone and background for every
+ *            service. It says what the app is and may do, or the first thing wrong. It installs nothing.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -370,10 +377,84 @@ static int restore(const char *card, int and_confirm) {
     return 0;
 }
 
+/* ---- app manifests (docs/platform/packages.md) ---- */
+
+#define API_SERVED 1
+static const char *const KINDS[] = {"browse", "toolkit", "game", "service", "theme", "language", "provider", 0};
+static const char *const PERMISSIONS[] = {"playback", "library", "library-write", "settings", "network-hold",
+                                          "screen", "music-files", "background", 0};
+
+static int listed(const char *const *list, const char *w, size_t n) {
+    for (int i = 0; list[i]; ++i)
+        if (strlen(list[i]) == n && !strncmp(list[i], w, n)) return 1;
+    return 0;
+}
+
+static int app_check(const char *dir) {
+    char path[700], *text;
+    const char *base = strrchr(dir, '/') ? strrchr(dir, '/') + 1 : dir;
+    struct { char name[200], api[16], version[64], kind[32], entry[600], permissions[400]; int api_n, new_keys; } m = {0};
+    if (base[0] != '.' || !base[1]) return fail("%s: an app's folder is .<id>", dir);
+    for (const char *c = base + 1; *c; ++c)
+        if (!(*c >= 'a' && *c <= 'z') && !(*c >= '0' && *c <= '9') && *c != '-') return fail("%s: an app id is a-z, 0-9 and -", dir);
+    snprintf(path, sizeof path, "%s/q2app", dir);
+    size_t n;
+    if (!(text = slurp(path, &n))) return fail("%s: no q2app", dir);
+    for (char *l = strtok(text, "\n"); l; l = strtok(0, "\n")) {
+        l[strcspn(l, "\r")] = 0;
+        char *eq = strchr(l, '=');
+        if (!eq || *l == '#') continue;
+        *eq = 0;
+        const char *k = l, *v = eq + 1;
+        struct { const char *key; char *to; size_t room; int new_key; } keys[] = {
+            {"name", m.name, sizeof m.name, 0}, {"api", m.api, sizeof m.api, 1}, {"version", m.version, sizeof m.version, 1},
+            {"kind", m.kind, sizeof m.kind, 1}, {"entry", m.entry, sizeof m.entry, 1},
+            {"permissions", m.permissions, sizeof m.permissions, 1}};
+        for (unsigned i = 0; i < sizeof keys / sizeof *keys; ++i)
+            if (!strcmp(k, keys[i].key)) snprintf(keys[i].to, keys[i].room, "%s", v), m.new_keys |= keys[i].new_key;
+    }
+    free(text);
+    if (!*m.name) return fail("q2app: no name=");
+    if (!m.new_keys) return printf("app %s: %s, API 0 (a card app as today)\n", base + 1, m.name), 0;
+    char *end;
+    long api = strtol(m.api, &end, 10);
+    if (!*m.api || *end || api < 1) return fail("q2app: api= is the lowest Vamp API it needs, a number from 1");
+    if (api > API_SERVED) return fail("q2app: needs API %ld; this Vamp OS serves API %d", api, API_SERVED);
+    if (!*m.version || strspn(m.version, "0123456789.") != strlen(m.version) || m.version[0] == '.' ||
+        m.version[strlen(m.version) - 1] == '.' || strstr(m.version, ".."))
+        return fail("q2app: version= is dotted numbers (1.4.2)");
+    if (!listed(KINDS, m.kind, strlen(m.kind))) return fail("q2app: kind=%s is not a kind", m.kind);
+    int data_only = !strcmp(m.kind, "theme") || !strcmp(m.kind, "language");
+    if (data_only && *m.entry) return fail("q2app: a %s is data and has no entry=", m.kind);
+    if (!data_only) {
+        size_t prog = strcspn(m.entry, " ");
+        char exe[800];
+        struct stat st;
+        if (!prog) return fail("q2app: a %s needs entry= (its program in the folder, then its arguments)", m.kind);
+        if (m.entry[0] == '/' || strstr(m.entry, "..") || strpbrk(m.entry, "|&;<>$`\\\"'*?(){}"))
+            return fail("q2app: entry= is a program in the app's folder and plain arguments, run with no shell");
+        snprintf(exe, sizeof exe, "%s/%.*s", dir, (int)prog, m.entry);
+        if (stat(exe, &st) || !S_ISREG(st.st_mode)) return fail("q2app: entry= names %.*s, which is not in the folder", (int)prog, m.entry);
+    }
+    int screen = 0, background = 0;
+    for (const char *w = m.permissions; *w;) {
+        size_t k = strcspn(w, ",");
+        if (!k || !listed(PERMISSIONS, w, k)) return fail("q2app: %.*s is not a permission", (int)(k ? k : 1), k ? w : ",");
+        screen |= k == 6 && !strncmp(w, "screen", 6), background |= k == 10 && !strncmp(w, "background", 10);
+        w += k + (w[k] == ',');
+    }
+    if (screen && strcmp(m.kind, "game")) return fail("q2app: screen is a game's permission alone");
+    if (!strcmp(m.kind, "service") && !background) return fail("q2app: a service runs in the background: it needs permissions=background");
+    printf("app %s: %s %s, a %s for API %ld, may use: %s\n", base + 1, m.name, m.version, m.kind, api, *m.permissions ? m.permissions : "nothing");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     const char *rootfs = "/", *card = "/mnt/mmc", *usage =
-        "usage: q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR] | install | restore | confirm [--card DIR]\n";
+        "usage: q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR] | install | restore | confirm [--card DIR]"
+        " | app-check DIR\n";
     if (argc < 2) return fputs(usage, stderr), 2;
+    if (!strcmp(argv[1], "app-check")) return argc == 3 ? app_check(argv[2]) : (fputs(usage, stderr), 2);
     int first = !strcmp(argv[1], "stage") ? 3 : 2;
     if (first > argc) return fputs(usage, stderr), 2;
     for (int i = first; i < argc; ++i) {

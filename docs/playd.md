@@ -36,28 +36,7 @@ A song's `set-songurl` is built as `demo`'s `mclStartPlayer` builds it: the path
 
 ## Q2PLAY/1
 
-The socket the UI is meant to move to, the shape the roadmap gives every service ([Process model](vamp-os.md#process-model)): line-framed text, a versioned first line, a reply to every command, and a subscription in place of a file to poll. `ui/player.c` and `ui/now.c` say they are what changes when `q2ui` stops going through `demo`'s queue; with this socket `player_send` becomes one line written and its `ok` read, and `now_read` the `now` lines a `watch` delivers, with no inotify on `/tmp`.
-
-```text
-> Q2PLAY/1                 the client's first line; anything else is "err version" and the connection closes
-< Q2PLAY/1 ok
-> play 0 1 3               then the three ids, a line each
-> 12
-> 40
-> 7
-< ok
-> watch                    from now on, a "now" line at each change (as the now file's, at most twice a second)
-< ok
-< now title=Beta artist=Bob album=First%20Light state=1 pos=0 len=0 volume=24 id=12
-> volume 30
-< ok
-> bogus
-< err bogus
-```
-
-`now` alone answers one such line. At most 8 clients at once; a line from a client is 512 bytes at most. The socket is mode 0600, root's: the permission check is the file's ([Permissions and isolation](vamp-os.md#permissions-and-isolation) will give it a group).
-
-**Fields.** A `now` line is `now` and then `key=value` fields separated by single spaces, in this order: `title`, `artist`, `album`, `state`, `pos`, `len`, `volume`, `id`. The free-text values (`title`, `artist`, `album`, which come from tags and can hold anything) are percent-encoded: every byte below `0x21` (space, line ends, other controls), `%`, `"`, `=` and `0x7f` is `%` and two upper-case hex digits; every other byte, UTF-8 included, is as it is. So no value holds a space, a line end or an `=`: a client splits the line on spaces, each field at its first `=`, and URL-decodes the value (`urllib.parse.unquote`, `decodeURIComponent`). A title `Cut state=2` is `title=Cut%20state%3D2`. The numbers are plain decimal. Commands carry no free text, so nothing a client sends is decoded. The now file for `q2ui` keeps the shim's format, a field a line and no encoding, with any line end or other control byte in a value made a space.
+The socket the UI is meant to move to, `/run/vamp/play.sock`. Its protocol is Vamp API 1's playback page, [Q2PLAY/1](platform/playback.md), with its commands, its `now` fields and their encoding, its capability words and the transcripts its conformance test replays here. `ui/player.c` and `ui/now.c` say they are what changes when `q2ui` stops going through `demo`'s queue; with this socket `player_send` becomes one line written and its `ok` read, and `now_read` the `now` lines a `watch` delivers, with no inotify on `/tmp`. The now file for `q2ui` keeps the shim's format, a field a line and no encoding, with any line end or other control byte in a value made a space.
 
 ## The volume
 
@@ -94,7 +73,7 @@ At each song's start its cover is copied to `/tmp/externpic.jpg`, where stock's 
 
 ## Tests
 
-`python3 test/playd.py` (pytest) builds `q2playd` for this machine against its own SQLite and runs it under a temporary root with a stand-in for `q2player` on its socket: a play from the FIFO and list file and its `set-songurl` byte for byte, the cache by kind and the brace's escape, an end playing the next and the queue's end stopping, a failed song and a missing id passed over, `next` cutting without a double advance, `toggle`, `previous`'s two ways, the position and length from `media-info`, the volume's range, a player that goes away and one that comes back, shuffle's order, the volume (its start from `config.ini` and Default Volume, the DAC's ioctl recorded by an `LD_PRELOAD` stand-in, Max Volume's cap, the save changing one line), and Q2PLAY/1's greeting, refusal of another version, play, `now` and `watch`, and a title holding ` state=`, `=`, `%` and a line end that a client splits back exactly while the now file keeps it on one line; server songs: a list handed to its app as a catplay byte for byte with nothing played until its m3u answers and then the m3u's songs in turn, an unanswered catplay playing the card songs from the chosen one after 4 s, an app not listening getting no catplay and the card songs at once, and an answer to another seq not taken; the cover copied for a song with one and removed for the next without, and a Stream Cache copy showing its server row's title, artist, album and cover. Copies of `q2playd.c` with the escape, the advance at a song's end, the cut, the watchers' message, the field encoding, the DAC's two bytes, the cap, Default Volume, the catplay, its seq check, the card-only fallback, the cover, its removal or the Stream Cache lookup removed each fail it (`Q2PLAYD_SOURCE`). `test/os_image.py`'s boot runs the image's own `q2playd` and `q2player` under QEMU: `q2player` connects, and a play asked for over Q2PLAY/1 reaches it and its end comes back (here "did not play": the emulator has no sound card). With the `q2playd` service replaced (`--perturb playd-off`) both checks fail.
+`python3 test/playd.py` (pytest) builds `q2playd` for this machine against its own SQLite and runs it under a temporary root with a stand-in for `q2player` on its socket: a play from the FIFO and list file and its `set-songurl` byte for byte, the cache by kind and the brace's escape, an end playing the next and the queue's end stopping, a failed song and a missing id passed over, `next` cutting without a double advance, `toggle`, `previous`'s two ways, the position and length from `media-info`, the volume's range, a player that goes away and one that comes back, shuffle's order, the volume (its start from `config.ini` and Default Volume, the DAC's ioctl recorded by an `LD_PRELOAD` stand-in, Max Volume's cap, the save changing one line), and Q2PLAY/1's greeting, refusal of another version, play, `now` and `watch`, and a title holding ` state=`, `=`, `%` and a line end that a client splits back exactly while the now file keeps it on one line; server songs: a list handed to its app as a catplay byte for byte with nothing played until its m3u answers and then the m3u's songs in turn, an unanswered catplay playing the card songs from the chosen one after 4 s, an app not listening getting no catplay and the card songs at once, and an answer to another seq not taken; the cover copied for a song with one and removed for the next without, and a Stream Cache copy showing its server row's title, artist, album and cover. Copies of `q2playd.c` with the escape, the advance at a song's end, the cut, the watchers' message, the field encoding, the DAC's two bytes, the cap, Default Volume, the catplay, its seq check, the card-only fallback, the cover, its removal or the Stream Cache lookup removed each fail it (`Q2PLAYD_SOURCE`). `test/os_image.py`'s boot runs the image's own `q2playd` and `q2player` under QEMU: `q2player` connects, and a play asked for over Q2PLAY/1 reaches it and its end comes back (here "did not play": the emulator has no sound card). With the `q2playd` service replaced (`--perturb playd-off`) both checks fail. Its `test_conformance_*` tests replay [playback.md](platform/playback.md)'s transcripts against it and check that every capability word is sent by one ([conformance](platform/README.md#conformance)).
 
 ## What is missing
 

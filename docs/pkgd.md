@@ -11,6 +11,9 @@ Vamp OS's update service ([roadmap: Installer and updates](vamp-os.md#installer-
 
 **It never writes flash.** The flash is written by Shanling's recovery when the owner starts it with the Q2's keys (hold Previous, power on with Centre: [README](../README.md#restoring-stock-firmware)). Marking `mtd6` and rebooting into the recovery, the roadmap's automatic hand-off, is not built, and is not to be built until the recovery has been tried on a unit ([First boot](vamp-os-base.md#first-boot-on-a-q2)).
 
+
+It also checks an app's folder and manifest, `q2pkgd app-check DIR`: Vamp API 1's [Packages](platform/packages.md), tested by `test/apps.py`; it installs nothing.
+
 ## The rescue copy
 
 The card's `recovery-update/` holds stock's `xImage` and `rootfs.squashfs` on purpose: the owner cannot reach the card by hand, and Shanling's recovery from it (Previous and Centre) is the only way back if a boot fails; `vamp recovery-stage` (`feat/vamp-cli`) puts it back after every install. So `q2pkgd` never leaves the card without a known-good `recovery-update/` while idle:

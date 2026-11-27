@@ -14,6 +14,9 @@ import time
 
 import pytest
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conformance  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE = pathlib.Path(os.environ.get('Q2SYSD_SOURCE') or ROOT/'sysd/q2sysd.c')
 KEY_POWER, KEY_VOLUMEUP, EV_KEY = 116, 115, 1
@@ -76,12 +79,15 @@ class Service(threading.Thread):
         while True:
             c, _ = self.s.accept()
             f = c.makefile('rw')
-            for line in f:
-                line = line.strip()
-                f.write((f'{self.version} ok' if line == self.version else 'ok') + '\n')
-                f.flush()
-                if line != self.version:
-                    self.lines.append(line)
+            try:
+                for line in f:
+                    line = line.strip()
+                    f.write((f'{self.version} ok' if line == self.version else 'ok') + '\n')
+                    f.flush()
+                    if line != self.version:
+                        self.lines.append(line)
+            except OSError:  # q2sysd went away mid-line (its end at a test's close)
+                pass
             c.close()
 
 
@@ -293,6 +299,19 @@ def test_standby_pauses_turns_off_and_resumes(run, card):
     assert got == ['screen off', 'standby', 'screen on', 'resumed']
     assert read(root, '/sys/power/state') == 'mem' and play.lines == ['pause']
     assert net.lines == ([] if card else ['off', 'wake']), "a card boot's Wi-Fi is never turned off"
+
+
+# ---- Vamp API 1 (docs/platform/system.md) ----
+
+def test_conformance_every_command_is_on_the_page():
+    conformance.check_coverage('system.md')
+
+
+@pytest.mark.parametrize('n', range(len(conformance.blocks('system.md'))))
+def test_conformance_system(run, n):
+    root, keys = run
+    play, net = Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
+    conformance.replay(root/'run/vamp/sys.sock', conformance.blocks('system.md')[n])
 
 
 if __name__ == '__main__':

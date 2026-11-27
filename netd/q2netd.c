@@ -16,7 +16,7 @@
  * none, the radio is brought up on the saved networks and kept up, Smart Wi-Fi and `off` refused.
  *
  * wpa_supplicant is spoken to over its control socket (/var/run/wpa_supplicant/wlan0: text commands, a datagram each).
- * Q2NET/1 on /run/vamp/net.sock (docs/netd.md#q2net1). --root prefixes paths; --wpa, --dhcp, --up and --down name the
+ * Q2NET/1 on /run/vamp/net.sock (docs/platform/network.md). --root prefixes paths; --wpa, --dhcp, --up and --down name the
  * commands, for test/netd.py. */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -286,7 +286,7 @@ static int forget_network(const char *ssid) {
 static struct client { int fd, hello, watch; char in[512]; size_t n; } cl[CLIENTS];
 static int api = -1;
 
-/* percent-encoding of a free-text value, as Q2PLAY/1's (docs/playd.md#q2play1) */
+/* percent-encoding of a free-text value, Vamp API 1's (docs/platform/README.md#the-common-shape) */
 static void enc(char *out, size_t room, const char *in) {
     static const char hex[] = "0123456789ABCDEF";
     size_t j = 0;
@@ -339,6 +339,8 @@ static void client_line(struct client *c, char *line) {
         if (strcmp(line, "Q2NET/1")) { client_say(c, "err version"); close(c->fd), c->fd = -1; return; }
         c->hello = 1;
         client_say(c, "Q2NET/1 ok");
+    } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
+        client_say(c, "caps status scan networks add forget wake hold off smart watch");
     } else if (!strcmp(line, "status")) {
         status_line(a, sizeof a);
         client_say(c, "%s", a);

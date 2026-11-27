@@ -13,6 +13,9 @@ import time
 
 import pytest
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conformance  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE = pathlib.Path(os.environ.get('Q2NETD_SOURCE') or ROOT/'netd/q2netd.c')
 CONF = 'ctrl_interface=/var/run/wpa_supplicant\nupdate_config=0\n\nnetwork={\n\tssid="Home"\n\tpsk="secret123"\n}\n'
@@ -253,6 +256,18 @@ def test_another_version_is_refused(run):
     root = run(conf=None)
     a = Api(root, 'Q2NET/2')
     assert a.line() == 'err version'
+
+
+# ---- Vamp API 1 (docs/platform/network.md) ----
+
+def test_conformance_every_command_is_on_the_page():
+    conformance.check_coverage('network.md')
+
+
+@pytest.mark.parametrize('n', range(len(conformance.blocks('network.md'))))
+def test_conformance_network(run, n):
+    root = run()
+    conformance.replay(root/'run/vamp/net.sock', conformance.blocks('network.md')[n])
 
 
 if __name__ == '__main__':

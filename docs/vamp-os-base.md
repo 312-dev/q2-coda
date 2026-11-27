@@ -95,7 +95,7 @@ The files of Shanling's the image needs at run time: the 24 modules, their 25 sc
 | The framebuffer as a file of two 320x375 pages, the keys and the wheel as FIFOs (no ioctl answers: `q2ui` takes the file's size) | `/proc/mtd`, UBI, the card, the panel's timing, vsync, the DAC, ALSA (no sound card: `q2player` never opens one here) |
 | The network: adb over Wi-Fi on this machine's loopback | Power, suspend, the watchdog, the PMIC's keys |
 
-The boot passes when the record shows, in this order: `/proc`, the tmpfs `/dev`, `mdev -s` and `mdev -d`, the data step (here: no `userdata` in `/proc/mtd`, so a tmpfs), the 24 `insmod` calls in the order and with the parameters Shanling's scripts give (read from the vendor files themselves), `modules: done`, `fb0: present` and `rcS: done`, all before either service starts; then `q2ui` draws into the framebuffer, `q2player` connects to the image's `q2playd`, and a song asked for over [Q2PLAY/1](playd.md#q2play1) reaches `q2player` and its end comes back ("did not play": no sound card), and adb over Wi-Fi keeps its key rules ([adb](#adb)), and `q2ui` comes back after being ended while `q2playd` keeps its song ([Hot reload](#hot-reload)).
+The boot passes when the record shows, in this order: `/proc`, the tmpfs `/dev`, `mdev -s` and `mdev -d`, the data step (here: no `userdata` in `/proc/mtd`, so a tmpfs), the 24 `insmod` calls in the order and with the parameters Shanling's scripts give (read from the vendor files themselves), `modules: done`, `fb0: present` and `rcS: done`, all before either service starts; then `q2ui` draws into the framebuffer, `q2player` connects to the image's `q2playd`, and a song asked for over [Q2PLAY/1](platform/playback.md) reaches `q2player` and its end comes back ("did not play": no sound card), and adb over Wi-Fi keeps its key rules ([adb](#adb)), and `q2ui` comes back after being ended while `q2playd` keeps its song ([Hot reload](#hot-reload)).
 
 ## Card boot
 
@@ -136,11 +136,12 @@ In the order it is needed:
 
 1. **A first run on a Q2**, from the card ([below](#first-boot-on-a-q2)): whether the kernel has loop devices, whether `q2ui` and `q2player` run on its kernel, then a boot from flash: whether the modules load under this init, whether the kernel has what it assumes (a tmpfs `/dev` and mdev, UBI, LZO squashfs), whether the watchdog runs.
 2. **The rescue page**, and a first-key Allow card in `q2ui`: until then a Q2 that trusts no computer is reached only by putting a key in the card's `adb_keys` ([adb](#adb)).
-3. The rest of `q2playd` and `q2libd` ([q2playd](playd.md#what-is-missing), [q2libd](libd.md#what-is-missing)): the rest of server songs, duplicates, playlists.
-4. **The rest of q2sysd** ([Needs a Q2](sysd.md#needs-a-q2) first): Standby, the screen's idle timeout, the jack and the DAC's power and volume, Charge Limit, heat, USB modes.
-5. **The rest of the installer** ([q2pkgd](pkgd.md)): its first slice checks, composes and stages a signed release (the image's own `mksquashfs` composes the build machine's bytes under QEMU); the download, the automatic hand-off to the recovery and packages are not built.
-6. q2ui's icons: it looks for `oled_*_w.png` in `--icons`, stock's art, which the image does not have; the pages draw without them.
-7. Bluetooth, Wi-Fi, USB modes, the MCU's firmware load, the splash.
+3. The rest of `q2playd` and `q2libd` ([q2playd](playd.md#what-is-missing), [q2libd](libd.md#what-is-missing)): starting a stopped app for a server play, offline copies, the servers' playlists, a library socket.
+4. **Vamp API 1's run-time permissions** ([Packages: Permissions](platform/packages.md#permissions)): users and groups per package on writable storage, and each service's `SO_PEERCRED` check; manifests are checked, nothing is enforced.
+5. **The rest of q2sysd** ([Needs a Q2](sysd.md#needs-a-q2) first): Standby, the screen's idle timeout, the jack and the DAC's power and volume, Charge Limit, heat, USB modes.
+6. **The rest of the installer** ([q2pkgd](pkgd.md)): its first slice checks, composes and stages a signed release (the image's own `mksquashfs` composes the build machine's bytes under QEMU); the download, the automatic hand-off to the recovery and packages are not built.
+7. q2ui's icons: it looks for `oled_*_w.png` in `--icons`, stock's art, which the image does not have; the pages draw without them.
+8. Bluetooth, Wi-Fi, USB modes, the MCU's firmware load, the splash.
 
 ## Needs a device
 
@@ -163,6 +164,7 @@ Everything here has been run only under the emulator and on this machine. What o
 | Library | A real card's first scan time and memory under FFmpeg | [q2libd](libd.md#what-is-missing) |
 | Updates | Shanling's recovery's folder contract, and that it removes the folder after flashing (inferred from installs); `mksquashfs`'s time and memory on the Q2 | [q2pkgd](pkgd.md#needs-a-q2) |
 | Hot reload | `kill -HUP`'s in-place restart (QEMU's `/proc/self/exe` is QEMU) | [Hot reload](#hot-reload) |
+| App isolation | Which of mount and network namespaces, cgroups and seccomp the kernel has, for what a package's permissions can hold | [Packages: Permissions](platform/packages.md#permissions) |
 
 ## First boot on a Q2
 

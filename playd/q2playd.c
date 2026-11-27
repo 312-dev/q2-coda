@@ -8,7 +8,7 @@
  *     writes it, to /tmp/coda-rc.now (key=value lines, on a change, twice a second at most), so q2ui runs on it
  *     unchanged;
  *   - its own socket, /run/vamp/play.sock: Q2PLAY/1, a line protocol with answers and a subscription to what plays
- *     (docs/playd.md#q2play1), the interface the UI is meant to move to.
+ *     (docs/platform/playback.md), the interface the UI is meant to move to.
  *
  * One thread, one poll loop. The player's status is asked for (player-status, media-info) when its push datagram
  * says it changed (/tmp/q2player.push, docs/internals.md#player-status-push) and once a second while a song is
@@ -627,7 +627,7 @@ static void cmdq_read(void) {
 /* ---- what plays, written for q2ui and told to Q2PLAY/1's watchers ---- */
 
 /* A free-text field (a title, an artist, an album: from tags, so anything) for one line: Q2PLAY/1's percent-encoding
- * (docs/playd.md#q2play1), every byte below 0x21, '%', '"', '=' and 0x7f as %XX, so a value holds no space, no line
+ * (docs/platform/README.md#the-common-shape), every byte below 0x21, '%', '"', '=' and 0x7f as %XX, so a value holds no space, no line
  * end and no '=' and a client splits on spaces safely; or, for the now file, whose format is demo's shim's (one
  * key=value a line, read by ui/now.c), only line ends and other control bytes made spaces. */
 static void field(char *out, size_t room, const char *in, int encode) {
@@ -681,7 +681,7 @@ static void tell_watchers(void) {
         if (cl[i].fd >= 0 && cl[i].watch) client_say(&cl[i], "now %s", text);
 }
 
-/* One Q2PLAY/1 line (docs/playd.md#q2play1). */
+/* One Q2PLAY/1 line (docs/platform/playback.md). */
 static void client_line(struct client *c, char *line) {
     if (!c->hello) {
         if (strcmp(line, "Q2PLAY/1")) { client_say(c, "err version"); close(c->fd), c->fd = -1; return; }
@@ -706,7 +706,9 @@ static void client_line(struct client *c, char *line) {
         c->want_ids = n, c->got_ids = 0, c->a = a, c->b = b;
         return;
     }
-    if (!strcmp(line, "now")) {
+    if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
+        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch");
+    } else if (!strcmp(line, "now")) {
         char text[2600];
         now_text(text, sizeof text, " ", 1);
         client_say(c, "now %s", text);

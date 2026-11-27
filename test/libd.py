@@ -15,6 +15,9 @@ import time
 
 import pytest
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conformance  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE = pathlib.Path(os.environ.get('Q2LIBD_SOURCE') or ROOT/'libd/q2libd.c')
 # ui/lib.c's query with a server catalogue attached as cat, as q2ui runs it
@@ -223,6 +226,26 @@ def test_as_a_service_a_new_playlist_is_read_within_its_look(binary, card):
     finally:
         p.terminate()
         p.wait(5)
+
+
+# ---- Vamp API 1 (docs/platform/library.md) ----
+
+def test_conformance_library(binary, card):
+    d = card/'mnt/mmc/_explaylist_data'
+    d.mkdir(parents=True)
+    (d/'Mix.m3u').write_text('/mnt/mmc/loose.wav\n')
+    catalogue(card, 'subsonic', [S1, S2])
+    scan(binary, card)
+    files = {'library.db': card/'mnt/data/vamp/library.db', 'catalogue.db': card/'mnt/mmc/.vamp/catalogue.db'}
+    for name, tables in conformance.schemas().items():
+        db = sqlite3.connect(files[name])
+        got = {t: [c[1] for c in db.execute(f'pragma table_info({t})')]
+               for (t,) in db.execute("select name from sqlite_master where type = 'table' and name not like 'sqlite_%'")}
+        assert got == tables, f'{name} is not what docs/platform/library.md says'
+    ids = [r[0] for r in rows(card, 'select id from songtable')]
+    assert ids and max(ids) < 0x40000000
+    server = [r[0] for r in sqlite3.connect(files['catalogue.db']).execute('select id from servertable')]
+    assert server and all(0x40000000 <= i < 0x40000000 + 4 * 0x01000000 for i in server)
 
 
 if __name__ == '__main__':

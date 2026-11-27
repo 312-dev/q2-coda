@@ -18,8 +18,8 @@
  *   - Standby: the screen off, the music paused, Wi-Fi off, then the kernel's suspend (/sys/power/state mem) until a
  *     wake source (the power key) resumes it; then the screen on.
  *
- * Q2SYS/1 on /run/vamp/sys.sock (docs/sysd.md#q2sys1): screen on|off|toggle, brightness P, battery, usb, usb adb|storage,
- * standby, watch.
+ * Q2SYS/1 on /run/vamp/sys.sock (docs/platform/system.md): screen on|off|toggle, brightness P, battery, usb, usb adb|storage,
+ * standby, watch, caps.
  * --root prefixes every path and --poweroff names the command, for test/sysd.py. */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -149,7 +149,7 @@ struct battery { int level, mv, cable; char status[24]; };
 static struct battery bat = {-1, -1, -1, ""};
 
 /* The charger's status is the kernel's text ("Not charging" has a space): on Q2SYS/1 percent-encoded as Q2PLAY/1's
- * free-text fields are (docs/sysd.md#q2sys1), every byte below 0x21, '%', '"', '=' and 0x7f as %XX; in the file, one
+ * free-text fields are (docs/platform/README.md#the-common-shape), every byte below 0x21, '%', '"', '=' and 0x7f as %XX; in the file, one
  * key=value a line, as it is. */
 static void battery_text(char *out, size_t room, const char *sep, int encode) {
     static const char hex[] = "0123456789ABCDEF";
@@ -478,6 +478,8 @@ static void client_line(struct client *c, const char *line) {
         if (strcmp(line, "Q2SYS/1")) { client_say(c, "err version"); close(c->fd), c->fd = -1; return; }
         c->hello = 1;
         client_say(c, "Q2SYS/1 ok");
+    } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
+        client_say(c, "caps screen brightness usb standby battery watch");
     } else if (!strcmp(line, "battery")) {
         char text[160];
         read_battery();

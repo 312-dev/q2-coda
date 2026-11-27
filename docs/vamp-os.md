@@ -327,7 +327,7 @@ Vamp OS is a product and a base. The base's promise to someone who is not us: **
 
 ### The API
 
-Version 1 of the Vamp API is a set of service sockets, each with a protocol document in `docs/platform/`, a conformance test that runs against the real service on a laptop, and a small C library (`libvamp`) that is a convenience, not a requirement.
+Version 1 of the Vamp API is a set of service sockets, each with a protocol document in [`docs/platform/`](platform/README.md), a conformance test that runs against the real service on a laptop, and a small C library (`libvamp`, not written yet) that is a convenience, not a requirement.
 
 | Area            | Service            | What an app can do                                                                                                                                       | Grows from                                                                                                                   |
 | --------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |

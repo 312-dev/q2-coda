@@ -16,6 +16,9 @@ import time
 
 import pytest
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import conformance  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE = pathlib.Path(os.environ.get('Q2PLAYD_SOURCE') or ROOT/'playd/q2playd.c')
 SONGS = [(1, '/mnt/mmc/Music/a.flac', 'Alpha', 'Ann', 'First'), (2, '/mnt/mmc/Music/b.mp3', 'Beta', 'Bob', 'First'),
@@ -405,6 +408,18 @@ def test_a_stream_cache_copy_shows_its_server_row_and_cover(run):
     assert (n['title'], n['artist'], n['album']) == ('Cloud One', 'Sky', 'Up')
     assert (root/'tmp/externpic.jpg').read_bytes() == b'\xff\xd8 album one'
     sock.close()
+
+
+# ---- Vamp API 1 (docs/platform/playback.md) ----
+
+def test_conformance_every_command_is_on_the_page():
+    conformance.check_coverage('playback.md')
+
+
+@pytest.mark.parametrize('n', range(len(conformance.blocks('playback.md'))))
+def test_conformance_playback(run, n):
+    root, pl = run
+    conformance.replay(root/'run/vamp/play.sock', conformance.blocks('playback.md')[n])
 
 
 if __name__ == '__main__':
