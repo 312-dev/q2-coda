@@ -7,11 +7,14 @@ capset and prctl) and then the Q2's changes:
 - adb_auth_client.c: RSA key authentication always on. Authorized keys are /mnt/data/adb_keys and, while
   the card is mounted, /mnt/mmc/adb_keys, read for every connection. An unknown key goes to the UI over
   the socket /tmp/q2adb-ui as Android's framework gets it ("PK<key>", answered "OK" or anything else);
-  with no UI connected it is refused. RSA_verify is libmincrypt's (fetched beside the source), not
+  with no UI connected (the Wi-Fi adbd connects none) it is refused. RSA_verify is libmincrypt's (fetched beside the source), not
   OpenSSL's, whose RSA_verify the Debian build linked by mistake. transport.c tells it when a computer
   it asked about goes.
-- adb.c: USB FunctionFS only (no smartsocket on 5037, no TCP on 5555, no JDWP socket), no privilege
-  drop (a root shell, behind authorization), umask 022, the keys reloaded at each CNXN.
+- adb.c: USB FunctionFS, or with --tcp PORT that TCP port alone (adb over Wi-Fi, a second process; it
+  never asks the UI, and each computer let in and each service it opens renames a new
+  /tmp/q2remote.used into place for Smart Wi-Fi's hold); no smartsocket on 5037, no JDWP socket, no
+  privilege drop (a root shell, behind authorization), umask 022, the keys reloaded at each CNXN.
+- transport_local.c: the Wi-Fi adbd keeps at most 8 connections, each with TCP keep-alive.
 - usb_linux_client.c: FunctionFS v2 descriptors with Microsoft OS descriptors (compatible ID WINUSB,
   DeviceInterfaceGUID adb's), so Windows binds WinUSB itself; ep0 kept open for adbd's lifetime, as
   closing it makes the kernel unbind the gadget; host control requests answered.
@@ -21,7 +24,7 @@ capset and prctl) and then the Q2's changes:
 - file_sync_service.c: utimes for utime.
 
 diff --git a/core/adbd/adb.c b/core/adbd/adb.c
-index d90e6b8..a7add76 100644
+index d90e6b8..2e228b0 100644
 --- a/core/adbd/adb.c
 +++ b/core/adbd/adb.c
 @@ -41,7 +41,8 @@
@@ -43,7 +46,48 @@ index d90e6b8..a7add76 100644
  
  #if !ADB_HOST
  static const char *adb_device_banner = "device";
-@@ -536,6 +537,7 @@ void handle_packet(apacket *p, atransport *t)
+@@ -394,8 +395,40 @@ static void send_auth_publickey(atransport *t)
+     send_packet(p, t);
+ }
+ 
++#if !ADB_HOST
++int q2_tcp_port;
++
++/* Q2: in the Wi-Fi adbd, a computer let in, and each service it opens, renames a new
++ * Q2_USED_FILE into place, as q2remote's requests do (patch/remote.c mark_used), so a --dev demo's
++ * Smart Wi-Fi keeps the radio on for its hold after the last one (docs/remote.md#smart-wi-fi). Only
++ * the inode matters to demo; the file holds this pid. */
++#ifndef Q2_USED_FILE
++#define Q2_USED_FILE "/tmp/q2remote.used"
++#endif
++void q2_mark_used(void)
++{
++    char tmp[64], pid[16];
++    int fd, n;
++
++    if (!q2_tcp_port)
++        return;
++    snprintf(tmp, sizeof tmp, "%s.%d", Q2_USED_FILE, (int)getpid());
++    fd = unix_open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
++    if (fd < 0)
++        return;
++    n = snprintf(pid, sizeof pid, "%d\n", (int)getpid());
++    if (adb_write(fd, pid, n) != n) {}
++    adb_close(fd);
++    if (rename(tmp, Q2_USED_FILE))
++        adb_unlink(tmp);
++}
++#endif
++
+ void adb_auth_verified(atransport *t)
+ {
++#if !ADB_HOST
++    q2_mark_used();
++#endif
+     handle_online(t);
+     send_connect(t);
+ }
+@@ -536,6 +569,7 @@ void handle_packet(apacket *p, atransport *t)
              handle_online(t);
              if(!HOST) send_connect(t);
          } else {
@@ -51,7 +95,17 @@ index d90e6b8..a7add76 100644
              send_auth_request(t);
          }
          break;
-@@ -1163,49 +1165,12 @@ void build_local_name(char* target_str, size_t target_size, int server_port)
+@@ -565,6 +599,9 @@ void handle_packet(apacket *p, atransport *t)
+ 
+     case A_OPEN: /* OPEN(local-id, 0, "destination") */
+         if (t->online) {
++#if !ADB_HOST
++            q2_mark_used();
++#endif
+             char *name = (char*) p->data;
+             name[p->msg.data_length > 0 ? p->msg.data_length - 1 : 0] = 0;
+             s = create_local_service_socket(name);
+@@ -1163,49 +1200,12 @@ void build_local_name(char* target_str, size_t target_size, int server_port)
    snprintf(target_str, target_size, "tcp:%d", server_port);
  }
  
@@ -103,14 +157,22 @@ index d90e6b8..a7add76 100644
  #endif
  
      atexit(adb_cleanup);
-@@ -1231,108 +1196,12 @@ int adb_main(int is_daemon, int server_port)
+@@ -1231,108 +1231,20 @@ int adb_main(int is_daemon, int server_port)
          exit(1);
      }
  #else
 -    //property_get("ro.adb.secure", value, "0");
 -    auth_enabled = 0;//!strcmp(value, "1");
 -    if (auth_enabled)
--        adb_auth_init();
++    /* Q2: RSA key authentication is always on (adb_auth_client.c reads the authorized keys). adbd
++     * listens on USB FunctionFS, or with --tcp PORT on that TCP port alone (docs/adb.md#adb-over-wi-fi),
++     * a process of its own beside the USB one, so stock's USB gadgets taking the controller (which stops
++     * the USB adbd) leave a Wi-Fi session alone. Neither has the local smartsocket on 5037 or the JDWP
++     * control socket. */
++    auth_enabled = 1;
++    if (q2_tcp_port) {
++        adb_auth_ui = 0;
+         adb_auth_init();
 -
 -    // Our external storage path may be different than apps, since
 -    // we aren't able to bind mount after dropping root.
@@ -173,7 +235,8 @@ index d90e6b8..a7add76 100644
 -        capset(&header, cap);
 -
 -        D("Local port disabled\n");
--    } else {
++        local_init(q2_tcp_port);
+     } else {
 -        char local_name[30];
 -        build_local_name(local_name, sizeof(local_name), server_port);
 -        if(install_listener(local_name, "*smartsocket*", NULL, 0)) {
@@ -184,7 +247,8 @@ index d90e6b8..a7add76 100644
 -    int usb = 0;
 -    if (access(USB_ADB_PATH, F_OK) == 0 || access(USB_FFS_ADB_EP0, F_OK) == 0) {
 -        // listen on USB
--        usb_init();
++        adb_auth_init();
+         usb_init();
 -        usb = 1;
 -    }
 -
@@ -209,21 +273,38 @@ index d90e6b8..a7add76 100644
 -    D("adb_main(): pre init_jdwp()\n");
 -    init_jdwp();
 -    D("adb_main(): post init_jdwp()\n");
-+    /* Q2: RSA key authentication is always on (adb_auth_client.c reads the authorized keys), and adbd
-+     * listens on USB FunctionFS only: no local smartsocket on 5037, no TCP transport on 5555 and no
-+     * JDWP control socket, so nothing on the Q2 or its network reaches it. */
-+    auth_enabled = 1;
-+    adb_auth_init();
-+    usb_init();
++    }
  #endif
  
      if (is_daemon)
+@@ -1721,6 +1633,16 @@ int main(int argc, char **argv)
+         recovery_mode = 1;
+     }
+ 
++    if (argc == 3 && !strcmp(argv[1], "--tcp")) {
++        char *end;
++        long port = strtol(argv[2], &end, 10);
++        if (*end || port < 1 || port > 65535) {
++            fprintf(stderr, "adbd: --tcp wants a port, 1 to 65535\n");
++            return 2;
++        }
++        q2_tcp_port = (int)port;
++    }
++
+     start_device_log();
+     D("Handling main()\n");
+     return adb_main(0, DEFAULT_ADB_PORT);
 diff --git a/core/adbd/adb.h b/core/adbd/adb.h
-index 9da8af8..2142bd0 100644
+index 9da8af8..1fa8f7a 100644
 --- a/core/adbd/adb.h
 +++ b/core/adbd/adb.h
-@@ -477,7 +477,9 @@ extern int SHELL_EXIT_NOTIFY_FD;
+@@ -475,9 +475,14 @@ extern int SHELL_EXIT_NOTIFY_FD;
+ #define CHUNK_SIZE (64*1024)
+ 
  #if !ADB_HOST
++/* Q2: adbd --tcp PORT (docs/adb.md#adb-over-wi-fi); 0 in the USB adbd */
++extern int q2_tcp_port;
++void q2_mark_used(void);
  #define USB_ADB_PATH     "/dev/android_adb"
  
 +#ifndef USB_FFS_ADB_PATH /* Q2: a test points it elsewhere */
@@ -233,19 +314,21 @@ index 9da8af8..2142bd0 100644
  
  #define USB_FFS_ADB_EP0   USB_FFS_ADB_EP(ep0)
 diff --git a/core/adbd/adb_auth.h b/core/adbd/adb_auth.h
-index 1fffa49..6faeb90 100644
+index 1fffa49..d5342cb 100644
 --- a/core/adbd/adb_auth.h
 +++ b/core/adbd/adb_auth.h
-@@ -48,6 +48,7 @@ int adb_auth_generate_token(void *token, size_t token_size);
+@@ -48,6 +48,9 @@ int adb_auth_generate_token(void *token, size_t token_size);
  int adb_auth_verify(void *token, void *sig, int siglen);
  void adb_auth_confirm_key(unsigned char *data, size_t len, atransport *t);
  void adb_auth_reload_keys(void);
 +void adb_auth_transport_gone(atransport *t);
++/* Q2: 0 in the Wi-Fi adbd (adbd --tcp), which never asks the UI: a key it does not hold is refused */
++extern int adb_auth_ui;
  
  #endif // ADB_HOST
  
 diff --git a/core/adbd/adb_auth_client.c b/core/adbd/adb_auth_client.c
-index 0b4913e..6d59d9c 100644
+index 0b4913e..f981c50 100644
 --- a/core/adbd/adb_auth_client.c
 +++ b/core/adbd/adb_auth_client.c
 @@ -19,6 +19,7 @@
@@ -256,7 +339,7 @@ index 0b4913e..6d59d9c 100644
  
  #include "sysdeps.h"
  #include "adb.h"
-@@ -28,6 +29,22 @@
+@@ -28,6 +29,24 @@
  
  #define TRACE_TAG TRACE_AUTH
  
@@ -265,7 +348,9 @@ index 0b4913e..6d59d9c 100644
 + * goes to the UI over a socket (ADB_UI_SOCKET, root's alone) as "PK<adbkey.pub line>"; the UI answers
 + * "OK" to let that computer in this once, after adding the key to ADB_KEYS itself for "Always Allow",
 + * or "NO". With no UI connected, or no answer, the computer stays unauthorized. ADB_KEYS_CARD, a file a
-+ * developer puts on the card, is read beside ADB_KEYS while the card is mounted. */
++ * developer puts on the card, is read beside ADB_KEYS while the card is mounted. The Wi-Fi adbd
++ * (adbd --tcp, docs/adb.md#adb-over-wi-fi) never asks: a computer reaches it only with a key already
++ * in one of the two files, so nothing on the network can put a question on the Q2's screen. */
 +#ifndef ADB_KEYS
 +#define ADB_KEYS "/mnt/data/adb_keys"
 +#endif
@@ -279,10 +364,11 @@ index 0b4913e..6d59d9c 100644
  
  struct adb_public_key {
      struct listnode node;
-@@ -35,32 +52,27 @@ struct adb_public_key {
+@@ -35,32 +54,28 @@ struct adb_public_key {
  };
  
  static struct listnode key_list;
++int adb_auth_ui = 1;
 +static adb_mutex_t keys_lock = ADB_MUTEX_INITIALIZER;
  
 -static char *key_paths[] = {
@@ -293,9 +379,9 @@ index 0b4913e..6d59d9c 100644
 -
 -static fdevent listener_fde;
 -static int framework_fd = -1;
--
 +extern int adb_b64_pton(char const *src, u_char *target, size_t targsize);
  
+-
 -static void read_keys(const char *file, struct listnode *list)
 +static void parse_keys(char *buf, struct listnode *list)
  {
@@ -326,7 +412,7 @@ index 0b4913e..6d59d9c 100644
          /* Allocate 4 extra bytes to decode the base64 data in-place */
          key = calloc(1, sizeof(*key) + 4);
          if (!key) {
-@@ -68,27 +80,21 @@ static void read_keys(const char *file, struct listnode *list)
+@@ -68,27 +83,21 @@ static void read_keys(const char *file, struct listnode *list)
              break;
          }
  
@@ -357,7 +443,7 @@ index 0b4913e..6d59d9c 100644
  }
  
  static void free_keys(struct listnode *list)
-@@ -102,20 +108,35 @@ static void free_keys(struct listnode *list)
+@@ -102,20 +111,35 @@ static void free_keys(struct listnode *list)
      }
  }
  
@@ -403,7 +489,7 @@ index 0b4913e..6d59d9c 100644
  }
  
  int adb_auth_generate_token(void *token, size_t token_size)
-@@ -137,109 +158,132 @@ int adb_auth_verify(void *token, void *sig, int siglen)
+@@ -137,109 +161,134 @@ int adb_auth_verify(void *token, void *sig, int siglen)
  {
      struct listnode *item;
      struct adb_public_key *key;
@@ -433,14 +519,14 @@ index 0b4913e..6d59d9c 100644
 +static fdevent ui_fde;
 +static int framework_fd = -1;
 +static atransport *asking; /* the computer the UI was last asked about, until it answers or goes */
-+
+ 
+-    return 0;
 +void adb_auth_transport_gone(atransport *t)
 +{
 +    if (asking == t)
 +        asking = NULL;
 +}
- 
--    return 0;
++
 +static void ui_close(void)
 +{
 +    if (framework_fd >= 0) {
@@ -530,10 +616,10 @@ index 0b4913e..6d59d9c 100644
 -    struct sockaddr addr;
 -    socklen_t alen;
 -    int s;
+-
+-    alen = sizeof(addr);
 +    int s = adb_socket_accept(fd, NULL, NULL);
  
--    alen = sizeof(addr);
--
 -    s = adb_socket_accept(fd, &addr, &alen);
      if (s < 0) {
          D("Failed to accept: errno=%d\n", errno);
@@ -554,7 +640,7 @@ index 0b4913e..6d59d9c 100644
  
      list_init(&key_list);
      adb_auth_reload_keys();
- 
+-
 -    fd = android_get_control_socket("adbd");
 -    if (fd < 0) {
 -        D("Failed to get adbd socket\n");
@@ -564,6 +650,9 @@ index 0b4913e..6d59d9c 100644
 -    ret = listen(fd, 4);
 -    if (ret < 0) {
 -        D("Failed to listen on '%d'\n", fd);
++    if (!adb_auth_ui)
++        return; /* the USB adbd owns ADB_UI_SOCKET; binding it here would take it from that one */
++
 +    fd = socket_local_server(ADB_UI_SOCKET, ANDROID_SOCKET_NAMESPACE_FILESYSTEM, SOCK_STREAM);
 +    if (fd < 0 || chmod(ADB_UI_SOCKET, 0600)) {
 +        D("Failed to listen on '%s'\n", ADB_UI_SOCKET);
@@ -1136,6 +1225,70 @@ index 9fd6cc2..88eda09 100644
  
          if (t->product)
              free(t->product);
+diff --git a/core/adbd/transport_local.c b/core/adbd/transport_local.c
+index ee5e498..12f4d39 100644
+--- a/core/adbd/transport_local.c
++++ b/core/adbd/transport_local.c
+@@ -151,6 +151,26 @@ static void *client_socket_thread(void *x)
+     return 0;
+ }
+ 
++#if !ADB_HOST
++/* Q2: the Wi-Fi adbd keeps at most TCP_MAX connections, authorized or not; one past it is closed at
++ * once. Each costs two threads until it goes, and keep-alive probes end one whose computer vanished
++ * (asleep, or off the network) in about 90 s. ponytail: a host on the network can hold all TCP_MAX
++ * unauthorized and lock the others out until it lets go; a deadline for the handshake would lift it. */
++#define TCP_MAX 8
++#include <netinet/tcp.h>
++static int tcp_live;
++static adb_mutex_t tcp_live_lock = ADB_MUTEX_INITIALIZER;
++
++static void tcp_keepalive(int fd)
++{
++    int on = 1, idle = 60, intvl = 10, cnt = 3;
++    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof on);
++    setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof idle);
++    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof intvl);
++    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof cnt);
++}
++#endif
++
+ static void *server_socket_thread(void * arg)
+ {
+     int serverfd, fd;
+@@ -178,6 +198,19 @@ static void *server_socket_thread(void * arg)
+             D("server: new connection on fd %d\n", fd);
+             close_on_exec(fd);
+             disable_tcp_nagle(fd);
++#if !ADB_HOST
++            adb_mutex_lock(&tcp_live_lock);
++            int full = tcp_live >= TCP_MAX;
++            if (!full)
++                tcp_live++;
++            adb_mutex_unlock(&tcp_live_lock);
++            if (full) {
++                D("server: %d connections already, refused\n", TCP_MAX);
++                adb_close(fd);
++                continue;
++            }
++            tcp_keepalive(fd);
++#endif
+             register_socket_transport(fd, "host", port, 1);
+         }
+     }
+@@ -355,6 +388,12 @@ static void remote_kick(atransport *t)
+ static void remote_close(atransport *t)
+ {
+     adb_close(t->fd);
++#if !ADB_HOST
++    adb_mutex_lock(&tcp_live_lock);
++    if (tcp_live > 0)
++        tcp_live--;
++    adb_mutex_unlock(&tcp_live_lock);
++#endif
+ }
+ 
+ 
 diff --git a/core/adbd/usb_linux_client.c b/core/adbd/usb_linux_client.c
 index 33875a8..f1e1752 100644
 --- a/core/adbd/usb_linux_client.c

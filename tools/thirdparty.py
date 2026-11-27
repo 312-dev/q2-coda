@@ -445,8 +445,8 @@ ADBD_MINCRYPT_FILES = {'rsa.c': '865378dc08eb8ca78d0490016ad1ec75d4d1d9140548303
                        'NOTICE': 'b220fd3c79e0906eda798b23699305ab05576e849f45810eca74afcb2c7f2311'}
 ADBD_PATCH = (pathlib.Path(__file__).resolve().parent/'adbd.patch').read_text()
 # What adbd links, by directory under core/: Debian's adbd.mk less the services tools/adbd.patch removes.
-ADBD_SOURCES = {'adbd': ['adb', 'fdevent', 'transport', 'transport_usb', 'adb_auth_client', 'sockets', 'services',
-                         'file_sync_service', 'usb_linux_client', 'utils', 'base64'],
+ADBD_SOURCES = {'adbd': ['adb', 'fdevent', 'transport', 'transport_usb', 'transport_local', 'adb_auth_client',
+                         'sockets', 'services', 'file_sync_service', 'usb_linux_client', 'utils', 'base64'],
                 'libcutils': ['socket_inaddr_any_server', 'socket_local_client', 'socket_loopback_client',
                               'socket_loopback_server', 'socket_local_server', 'list'],
                 'libmincrypt': ['rsa', 'rsa_e_3', 'rsa_e_f4', 'sha']}
