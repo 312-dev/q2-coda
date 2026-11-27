@@ -6,9 +6,10 @@
     python3 tools/vampos.py vendor-manifest ZIP                       # (re)write os/vendor/V1.36.tsv
     python3 tools/vampos.py qemu                                      # the static qemu-mipsel test/os_image.py boots with
     python3 tools/vampos.py card --image composed.squashfs --card DIR [--always | --no-switch]
+    python3 tools/vampos.py release --image vampos.squashfs --zip ZIP --tag TAG --out DIR [--key PEM]
 
 `build` runs Buildroot (BUILDROOT, pinned by SHA-256, with os/patches/buildroot applied) over os/ as a
-BR2_EXTERNAL tree. Its sources are exported from git first: this tree's os/, tools/, player/, playd/, sysd/, libd/, netd/, patch/ and
+BR2_EXTERNAL tree. Its sources are exported from git first: this tree's os/, tools/, player/, playd/, sysd/, libd/, netd/, pkgd/, patch/, assets/signing and
 assets/fonts at HEAD, and q2ui's ui/ and patch/ at Q2UI_COMMIT, so the image is a function of the commits
 it names (manifest.json); --worktree exports the working tree instead, for a try, and says so. It needs
 Linux and a case-sensitive file system: on a Mac it runs under tools/mac/q2env, whose q2-os volume holds
@@ -17,6 +18,10 @@ CACHE. Downloads go to DL.
 `card` lays a composed image out on a card (DIR, its root) for the card boot of a --dev build of today's Vamp
 (patch/q2vampos.sh, docs/vamp-os-base.md#card-boot): .vamp/os/vampos.squashfs, its .sha256, and boot-once (one
 boot, removed before the hand-off), boot-always, or no switch.
+
+`release` makes what a Q2's q2pkgd stages (docs/pkgd.md): DIR/vampos.squashfs, DIR/release.txt (the image's SHA-512,
+the vendor manifest's files and the SHA-256 the image composes to with V1.36's vendor set) and DIR/release.sig, the
+release key's Ed25519 signature of it (the key's PEM from --key, or tools/signing.py's Q2_SIGNING_KEY).
 
 `vampos.squashfs` holds no file of Shanling's. `compose` appends /vendor to a copy of it: the files
 os/vendor/V1.36.tsv names, each checked against its SHA-256, taken from the user's own stock firmware ZIP or
@@ -53,7 +58,7 @@ BUILDROOT = ('2026.02.3', 'https://buildroot.org/downloads/buildroot-2026.02.3.t
 PATCHES = ROOT/'os/patches/buildroot'
 # feat/render-engine's ui/ (another worker's; read-only here): moved on by changing this commit
 Q2UI_COMMIT = '817b5fc2'
-VAMP_PATHS = ['os', 'tools', 'player', 'playd', 'sysd', 'libd', 'netd', 'patch', 'assets/fonts', 'LICENSE']
+VAMP_PATHS = ['os', 'tools', 'player', 'playd', 'sysd', 'libd', 'netd', 'pkgd', 'patch', 'assets/signing', 'assets/fonts', 'LICENSE']
 Q2UI_PATHS = ['ui', 'patch', 'LICENSE']
 MANIFEST = ROOT/'os/vendor/V1.36.tsv'
 # A static qemu-mipsel for the boot test (test/os_image.py), the host's architecture: Ubuntu 24.04's, from
@@ -290,6 +295,30 @@ def card(image, root, switch='boot-once'):
     print(f'{d}: vampos.squashfs, vampos.squashfs.sha256{", " + switch if switch else ""}')
 
 
+def release(image, zip_path, tag, out, key=None):
+    import signing
+    out = pathlib.Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    files, _ = read_manifest()
+    with tempfile.TemporaryDirectory() as tmp:
+        composed = pathlib.Path(tmp)/'composed.squashfs'
+        compose(image, composed, zip_path=zip_path)
+        digest = sha256(composed)
+    shutil.copyfile(image, out/'vampos.squashfs')
+    h = hashlib.sha512(pathlib.Path(image).read_bytes()).hexdigest()
+    epoch = struct.unpack_from('<I', pathlib.Path(image).read_bytes(), 8)[0]
+    lines = ['Q2REL/1', f'tag {tag}', f'image {h} {pathlib.Path(image).stat().st_size}', f'epoch {epoch}',
+             *(f'file {n} {d} {m:o}' for n, (d, m) in files.items()), f'composed V1.36 {digest}']
+    text = ''.join(l + '\n' for l in lines).encode()
+    (out/'release.txt').write_bytes(text)
+    pem = pathlib.Path(key).read_text() if key else os.environ.get(signing.ENV)
+    if not pem:
+        sys.exit('os: no signing key (--key, or Q2_SIGNING_KEY)')
+    message = f'q2-coda-vampos-v1 {tag} {hashlib.sha512(text).hexdigest()}\n'.encode()
+    (out/'release.sig').write_bytes(signing.sign(message, pem))
+    print(f'{out}: release {tag}, composes to {digest}')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -306,6 +335,12 @@ def main():
     v = sub.add_parser('vendor-manifest')
     v.add_argument('zip', type=pathlib.Path)
     sub.add_parser('qemu')
+    r = sub.add_parser('release')
+    r.add_argument('--image', type=pathlib.Path, required=True)
+    r.add_argument('--zip', type=pathlib.Path, required=True)
+    r.add_argument('--tag', required=True)
+    r.add_argument('--out', type=pathlib.Path, required=True)
+    r.add_argument('--key')
     k = sub.add_parser('card')
     k.add_argument('--image', type=pathlib.Path, required=True)
     k.add_argument('--card', type=pathlib.Path, required=True)
@@ -317,6 +352,8 @@ def main():
         build(a.out, a.worktree, a.jobs)
     elif a.cmd == 'compose':
         compose(a.image, a.out, a.zip, a.rootfs)
+    elif a.cmd == 'release':
+        release(a.image, a.zip, a.tag, a.out, a.key)
     elif a.cmd == 'card':
         card(a.image, a.card, None if a.no_switch else 'boot-always' if a.always else 'boot-once')
     elif a.cmd == 'qemu':

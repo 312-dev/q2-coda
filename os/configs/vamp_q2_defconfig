@@ -36,6 +36,10 @@ BR2_PACKAGE_Q2PLAYD=y
 BR2_PACKAGE_Q2SYSD=y
 BR2_PACKAGE_Q2LIBD=y
 BR2_PACKAGE_Q2NETD=y
+BR2_PACKAGE_Q2PKGD=y
+# the image's mksquashfs composes LZO images (q2pkgd); gzip, its default, not needed
+BR2_PACKAGE_SQUASHFS_LZO=y
+# BR2_PACKAGE_SQUASHFS_GZIP is not set
 BR2_PACKAGE_Q2UI=y
 BR2_PACKAGE_VAMP_ASSETS=y
 # adb over USB and Wi-Fi (docs/vamp-os-base.md#adb), and Wi-Fi itself (q2netd)

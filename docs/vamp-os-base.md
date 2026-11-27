@@ -137,7 +137,7 @@ In the order it is needed:
 2. **The rescue page**, and a first-key Allow card in `q2ui`: until then a Q2 that trusts no computer is reached only by putting a key in the card's `adb_keys` ([adb](#adb)).
 3. The rest of `q2playd` and `q2libd` ([q2playd](playd.md#what-is-missing), [q2libd](libd.md#what-is-missing)): server songs played through their app, duplicates, playlists.
 4. **The rest of q2sysd** ([Needs a Q2](sysd.md#needs-a-q2) first): Standby, the screen's idle timeout, the jack and the DAC's power and volume, Charge Limit, heat, USB modes.
-5. **The installer** (`q2pkgd`'s system half) and the expected-hash check of a composed image on the device: `mksquashfs` in the image and the test that a Q2 and the build machine compose the same bytes.
+5. **The rest of the installer** ([q2pkgd](pkgd.md)): its first slice checks, composes and stages a signed release (the image's own `mksquashfs` composes the build machine's bytes under QEMU); the download, the automatic hand-off to the recovery and packages are not built.
 6. q2ui's icons: it looks for `oled_*_w.png` in `--icons`, stock's art, which the image does not have; the pages draw without them.
 7. Bluetooth, Wi-Fi, USB modes, the MCU's firmware load, the splash.
 
@@ -160,6 +160,7 @@ Everything here has been run only under the emulator and on this machine. What o
 | Sound | The DAC powered and in PCM mode with no `demo`; the driver's 0-100 volume law in decibels | [q2playd](playd.md#the-volume) |
 | Wi-Fi | Association, DHCP and DNS; the radio's power when `wlan0` is down | [q2netd](netd.md#needs-a-q2) |
 | Library | A real card's first scan time and memory under FFmpeg | [q2libd](libd.md#what-is-missing) |
+| Updates | Shanling's recovery's folder contract; `mksquashfs`'s time and memory on the Q2 | [q2pkgd](pkgd.md#needs-a-q2) |
 | Hot reload | `kill -HUP`'s in-place restart (QEMU's `/proc/self/exe` is QEMU) | [Hot reload](#hot-reload) |
 
 ## First boot on a Q2

@@ -1,0 +1,8 @@
+config BR2_PACKAGE_Q2PKGD
+	bool "q2pkgd"
+	select BR2_PACKAGE_SQUASHFS
+	select BR2_PACKAGE_SQUASHFS_LZO # mtd2's images are LZO; mksquashfs refuses to append to one without it
+	help
+	  Vamp OS's update service (pkgd/, docs/pkgd.md), its first slice: a release checked against the
+	  release key, composed with this Q2's vendor set by the image's own mksquashfs, and staged for
+	  Shanling's recovery. It never writes flash.

@@ -7,6 +7,7 @@
                                       taken from Buildroot's download folder DL (each checked against its pin), compiled
                                       with CC; the program in SRC/stage/usr/bin/adbd
     pins.py adb-mdns-sources          tools/build.py's ADB_MDNS_SOURCES
+    pins.py release-key               the release key's public half (assets/signing/q2-coda-release.pub) as a C array
 
 Run from the tree tools/vampos.py exported, so the settings are those of the commit the image names.
 """
@@ -45,5 +46,9 @@ elif sys.argv[1:] == ['adb-mdns-sources']:
     tree = ast.parse((TOOLS/'build.py').read_text())
     value = next(n.value for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, 'id', None) == 'ADB_MDNS_SOURCES' for t in n.targets))
     print(' '.join(ast.literal_eval(value)))
+elif sys.argv[1:] == ['release-key']:
+    import signing
+    key = signing.public_key(signing.PUBLIC_KEY.read_bytes())
+    print('{' + ','.join(f'0x{b:02x}' for b in key) + '}')
 else:
     sys.exit(__doc__)
