@@ -79,6 +79,7 @@ CASES = {
  'cc-level-late': ('ui/page_control.c', '    s->want[i] = to, s->set_at[i] = ui_time();\n}', '}', 'pages', 'shows the level set at once'),
  'slider-never-grabs': ('ui/list.c', '            l->grab = l->grab == l->sel ? -1 : l->sel;', '            l->grab = -1;', 'scripts', 'Centre grabs the slider'),
  'slider-track-plain': ('ui/list.c', '#define SLIDER_TRACK_ON 0x7da2ea', '#define SLIDER_TRACK_ON 0x333333', 'scripts', "the grabbed row's track on the bar"),
+ 'art-never-again': ('ui/art.c', '            if (t.tv_sec == seen_at.tv_sec && t.tv_nsec == seen_at.tv_nsec) continue;', '            continue;', 'pages', 'drawn within seconds'),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

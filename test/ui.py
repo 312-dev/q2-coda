@@ -872,6 +872,28 @@ def album_covers(binary, work, home):
         run.proc.kill()
         run.proc.wait(timeout=5)
         os.close(run.queue)
+    # Cover Flow makes its thumbnails after q2ui has looked (a fresh card: demo builds them once the scan is done, the
+    # emulator's m27 walk): the rows on screen take the cover once it is written, with no key pressed
+    late = pathlib.Path(tempfile.mkdtemp(dir=work))
+    run = Run(binary, work, 60, *home, '--art', late, '--clock', '12:00')
+    try:
+        run.rest()
+        run.key(KEY_CENTRE)
+        run.rest()
+        run.ticks(2)
+        run.rest()
+        run.key(KEY_CENTRE)
+        run.rest()
+        before = shot.pixel(run.picture(), 44, 84)
+        png(late/f'{art_key(artist, album):08x}.jpg', 160, 160, (200, 40, 40))
+        time.sleep(4)
+        after = shot.pixel(run.picture(), 44, 84)
+        good &= check('a cover Cover Flow writes after the row was drawn with the placeholder is drawn within seconds',
+                      before == (0x2c, 0x2c, 0x2e) and after == (200, 40, 40), f'{before} then {after}')
+    finally:
+        run.proc.kill()
+        run.proc.wait(timeout=5)
+        os.close(run.queue)
     return good
 
 
