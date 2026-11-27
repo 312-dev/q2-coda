@@ -36,6 +36,14 @@ CASES = {
  'play-no-list': ('ui/player.c', '    if (!ok || rename(tmp, player_list)) return -1;', '    if (!ok) return -1;', 'live', "every song's id"),
  'no-restore': ('ui/main.c', '    first_page();\n    state_restore();', '    first_page();', 'live', 'opens on the row it was ended on'),
  'never-dark': ('ui/ui.c', '        if (got && dark()) quiet_until = mono_us() + 400000;', '        if (0 && got && dark()) quiet_until = mono_us() + 400000;', 'live', 'with the backlight off'),
+ 'spin-skips-top': ('ui/list.c', '    if (l->top < p || l->sel < p) l->top = p;', '    if (l->top < p) l->top = p;', 'scripts', 'every one leaves the songs at their top'),
+ 'no-playing-row': ('ui/page_home.c', 'static int state_now(void) { return now_get()->playing ? 1 : now_get()->paused ? 2 : 0; }', 'static int state_now(void) { return 0; }', 'pages', 'Home has one row more'),
+ 'bar-empty': ('ui/page_now.c', '    float share = n->len_s ? clampf((float)pos / ((float)n->len_s * 1000), 0, 1) : 0;', '    float share = 0 * pos;', 'pages', "bar is filled to 14 s"),
+ 'centre-not-toggle': ('ui/page_now.c', '        player_send("toggle");', '        player_send("pause");', 'pages', 'Centre is play and pause'),
+ 'group-plays-library': ('ui/page_library.c', '    player_play(s->ids, s->n, i, 0);', '    player_play(lib_ids(), lib_songs(), i, 0);', 'pages', "plays that artist's songs"),
+ 'album-by-title': ('ui/lib.c', '    if (group_kind == LIB_ALBUM && lib.track[x] != lib.track[y]) return lib.track[x] - lib.track[y];', '', 'pages', "its tracks in order"),
+ 'old-menus-stays': ('ui/page_home.c', '        ui_quit(0); /* demo', '        (void)0; /* demo', 'pages', 'Centre on Old Menus ends q2ui'),
+ 'route-forgotten': ('ui/main.c', '        else if (!library_route(seg))\n            break;', '        else\n            break;', 'live', 'on the page and the row it was ended on'),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0

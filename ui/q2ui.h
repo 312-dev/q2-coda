@@ -225,6 +225,7 @@ void ui_select_top(int sel);
 void ui_push(const ui_page *p, void *arg);
 void ui_pop(void); /* the top page closes; the last page's pop ends the program */
 void ui_quit(int code);
+int ui_quitting(int *code); /* whether ui_quit was called, and with what */
 void ui_mark(rect_t r);  /* r is to be drawn again and shown */
 void ui_mark_all(void);
 void ui_again(void);     /* something still moves: another frame after this one */

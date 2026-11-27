@@ -350,12 +350,14 @@ static int script(const char *path) {
             else
                 strcpy(record_dir, arg);
         }
-        if (!ui_depth()) break;
+        if (!ui_depth() || ui_quitting(0)) break;
     }
     fclose(f);
     if (trace) fclose(trace);
     write_stats();
-    return 0;
+    int code = 0;
+    ui_quitting(&code);
+    return code; /* a page that ended the program ends the script, with its code */
 }
 
 int main(int argc, char **argv) {
@@ -389,6 +391,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     input_open(opt.input);
+    input_flush(); /* nothing pressed before it had the screen is its to act on (a FIFO standing in for a device keeps such) */
     first_page();
     state_restore();
     ui_frame(0, 0);

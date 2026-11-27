@@ -1,6 +1,6 @@
 /* The Library (docs/ipod.md#rows): its list, and the lists under it that are groups of songs
  * (Artists, Albums) and then a group's songs. Centre on a song plays its list from that song,
- * through the player (ui/player.c). Rows whose page q2ui has not got open demo's (ui_demo_page). */
+ * through the player (ui/player.c). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,9 +61,9 @@ static void groups_push(int kind) {
 /* ---- the Library's own list ---- */
 static const struct {
     const char *title, *demo;
-} lib_rows[] = { { "Songs", 0 },     { "Playlists", "playlist_page" }, { "Artists", 0 },
-                 { "Albums", 0 },    { "Years", "era_page" },           { "Ratings", "ratings_page" },
-                 { "Most Played", "mostplayed_page" } };
+} lib_rows[] = { { "Songs", 0 }, { "Artists", 0 }, { "Albums", 0 } };
+/* ponytail: Playlists, Genres, Years, Ratings and the rest of demo's Library are reached through
+ * Home's Old Menus until each has a page here or an opener the gate is seen to run (page_home.c). */
 static int l_count(void *ctx) {
     (void)ctx;
     return (int)(sizeof lib_rows / sizeof *lib_rows);
@@ -79,7 +79,7 @@ static void l_chosen(void *ctx, int i) {
     else if (i == 0)
         songs_push();
     else
-        groups_push(i == 2 ? LIB_ARTIST : LIB_ALBUM);
+        groups_push(i == 1 ? LIB_ARTIST : LIB_ALBUM);
 }
 void library_push(void) {
     ui_source src = { .count = l_count, .row = l_row, .chosen = l_chosen, .name = "library" };

@@ -96,15 +96,26 @@ class Picture:
         return sum(rows) / len(rows) if rows else 0
 
 
-def script(binary, work, n, lines, *options):
-    """q2ui run over a script; the trace (a dict a frame), the pictures it saved by name, and the stats."""
+NOW = 'seq=3\nstate=2\npos=14000\nlen=180\nid=5\nvolume=40\nsource=library\ntitle=A Made-Up Song\nartist=Its Artist\nalbum=Its Album\n'
+
+
+def script(binary, work, n, lines, *options, now=None, code=0, queue=False):
+    """q2ui run over a script; the trace (a dict a frame), the pictures it saved by name, and the stats. now is what
+    plays (the text of demo's file for it), code the exit code expected, and with queue the player's queue is a FIFO
+    whose lines come back as a fourth value with the list file's ids."""
     d = folder(work, n)
+    if now:
+        (d/'now').write_text(now)
+    fifo = None
+    if queue:
+        os.mkfifo(d/'cmdq')
+        fifo = os.open(d/'cmdq', os.O_RDWR | os.O_NONBLOCK)
     text = '\n'.join(lines).replace('@', str(d) + '/') + '\n'
     (d/'script').write_text(text)
     done = subprocess.run(base_args(binary, d) + ['--script', d/'script', '--trace', d/'trace', '--clock', '12:00', *options],
                           timeout=120)
-    if done.returncode:
-        raise RuntimeError(f'q2ui --script exited {done.returncode}')
+    if done.returncode != code:
+        raise RuntimeError(f'q2ui --script exited {done.returncode}, not {code}')
     trace = []
     for line in (d/'trace').read_text().splitlines():
         if 'sel=' not in line:
@@ -112,7 +123,16 @@ def script(binary, work, n, lines, *options):
         row = dict(part.split('=') for part in line.split())
         trace.append({k: float(v) for k, v in row.items()})
     pictures = {p.stem: Picture(p) for p in d.glob('*.ppm')}
-    return trace, pictures, json.loads((d/'stats.json').read_text())
+    stats = json.loads((d/'stats.json').read_text()) if (d/'stats.json').exists() else {}
+    if fifo is None:
+        return trace, pictures, stats
+    try:
+        sent = os.read(fifo, 4096).decode().splitlines()
+    except BlockingIOError:
+        sent = []
+    os.close(fifo)
+    ids = (d/'list').read_text().split() if (d/'list').exists() else []
+    return trace, pictures, stats, (sent, ids, d)
 
 
 class Run:
@@ -317,6 +337,89 @@ def scripts(binary, work):
     return good
 
 
+def pages(binary, work):
+    """Home, the Library's lists and Now Playing (docs/ui-rewrite.md#parity), by script."""
+    good = True
+    home = ('--page', 'home')
+    # Home: the list at the left, the pane at the right; its first row is Playing while something is
+    trace, pics, _ = script(binary, work, 60, ['rest', 'shot @idle.ppm', 'tick 9', 'rest'], *home)
+    idle_rows = trace[-1]['sel'] + 1
+    trace, pics2, _ = script(binary, work, 60, ['rest', 'shot @playing.ppm', 'tick 9', 'rest'], *home, now=NOW)
+    good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (2, 3), f"{idle_rows} and {trace[-1]['sel'] + 1}")
+    good &= check("Home's platter keeps to the list's side and the pane is drawn beside it",
+                  pics['idle'].blue(100, BAR_H + 3) and not pics['idle'].blue(250, BAR_H + 3) and pics['idle'].at(280, 160) != (0, 0, 0))
+    good &= check('the two Homes differ where the first row is', pics['idle'].rgb != pics2['playing'].rgb)
+    # Centre on Playing is Now Playing: the bar filled to the song's place, the times beside it
+    _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'shot @now.ppm'], *home, now=NOW)
+    fill, track = pics['now'].at(36, 231), pics['now'].at(200, 231)
+    good &= check("Now Playing's bar is filled to 14 s of 180", fill == ACCENT and track == (0x33, 0x33, 0x33), f'{fill} {track}')
+    _, later, _ = script(binary, work, 60, ['rest', 'key centre', 'rest', 'shot @now.ppm'], *home, now=NOW.replace('pos=14000', 'pos=120000'))
+    good &= check('and further on later in the song', later['now'].at(200, 231) == ACCENT and later['now'].rgb != pics['now'].rgb)
+    _, _, _, (sent, _, _) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'key centre', 'run 100', 'tick 1', 'run 100'], *home, now=NOW, queue=True)
+    good &= check('there Centre is play and pause, and a tick down the wheel is one step quieter',
+                  [line.split(' ', 1)[1] for line in sent] == ['toggle', 'volume 39'], str(sent))
+    # Library > Artists > the first artist's songs > Centre on the second: that artist's songs are the queue
+    walk = ['rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'run 200']
+    _, _, _, (sent, ids, d) = script(binary, work, 60, walk, *home, queue=True)
+    db = sqlite3.connect(d/'library.db')
+    artist = db.execute('select songer from songtable order by songer collate nocase limit 1').fetchone()[0]
+    want = [str(r[0]) for r in db.execute('select id from songtable where songer = ? order by name collate nocase, id', (artist,))]
+    good &= check("Centre on an artist's second song plays that artist's songs from it",
+                  len(sent) == 1 and sent[0].split()[1:] == ['play', '1', '0', str(len(want))] and ids == want and len(want) > 1, f'{sent} {len(ids)} ids for {len(want)}')
+    # Library > Albums > an album whose tracks are not in their titles' order: its tracks in track order
+    probe = folder(work, 60)  # the same made-up library every time
+    db = sqlite3.connect(probe/'library.db')
+    albums = [r[0] for r in db.execute('select distinct album from songtable order by album collate nocase')]
+    by = {o: {a: [str(r[0]) for r in db.execute(f'select id from songtable where album = ? order by {o}', (a,))] for a in albums}
+          for o in ('track, name collate nocase, id', 'name collate nocase, id')}
+    k = next((i for i, a in enumerate(albums) if by['track, name collate nocase, id'][a] != by['name collate nocase, id'][a]), None)
+    if k is None:
+        return check("the made-up library has an album whose tracks are not in title order", False)
+    walk = ['rest', 'key centre', 'rest', 'tick 2', 'rest', 'key centre', 'rest'] + ['tick 1', 'rest'] * k + ['key centre', 'rest', 'key centre', 'run 200']
+    _, _, _, (sent, ids, d) = script(binary, work, 60, walk, *home, queue=True)
+    want = by['track, name collate nocase, id'][albums[k]]
+    good &= check("an album's songs are its tracks in order", len(sent) == 1 and ids == want, f'{ids} for {want}')
+    # the last row leaves q2ui for demo's menus: the program ends, with the code of a plain end
+    trace, _, _ = script(binary, work, 60, ['rest', 'tick 9', 'rest', 'key centre', 'run 100', 'tick -1', 'run 100'], *home, code=0)
+    good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 1, str(trace[-1]['sel']))
+    return good
+
+
+def routes(binary, work):
+    """Ended and started again, q2ui opens the pages it had open, each on its row."""
+    good = True
+    r = Run(binary, work, 60, '--page', 'home')
+    r.rest()
+    r.key(KEY_CENTRE)   # Library
+    time.sleep(0.6)
+    r.ticks(1)          # Artists
+    r.key(KEY_CENTRE)
+    time.sleep(0.6)
+    r.ticks(3)          # the fourth artist
+    before = r.rest()
+    was = r.picture()
+    r.proc.terminate()
+    r.proc.wait(timeout=5)
+    os.close(r.queue)
+    again = Run(binary, work, 60, '--page', 'home', at=r.dir)
+    again.rest()
+    now = again.picture()
+    # below the status row, whose clock may have turned a minute between the two
+    same = all(shot.pixel(was, x, y) == shot.pixel(now, x, y) for y in range(BAR_H, 320, 3) for x in range(0, 375, 5))
+    good &= check('started again, it is on the page and the row it was ended on', same and before['ticks'] == 4, f"{before['ticks']} ticks")
+    again.key(KEY_RETURN)
+    time.sleep(0.6)
+    again.key(KEY_RETURN)
+    time.sleep(0.6)
+    home = again.rest()
+    good &= check('and Return goes back through the pages under it to Home, which Return does not leave',
+                  again.proc.poll() is None and home['frames'] > 0)
+    again.proc.terminate()
+    again.proc.wait(timeout=5)
+    os.close(again.queue)
+    return good
+
+
 def live(binary, work):
     good = True
     # the first frame, three ticks, a rest
@@ -422,8 +525,11 @@ def main():
             good &= subprocess.run([str(engine), d/'fb', d/'fonts'], timeout=60).returncode == 0
         if not only or 'scripts' in only:
             good &= scripts(binary, work)
+        if not only or 'pages' in only:
+            good &= pages(binary, work)
         if not only or 'live' in only:
             good &= live(binary, work)
+            good &= routes(binary, work)
     print('q2ui: ' + ('all checks passed' if good else 'FAILED'))
     return 0 if good else 1
 

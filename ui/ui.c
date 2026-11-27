@@ -99,6 +99,10 @@ void ui_select_top(int sel) {
 int ui_moving(void) { return again; }
 int ui_wake_pending(void) { return wake_at != 0; }
 void ui_quit(int code) { quit = 1, quit_code = code; }
+int ui_quitting(int *code) {
+    if (code) *code = quit_code;
+    return quit;
+}
 void ui_stats_reset(void) { memset(&ui_stats, 0, sizeof ui_stats); }
 
 /* The top page as it is now, whole, into a canvas of its own (no status row: that stays put over

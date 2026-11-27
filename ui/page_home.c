@@ -1,8 +1,9 @@
 /* Home (docs/oled-design.md#homes-first-row, docs/ipod.md#home), Split: the list at the left, and
  * at the right the playing song's cover over the whole pane, a card whose picture moves inside
  * its frame as the selection moves (docs/ui-rewrite.md#cards). The first row is Playing or Paused
- * while something is, and opens Now Playing. A row whose page q2ui has not got asks demo for it
- * (ui_demo_page): demo takes the screen for that page and gives it back when the page is left. */
+ * while something is, and opens Now Playing. A row with a page of demo's named asks demo for it
+ * (ui_demo_page): demo takes the screen for that page and gives it back when the page is left.
+ * The last row, Old Menus, leaves q2ui for demo's own menus. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,8 +15,11 @@
 
 static const struct home_row {
     const char *title, *demo; /* demo: the page of demo's that row opens; 0: a page of q2ui's */
-} rows[] = { { "Library", 0 },          { "Radio", "tuner_page" },    { "Games", "games_page" },
-             { "Folders", "folder_page" }, { "Cover Flow", "coverflow_page" }, { "Old Menus", "" } };
+} rows[] = { { "Library", 0 }, { "Old Menus", "" } };
+/* ponytail: demo's other Home rows (Radio, Games, Folders, Cover Flow, Search, Settings) are not
+ * here. Most of their pages are built by the payload's own openers, not by a stock page's name,
+ * so each needs its opener called from the gate and seen to work in an emulator before it gets a
+ * row; until then they are reached through Old Menus. */
 #define ROWS ((int)(sizeof rows / sizeof *rows))
 
 struct home_st {
