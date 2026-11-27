@@ -63,7 +63,8 @@ def base_args(binary, d):
     return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
-            '--wireless', d/'wireless', '--told', d/'told', '--config', d/'config.ini']
+            '--wireless', d/'wireless', '--told', d/'told', '--config', d/'config.ini',
+            '--library-order', d/'library-order']
 
 
 class Picture:
@@ -551,6 +552,21 @@ def pages(binary, work):
     rows = (d/'rows.txt').read_text().split() if (d/'rows.txt').exists() else []
     good &= check("the Library's rows in demo's default order (patch/library_edit.c lr_default), for the ones q2ui has",
                   rows == ['Songs', 'Playlists', 'Artists', 'Albums', 'Years', 'Ratings', 'Most', 'Played'], str(rows))
+    # the user's own order and hidden rows from demo's Edit Library (patch/library_edit.c LR_FILE: the rows' letters in
+    # order, each led by + or - once shown or hidden; a row it does not name goes in after the one before it by default).
+    # Most Played moved first, Playlists hidden, Songs moved after Albums: Years and Ratings follow Albums, Songs last
+    order = pathlib.Path(tempfile.mkdtemp(dir=work))/'ringnav-library-order'
+    order.write_bytes(b'm-pals'.ljust(64, b'\0'))
+    _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'rows @rows.txt'], *home, '--library-order', order,
+                                queue=True)
+    rows = (d/'rows.txt').read_text().split() if (d/'rows.txt').exists() else []
+    good &= check("the Library's rows in the user's own order from Edit Library, a row they hid left out",
+                  rows == ['Most', 'Played', 'Artists', 'Albums', 'Years', 'Ratings', 'Songs'], str(rows))
+    _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'key centre', 'rest', 'tick 5', 'rest', 'key centre', 'rest',
+                                                   'rows @songs.txt'], *home, '--library-order', order, queue=True)
+    rows = (d/'songs.txt').read_text().split() if (d/'songs.txt').exists() else []
+    good &= check('and each row opens its own page there: the sixth, Songs, opens Songs (its Shuffle row first)',
+                  rows[:1] == ['Shuffle'], str(rows[:4]))
     # the last row leaves q2ui for demo's menus: the program ends, with the code of a plain end
     trace, _, _ = script(binary, work, 60, ['rest', 'tick 9', 'rest', 'key centre', 'run 100', 'tick -1', 'run 100'], *home, code=0)
     good &= check('Centre on Old Menus ends q2ui', trace[-1]['sel'] == 7, str(trace[-1]['sel']))

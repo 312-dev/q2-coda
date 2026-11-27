@@ -346,6 +346,7 @@ void control_push(void);      /* Control Center (page_control.c) */
 extern const ui_page page_control;
 /* ---- config.c: the settings q2ui reads from demo's config.ini ---- */
 extern const char *config_file;
+extern const char *library_order_file; /* demo's Edit Library order (ui/page_library.c) */
 extern int config_light_forced, config_motion_forced; /* --light, --reduce-motion */
 int config_int(const char *section, const char *key, int def);
 void config_open(void);      /* read it, and again whenever it is written */

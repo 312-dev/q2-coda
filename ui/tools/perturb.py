@@ -86,6 +86,8 @@ CASES = {
  'np-modes-stale': ('ui/page_now.c', '        if (marks != s->marks_s) {', '        if (0) {', 'pages', 'turned on while Now Playing is open'),
  'np-no-more': ('ui/page_now.c', '    if (more && *n->title)', '    if (0)', 'pages', "More is drawn"),
  'np-hold-nothing': ('ui/page_now.c', '        ui_demo_page("playermore_page");', '        ;', 'pages', "Centre held on Now Playing opens demo's More"),
+ 'library-order-ignored': ('ui/page_library.c', '    FILE *f = fopen(library_order_file, "rb");', '    FILE *f = 0;', 'pages', "user's own order"),
+ 'library-hidden-shown': ('ui/page_library.c', ' && find(hidden, h, out[i]) < 0) lib_shown', ') lib_shown', 'pages', "user's own order"),
 }
 names = sys.argv[1:] or list(CASES)
 bad = 0
