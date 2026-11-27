@@ -275,7 +275,7 @@ Two switches, both of a kind the firmware already has.
 
 - **`demo` starts it**, on its first pass, having read the target before its first paint, so no frame of `demo`'s shows first. It ends the boot animation as it does (`killall q2splash`, as before Rockbox): the animation draws on the page on screen until `demo` shows a frame, which it will not. A q2ui that ships waits on the animation's lock as `demo` does ([boot](boot.md#boot-animation)).
 - **While q2ui runs, `demo` is headless and whole**: every service it owns goes on (the player, Bluetooth, Wi-Fi, USB, power, the scan). It leaves the wheel, Centre, Return and touches to q2ui, which reads them itself, and each one it drops resets its screen-off timer, so the screen stays lit while it is used and sleeps when it is not. Play/Pause and the side buttons stay `demo`'s: the music's keys work as on any page.
-- **q2ui ends** (Return on its first page, or a crash): `demo` sees its child gone on the next pass and draws its whole screen, and keeps it until `demo` next starts (a restart of the Q2). This is the owner's way out, always one Return away. There is no key on `demo`'s side that brings q2ui back: every one on Home is taken (Return opens Now Playing, its hold is the user's Hold Return choice), and a way back is not needed once q2ui's own pages cover what its first page leads to.
+- **q2ui ends** (the last row of its Home, Old Menus, or a crash): `demo` sees its child gone on the next pass and draws its whole screen, and keeps it until `demo` next starts (a restart of the Q2). This is the owner's way out, always on Home. Return cannot be it: on Home, Return opens Now Playing, as `demo`'s does. And no key on `demo`'s side brings q2ui back: every one on its Home is taken (Return opens Now Playing, its hold is the user's Hold Return choice), and a way back is not needed once q2ui's own pages cover what its Home leads to.
 - **`demo` needs the screen**: when a window other than Home or Now Playing comes to the top by itself (the USB prompt, a pairing request, Shut Down?, a scan's dialog), `demo` ends q2ui so the window can be seen and answered, and starts it again once Home is back on top. q2ui keeps the row it rested on in `/tmp/q2ui.state` and a start within ten minutes opens on it, so the list is where it was left.
 - **The screen dark**: `demo` turns the backlight off after its idle time and on at the next press, which is a wake and nothing else. q2ui reads the same keys, so it drops what arrives while the backlight is off and for 0.4 s after (`ui/ui.c` `dark`).
 
@@ -337,14 +337,15 @@ By what is used most and coupled least. Each step ships behind the switch and is
 | `ui/tools/fixture.py`, `measure.py`, `shot.py` | a made-up library of N songs, the timing harness, a panel file as a PNG             |
 | `test/ui.py`                                   | the host test: the toolkit's checks, scripts, a live run                            |
 
-To run it in the emulator:
+The first page is Home (`--page home`); `--page songs` starts on Songs, as the tests do. To run it in the emulator:
 
 ```sh
 B=$(python3 tools/ci/rebuild.py --dev -- --ui-spike | tail -1)   # a default build has no q2ui
 python3 tools/ci/emu_pool.py get "$B"                            # prints the copy's folder, E
 python3 ui/tools/fixture.py 9000 E/state/data/database.db        # over the copy's library, emulator stopped
 echo q2ui > E/state/data/ui-target; E/q2emu restart "$B"         # q2emu says demo did not start: q2ui did
-E/q2emu wheel 5; E/q2emu shot songs.png; E/q2emu key return      # Return ends q2ui; demo starts
+echo "--input /mnt/data/q2ui-input" > E/state/data/q2ui.args    # the emulator's devices are FIFOs: see Cutover
+python3 ui/tools/emu_input.py E wheel 5; E/q2emu shot home.png   # input to both programs; the last Home row leaves q2ui
 ```
 
 Options go in `/mnt/data/q2ui.args` (one line) or on the command line: `--db FILE`, `--catalogue FILE` (the server library's, `/mnt/mmc/.q2pod/catalogue.db` unless given; `""` for none), `--fonts DIR`, `--icons DIR`, `--limit N`, `--motion 0|1`, `--reduce-motion`, `--light`, `--panel-bits 8|6|5`, `--text awtk`, `--page songs|depth|gallery|card`, `--bench`, and a script's ([Scripts](#scripts)). Stats are written to `/mnt/data/q2ui-stats.json` whenever it comes to rest.
@@ -412,6 +413,7 @@ Read with these in mind:
 - **Live**, with the wheel's own events sent by `ui/tools/measure.py` (same build, same loaded machine): 778 frames for 20 slow ticks and two 100-tick spins; draw 1.5 ms a frame on average and 7.6 ms at worst, by CPU; 771 of them shown in under 8 ms of wall time. A slow tick is now about 22 frames (the glide, the lean and the indicator's fade, every one drawn) and 45 ms of CPU on this load, against 5.5 ms for the spike's 15 frames and `demo`'s 53 to 58 ms on a quiet machine. At rest: 0.0 ms in 5 s, no frame.
 - **The estimates are estimates.** They rest on two ratios from one Q2 run of other code. What they are for is deciding whether the design fits a refresh, which it does with room; the figures to trust come from the device ([Phase 2](#phase-2), device questions).
 - **To do when the machine is quiet**: the same table, and `demo` beside it, in one sitting.
+- **Not timed**: Home, the Library's group lists and Now Playing. They were written after the move to a machine whose build image cannot yet run the emulator ([Phase 2](#phase-2)), and a host's figures are not on this table's scale. Home's frame while the selection moves is its list's 196 px and the pane beside it (a cover drawn scaled, 179 x 320); Now Playing at rest draws its bar and times four times a second while a song plays, and nothing while it is paused.
 
 ### Measured on a Q2
 
