@@ -9,7 +9,7 @@ import subprocess
 import pytest
 
 import host
-from conftest import FNV_PRIME, O, Deques, Files, Rows, claim, fnv1a, high_halves, in_fork, libc, stock_start_with  # noqa: F401
+from conftest import FNV_PRIME, O, Deques, Files, Rows, call_returning_to, callback_at, claim, code_at, fnv1a, high_halves, in_fork, libc, stock_start_with  # noqa: F401
 
 MAGIC = 0x5132524e
 HEADER = '<14I'
@@ -1223,8 +1223,13 @@ class Wheel:
         self.fw = fw
         self.log = (C.c_int * 4096)()
         claim(O['WHEEL_POST'])
-        code = b'\x48\xb8' + struct.pack('<Q', C.addressof(self.log)) + bytes.fromhex('8b08 ff00 8b5738 8954c808 8b5720 8954c80c c3')
-        C.memmove(O['WHEEL_POST'], code, len(code))
+        def post(info, *_):  # log[0] counts the posts; post n's two fields (info + 0x38, + 0x20) at log[2 + 2n]
+            n = self.log[0]
+            self.log[0] = n + 1
+            self.log[2 + 2 * n] = C.c_int.from_address(info + 0x38).value
+            self.log[3 + 2 * n] = C.c_int.from_address(info + 0x20).value
+            return 0
+        callback_at(O['WHEEL_POST'], post)
         self.q = (C.c_ushort * 4)(0, used, full, capacity)
         self.loop = C.create_string_buffer(0x40)
         self.info = C.create_string_buffer(0x40)
@@ -3013,22 +3018,19 @@ VIEW_QUEUE_RET, UNPLAYABLE_NEXT_RET, LOAD_DIRECTORY_RET, SPEED_RECONNECT_RET = 0
 
 @pytest.fixture
 def stock_call(fw):
-    """A firmware function as called from one of stock's sites: x86-64 whose call returns to ret, so
+    """A firmware function as called from one of stock's sites: code whose call returns to ret, so
     __builtin_return_address(0) reads ret, as on the Q2. Its bytes go back after the test."""
     saved = []
 
     def call(ret, name, restype, *argtypes):
-        start = ret - 16
+        start, code = call_returning_to(ret, C.cast(getattr(fw.lib, name), C.c_void_p).value)
         claim(start)
-        saved.append((start, C.string_at(start, 21)))
-        target = C.cast(getattr(fw.lib, name), C.c_void_p).value
-        # sub rsp, 8; mov rax, target; call rax; add rsp, 8; ret: the callee's stack aligned as the ABI's
-        code = bytes.fromhex('4883ec08 48b8') + struct.pack('<Q', target) + bytes.fromhex('ffd0 4883c408 c3')
-        C.memmove(start, code, len(code))
+        saved.append((start, C.string_at(start, len(code))))
+        code_at(start, code)
         return C.CFUNCTYPE(restype, *argtypes)(start)
     yield call
     for start, data in reversed(saved):
-        C.memmove(start, data, len(data))
+        code_at(start, data)
 
 
 def now_playing(fw):
