@@ -555,6 +555,15 @@ LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.er
             b'        while :; do\n            /release/bin/demo 2>>/tmp/q2-demo.err\n',
             b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.log); [ "${n:-0}" -gt 2000000 ] && cp /tmp/q2-demo.log /tmp/q2-demo.log.1 && : >/tmp/q2-demo.log; done) &\n'
             b'        while :; do\n            /release/bin/demo >>/tmp/q2-demo.log 2>&1\n')
+# --dev only (docs/vamp-os-base.md#card-boot, patch/q2vampos.sh): a Vamp OS image on the card, loop-mounted and run
+# in a chroot before demo when the card's .vamp/os asks for it (boot-once, removed first, or boot-always) and the
+# image's SHA-256 matches; any other case, or a failure, goes on to Rockbox's choice and demo as before. q2vampos
+# exits 2 only once Vamp OS has run and ended, and the Q2 then reboots; any other status (1, its normal Vamp, or a
+# q2vampos that is missing or broken) goes on as before. Before Rockbox's choice, in BOOT_HOOK's start path.
+VAMPOS = 'usr/bin/q2vampos'
+VAMPOS_HOOK = (b'        if [ "$(cat /mnt/data/boot-target 2>/dev/null)" != q2pod ] && ! /usr/bin/q2boot; then\n',
+               b'        /usr/bin/q2vampos; [ $? = 2 ] && { reboot; sleep 60; }\n'
+               b'        if [ "$(cat /mnt/data/boot-target 2>/dev/null)" != q2pod ] && ! /usr/bin/q2boot; then\n')
 # --dev only: the wheel's frame log (playback.c wl_flush) and stale-press notes (navigation.c stale_note) go to the
 # card's q2-wheel.log, appended, when the card is up, up to 256 KB. In BOOT_HOOK's start path.
 WHEEL_LOG_HOOK = (b'        rb=/mnt/mmc/.rockbox\n',
@@ -2479,13 +2488,28 @@ def adbd_binary(out):
     return thirdparty.stripped(thirdparty.build('adbd')/ADBD, out/'adbd').read_bytes()
 
 
+def s90play_script(s90play, dev):
+    """S90play as a build ships it: stock's with BOOT_HOOK, and a --dev build's hooks on top."""
+    check(s90play.count(BOOT_HOOK[0]) == 1 and s90play.count(REMOTE_HOOK[0]) == 1, 'Unexpected S90play')
+    s90play = s90play.replace(*BOOT_HOOK)
+    check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
+    check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
+    check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
+    check(s90play.count(VAMPOS_HOOK[0]) == 1, 'Unexpected boot choice')
+    if not dev:
+        return s90play
+    return (s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK)
+            .replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK).replace(*VAMPOS_HOOK))
+
+
 def adb_files(out, cat):
     """A --dev build's ADB files ({rootfs path: (path whose inode metadata it takes, bytes)}): adbd, its gadget
-    script, q2update, and stock's USB scripts wrapped (adb_wrapper), each stock copy before its wrapper, which takes the
-    inode the copy's metadata comes from."""
+    script, q2update, q2vampos (VAMPOS_HOOK, not ADB's but --dev's too), and stock's USB scripts wrapped (adb_wrapper),
+    each stock copy before its wrapper, which takes the inode the copy's metadata comes from."""
     return {ADBD: (HELPER_LIKE, adbd_binary(out)),
             ADB_GADGET: (HELPER_LIKE, (ROOT/'patch/adb_gadget.sh').read_bytes()),
             Q2UPDATE: (HELPER_LIKE, (ROOT/'patch/q2update.sh').read_bytes()),
+            VAMPOS: (HELPER_LIKE, (ROOT/'patch/q2vampos.sh').read_bytes()),
             **{f'usr/bin/{n.replace(".sh", "_stock.sh")}': (f'usr/bin/{n}', cat(f'usr/bin/{n}')) for n in USB_SCRIPTS},
             **{f'usr/bin/{n}': (f'usr/bin/{n}', adb_wrapper(n)) for n in USB_SCRIPTS}}
 
@@ -3092,13 +3116,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     def swap_inode(p, path, src):
         line = need(inode(p, path), f'Missing {path.decode()} pseudo inode')
         return p[:line.start()]+path+b' F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(src)).encode()+p[line.end():]
-    s90play = cat(S90PLAY)
-    check(s90play.count(BOOT_HOOK[0]) == 1 and s90play.count(REMOTE_HOOK[0]) == 1, 'Unexpected S90play')
-    s90play = s90play.replace(*BOOT_HOOK)
-    check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
-    check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
-    check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
-    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play)
+    (out/'S90play').write_bytes(s90play_script(cat(S90PLAY), dev))
     (out/'config.ini').write_bytes(default_config(cat(DEFAULT_CONFIG)))
     s11logo = cat(S11LOGO)
     check(s11logo.count(LOGO_HOOK[0]) == 1, 'Unexpected S11logo_display_shell')
