@@ -41,7 +41,9 @@ tc_sha=$(cd "$root/tools" && python3 -c 'import thirdparty; print(thirdparty.TOO
 # /tmp is a tmpfs: the -m32 test programs run under qemu-i386, and on overlayfs (ext4) a 32-bit readdir
 # there stops at once with EOVERFLOW, as the kernel gives a 64-bit process 64-bit directory offsets.
 # No core dumps: a crashed test would leave hundreds of MB in the worktree it ran in.
-run=(docker run --rm --platform linux/arm64 --user "$(id -u):$(id -g)" --ulimit core=0
+# --init: PID 1 is Docker's init, which reaps orphans. Without it the command is PID 1, and a test's process
+# whose parent has gone is reparented to it and stays a zombie, which kill(pid, 0) still finds alive.
+run=(docker run --rm --init --platform linux/arm64 --user "$(id -u):$(id -g)" --ulimit core=0
      --tmpfs /tmp:exec,mode=1777,size=2g
      --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined
      -v "$HOME:$HOME" -v "$HOME/.cache/q2-thirdparty:/home/gray/.cache/q2-thirdparty" -v q2-toolchain:$tc
