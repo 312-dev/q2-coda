@@ -1025,3 +1025,18 @@ def test_find_with_no_buzzer_is_refused(fw, ui, mcl, recs):
     q2.files[CMD] = b'33 find\n'
     q2.tick()
     assert q2.ack() == b'33 2\n' and q2.now()['find'] == '0'
+
+
+def test_a_set_down_the_queue_is_not_known_even_while_q2ui_runs(fw, ui, mcl, recs):
+    """Control Center's and Display's settings are q2ui's alone, sent down the pipe only q2ui holds (q2ui_gate.c
+    q2ui_ctl): the queue, which the phone's daemon writes too, has no "set", with q2ui up or not."""
+    from test_q2ui_gate import CHILD, Gate
+    q2 = Q2(fw, ui, recs)
+    saved = []
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append(C.string_at(key).decode()) or 0)
+    g = Gate(fw)
+    g.poll()
+    assert g.on() == CHILD  # q2ui has the screen
+    q2.files[CMD] = b'34 set smart 1\n'
+    q2.tick()
+    assert q2.ack() == b'34 1\n' and 'SMARTWIFI' not in saved

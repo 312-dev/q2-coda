@@ -79,6 +79,10 @@
 #define MQ_SPEED 35.0f      /* then slides at this many px a second, */
 #define MQ_END_US 1500000u  /* and waits at its end before going back */
 #define MQ_FADE 12
+#define SLIDER_X 190       /* an inline slider's track starts here (docs/oled-design.md#inline-sliders), */
+#define SLIDER_END 62      /* and ends this far short of the right column, where its value ends */
+#define SLIDER_STEPS 10    /* a tick's most steps on a fast spin (patch/offsets.inc VOL_ACCEL_MAX) */
+#define SLIDER_TRACK_ON 0x7da2ea /* its track on the platter, under a white fill */
 #define CACHE 32 /* rows whose text is kept: a power of two, more than a fast glide shows */
 
 int list_motion = 1;
@@ -100,6 +104,7 @@ struct ui_list {
     unsigned everything_seen; /* list_rows_changed's count when this list last read its rows again */
     float tug;
     int pressed, moving;
+    int grab; /* the ROW_SLIDER row the wheel sets, -1 none */
     uint64_t t, press_at, sb_at, mq_at;
     int sb_alpha;
     float mq_x;
@@ -193,6 +198,7 @@ ui_list *list_new(const ui_source *src) {
     l->y0 = l->box.y + src->pinned * l->row_h;
     l->rows = (l->box.y + l->box.h - l->y0) / l->row_h;
     l->n = src->count(src->ctx);
+    l->grab = -1;
     forget(l);
     /* a list opens on its first row that scrolls: a pinned row (Shuffle) is reached by the wheel */
     l->sel = src->pinned < l->n ? src->pinned : 0;
@@ -210,6 +216,13 @@ void list_free(ui_list *l) {
     free(l);
 }
 int list_selected(const ui_list *l) { return l->sel; }
+int list_grabbed(const ui_list *l) { return l->grab; }
+int list_set_down(ui_list *l) {
+    if (l->grab < 0) return 0;
+    l->grab = -1;
+    ui_mark(l->focus_was);
+    return 1;
+}
 float list_scroll(const ui_list *l) { return (float)l->scroll.x; }
 
 /* Rows changed in place (a switch flipped, a value cycled): the same rows are read again, and the
@@ -267,7 +280,10 @@ static struct rowc *row_text(ui_list *l, int i) {
         c->value.made = c->detail.made = c->sub.made = c->lead.made = c->title.made;
         return c;
     }
-    if (r->value && *r->value) {
+    if (r->flags & ROW_SLIDER) { /* the title before the track; the value after it, in small text */
+        if (r->value) run_make(&c->value, FACE_REGULAR, META_PX, r->value, SLIDER_END - 8);
+        end = (float)(l->box.x + SLIDER_X) - VALUE_GAP;
+    } else if (r->value && *r->value) {
         run_make(&c->value, FACE_REGULAR, two ? META_PX : TITLE_PX, r->value, (int)((end - x) / 2));
         end -= c->value.w + VALUE_GAP;
     } else if (r->flags & ROW_SWITCH)
@@ -321,6 +337,16 @@ static void toggle(float right, float cy, float on, int focused) {
     fill_disc(kx, cy, 10, rgb_mix(0xffffff, RGB_ACCENT, on), 1);
 }
 
+/* An inline slider's track from x0 to x1 on cy, filled to level with its knob there: Track and Accent
+ * Blue in the list, #7DA2EA and white on the platter; the knob grows from 12 to 16 px while grabbed. */
+static void slider(float x0, float x1, float cy, float level, int focused, int grabbed) {
+    float kx = x0 + (x1 - x0) * clampf(level, 0, 1), kr = grabbed ? 8 : 6;
+    fill_round((rectf_t){ x0, cy - 2, x1 - x0, 4 }, 2, 0, focused ? SLIDER_TRACK_ON : tok(TOK_TRACK), 1, 0);
+    if (kx > x0) fill_round((rectf_t){ x0, cy - 2, kx - x0, 4 }, 2, 0, focused ? 0xffffff : RGB_ACCENT, 1, 0);
+    if (!focused && ui_light) fill_disc(kx, cy, kr + 1, tok(TOK_TRACK), 1); /* white on white: edged, as iOS's thumb */
+    fill_disc(kx, cy, kr, 0xffffff, 1);
+}
+
 /* Row i's contents with its top at y: in its resting inks, or (focused) as it reads on the
  * platter, its text dy lower and its glyph and art deeper still. */
 static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
@@ -354,7 +380,10 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
     if (c->detail.n) run_draw(&c->detail, c->detail_x, ty + (h - (float)META_PX) / 2 + META_DY, dim, 256);
     if (two) run_draw(&c->sub, c->title_x, ty + 29, dim, 256);
     float right = (float)(l->box.x + l->box.w - (SCREEN_W - RIGHT_COL));
-    if (c->value.n)
+    if (r->flags & ROW_SLIDER) {
+        slider((float)(l->box.x + SLIDER_X), right - SLIDER_END, cy + iy, r->level, focused, i == l->grab);
+        if (c->value.n) run_draw(&c->value, right - c->value.w, ty + (h - (float)META_PX) / 2, val, 256);
+    } else if (c->value.n)
         run_draw(&c->value, right - c->value.w, two ? ty + 5 + 3 : ty + (h - (float)TITLE_PX) / 2, val, 256);
     else if (r->flags & ROW_SWITCH)
         toggle(right, cy + iy, i == l->sel ? (float)l->knob.x : r->flags & ROW_ON ? 1.0f : 0.0f, focused);
@@ -490,7 +519,12 @@ void list_select(ui_list *l, int i, int animate) {
 
 void list_event(ui_list *l, const input_t *e) {
     if (!l->n) return;
-    if (e->type == IN_TICK) {
+    if (e->type == IN_TICK && l->grab >= 0) { /* a grabbed slider's: the selection stays */
+        int step = wheel_accel(&l->accel, l, e->value, e->ms, 0);
+        step = step < 1 ? 1 : step > SLIDER_STEPS ? SLIDER_STEPS : step;
+        if (l->src.adjust) l->src.adjust(l->src.ctx, l->grab, -e->value * step); /* down the wheel is less */
+        ui_mark(l->focus_was);
+    } else if (e->type == IN_TICK) {
         int dir = e->value, step = wheel_accel(&l->accel, l, dir, e->ms, l->n), old = l->sel;
         int sel = step == WA_LETTER && l->src.letters ? letter_step(l, l->sel, dir)
                                                       : l->sel + dir * (step == WA_LETTER ? WA_MAX_ROWS : step);
@@ -522,6 +556,9 @@ void list_event(ui_list *l, const input_t *e) {
         else kick(l);
         if (e->type == IN_KEY_HOLD) {
             if (l->src.held) l->src.held(l->src.ctx, l->sel);
+        } else if (was && row_text_flags(l, l->sel) & ROW_SLIDER) { /* Centre grabs a slider and sets it down */
+            l->grab = l->grab == l->sel ? -1 : l->sel;
+            ui_mark(l->focus_was);
         } else if (was && l->src.chosen)
             l->src.chosen(l->src.ctx, l->sel);
     }
@@ -530,8 +567,8 @@ void list_event(ui_list *l, const input_t *e) {
 int list_last_selected(void) { return traced ? traced->sel : -1; }
 int list_trace(char *out, size_t room) {
     if (!traced) return snprintf(out, room, "-");
-    return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f", traced->sel,
-                    traced->scroll.x, traced->bar.x, traced->lean.x, traced->press.x, traced->knob.x);
+    return snprintf(out, room, "sel=%d scroll=%.3f bar=%.3f lean=%.3f press=%.4f knob=%.3f grab=%d", traced->sel,
+                    traced->scroll.x, traced->bar.x, traced->lean.x, traced->press.x, traced->knob.x, traced->grab);
 }
 
 void list_step(ui_list *l) {
@@ -615,7 +652,7 @@ static void lp_select(void *st, int sel) { list_select(((struct list_page_st *)s
 static void lp_event(void *st, const input_t *e) {
     struct list_page_st *s = st;
     if (e->type == IN_KEY_UP && e->value == KEY_UI_RETURN) {
-        ui_pop();
+        if (!list_set_down(s->list)) ui_pop(); /* Return sets a grabbed slider down first */
         return;
     }
     list_event(s->list, e);

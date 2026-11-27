@@ -4,7 +4,7 @@
  *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5|565]
  *          [--panel-mode 24|keep] [--panel-mem FILE]
  *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
- *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--playlist FILE]
+ *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--ctl FD] [--playlist FILE]
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
  *          [--wireless FILE] [--told FILE] [--art DIR] [--config FILE]
  *
@@ -24,7 +24,8 @@
  * ends it, by a signal, when a window of its own must be seen, and starts it again after: so the
  * pages it had open and each one's row are kept in --state (a file in /tmp: gone at a restart)
  * each time it comes to rest, and a start within STATE_FRESH_S of that opens them again. --cmdq and --playlist are
- * the player's queue and list file (ui/player.c), --now and --cover what plays and its cover
+ * the player's queue and list file (ui/player.c), --ctl the open fd of the pipe demo takes settings
+ * from (demo passes it; patch/q2ui_gate.c), --now and --cover what plays and its cover
  * (ui/now.c), --ask the file a page of demo's is asked for in (ui_demo_page), --backlight the
  * folder whose state says the screen is dark, --power, --wifi and --wireless where the status
  * row reads the battery and Wi-Fi, --told the file demo says the rest of its states in
@@ -99,6 +100,8 @@ static void parse(int argc, char **argv) {
             now_cover_file = v, ++i;
         else if (!strcmp(a, "--cmdq"))
             player_queue = v, ++i;
+        else if (!strcmp(a, "--ctl"))
+            player_ctl = atoi(v), ++i;
         else if (!strcmp(a, "--playlist"))
             player_list = v, ++i;
         else if (!strcmp(a, "--backlight"))
@@ -409,11 +412,13 @@ static int script(const char *path) {
 /* The program run again in place of this one, with the arguments this one was started with: its
  * path is run anew (so a newer q2ui put there is what runs) and so is
  * /mnt/data/q2ui.args. Where the pages were is saved first, and what this one had open is closed,
- * so the new one starts as from a shell. */
+ * so the new one starts as from a shell, but for the settings pipe (--ctl), which is in the arguments
+ * again and has no other way back. */
 static char **started_with;
 static void restart(void) {
     state_save();
-    for (int fd = 3; fd < 64; ++fd) close(fd);
+    for (int fd = 3; fd < 64; ++fd)
+        if (fd != player_ctl) close(fd);
     /* the path, not the file this process was started from: a newer q2ui mounted or moved there
      * since is the point (/proc/self/exe is still the old one). That file only when the path
      * cannot be run, or was a bare name found on PATH. */

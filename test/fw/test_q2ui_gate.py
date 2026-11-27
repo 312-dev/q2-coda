@@ -31,6 +31,7 @@ class Gate:
         fw.mock('fw_close', lambda *_: 0)
         fw.mock('fw_access', lambda path, *_: 0 if binary and C.string_at(path) == BINARY else -1)
         fw.mock('fw_fork', self.fork)
+        fw.mock('chapter_pipe2', lambda *_: -1)  # no settings pipe unless a test makes one (Piped)
         fw.mock('fw_waitpid', self.waitpid)
         fw.mock('fw_system', lambda cmd, *_: self.shell.append(C.string_at(cmd).decode()))
         fw.mock('window_manager', lambda *_: 0x1000)
@@ -368,3 +369,91 @@ def test_q2uis_display_page_sets_light_mode_and_reduce_motion_through_demo(fw):
     assert cc(b'light', 2) == 0 and saved[-1] == ('IPOD', 'LIGHT', 2)
     assert cc(b'light', 3) == -1 and len(saved) == 1
     assert cc(b'motion', 1) == 0 and saved[-1] == ('IPOD', 'REDUCEMOTION', 1)
+
+
+class Piped(Gate):
+    """The gate with q2ui's settings pipe: pipe2 answers READ and WRITE, and what q2ui wrote is read from READ."""
+    READ, WRITE = 20, 21
+
+    def __init__(self, fw):
+        super().__init__(fw)
+        self.sent, self.made = b'', 0
+        fw.mock('chapter_pipe2', self.pipe2)
+
+    def pipe2(self, fds, flags, *_):
+        self.made += 1
+        self.flags = flags
+        C.c_int.from_address(fds).value, C.c_int.from_address(fds + 4).value = self.READ, self.WRITE
+        return 0
+
+    def read(self, fd, out, room, *_):
+        if fd != self.READ:
+            return super().read(fd, out, room)
+        data, self.sent = self.sent[:room], self.sent[room:]
+        C.memmove(out, data, len(data))
+        return len(data) if data else -1  # EAGAIN: nothing waiting
+
+
+def test_q2ui_alone_is_given_the_settings_pipe_open_and_its_number(fw):
+    """The write end stays open across q2ui's exec (FD_CLOEXEC cleared in the child alone) and its number follows
+    --ctl; both ends close in any other child demo starts, and demo's end never waits."""
+    g = Piped(fw)
+    fw.mock('fw_fork', lambda *_: 0)
+    ran = []  # the arguments as execl has them: the number is in the starter's frame, gone once it returns
+    fw.mock('fw_execl', lambda *a: ran.append([C.string_at(p) if p else 0 for p in a[:5]]) or -1)
+    g.poll()
+    calls = fw.calls()
+    order = [n for n, _ in calls]
+    execl = order.index('fw_execl')
+    assert ran[0] == [BINARY, BINARY, b'--ctl', b'21', 0]
+    assert (g.flags & 0x80) and (g.flags & 0x80000) and g.made == 1
+    assert ('fw_fcntl', (21, 2, 0)) in [(n, tuple(a[:3])) for n, a in calls[:execl]]
+    g.poll()  # started again (a fork answering 0 here): the same pipe
+    assert g.made == 1
+
+
+def test_a_settings_line_down_q2uis_pipe_is_acted_on(fw):
+    """control_center.c q2ui_cc_set for each "set NAME VALUE" line, in order, also one split across two reads; a
+    line of another verb, or a setting it has not, does nothing."""
+    saved = []
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append((C.string_at(key).decode(), v)) or 0)
+    g = Piped(fw)
+    g.poll()
+    assert g.on() == CHILD
+    g.sent = b'set smart 1\nreboot\nset reboot 1\nset motion 1\nset sm'
+    g.poll()
+    assert saved == [('SMARTWIFI', 1), ('REDUCEMOTION', 1)]
+    g.sent = b'art 0\n'
+    g.poll()
+    assert saved[-1] == ('SMARTWIFI', 0) and len(saved) == 3
+
+
+def test_without_a_pipe_q2ui_is_started_with_no_ctl(fw):
+    """pipe2 refused: q2ui runs as before, its settings rows staying as demo has them."""
+    g = Gate(fw)
+    fw.mock('chapter_pipe2', lambda *_: -1)
+    fw.mock('fw_fork', lambda *_: 0)
+    g.poll()
+    args = [a for n, a in fw.calls() if n == 'fw_execl'][0]
+    assert [C.string_at(p) for p in args[:2]] == [BINARY, BINARY] and args[2] == 0
+
+
+def test_q2uis_brightness_slider_sets_the_backlight_and_is_told_it_with_the_volume(fw):
+    """Control Center's sliders in q2ui: demo tells bright, vol and volmax (vol_cap: how high a step may take the volume);
+    "set bright N" is stock's config_lightness for 0 to 100 only."""
+    from conftest import Files
+    files = Files(fw)
+    g = Gate(fw)
+    fw.var('g_lightness', C.c_ubyte).value = 55
+    fw.var('g_volume', C.c_ubyte).value = 30
+    fw.var('g_maxvolume', C.c_ubyte).value = 70
+    fw.mock('mclGetOutputWay', lambda *_: 0)
+    g.poll()
+    g.poll()
+    said = dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines())
+    assert said['bright'] == '55' and said['vol'] == '30' and said['volmax'] == '70'
+    lit = []
+    fw.mock('config_lightness', lambda v, *_: lit.append(v) or 0)
+    cc = fw.fn('q2ui_cc_set', C.c_int, C.c_char_p, C.c_int)
+    assert cc(b'bright', 80) == 0 and lit == [80]
+    assert cc(b'bright', 101) == -1 and cc(b'bright', -1) == -1 and lit == [80]

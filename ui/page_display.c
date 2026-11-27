@@ -2,8 +2,8 @@
  * Mode (Off, On, Auto: light from 7:00 to 19:00) and Reduce Motion, which q2ui itself draws by, then
  * the rest of demo's Display page through the gate. A setting's value is the file's
  * (ui/config.c reads demo's config.ini whenever it is written); a choice goes to demo, which owns
- * the file, through the command queue ("set light N", "set motion N", patch/control_center.c
- * q2ui_cc_set), and the row shows it at once until the file says so too. */
+ * the file, down q2ui's own pipe ("set light N", "set motion N", ui/player.c player_set,
+ * patch/control_center.c q2ui_cc_set), and the row shows it at once until the file says so too. */
 #include <stdio.h>
 
 #include "q2ui.h"
@@ -36,10 +36,8 @@ static void chosen(void *ctx, int i) {
         ui_demo_page("systemset/display_page");
         return;
     }
-    char verb[24];
     int next = i == D_LIGHT ? (value(D_LIGHT) + 1) % 3 : !value(D_MOTION);
-    snprintf(verb, sizeof verb, "set %s %d", i == D_LIGHT ? "light" : "motion", next);
-    if (player_send(verb)) return;
+    if (player_set(i == D_LIGHT ? "light" : "motion", next)) return;
     want[i] = next;
     list_rows_changed();
     ui_mark_all();
