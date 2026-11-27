@@ -2133,9 +2133,10 @@ def live(binary, work):
     # a server library's catalogue (docs/server-library.md): its songs are listed with the card's
     cat = pathlib.Path(work)/'catalogue.db'
     db = sqlite3.connect(cat)
-    db.execute('create table servertable(id integer, name, songer, album, track integer)')  # songtable's columns that are read
-    db.executemany('insert into servertable values (?, ?, ?, ?, ?)',
-                   [(0x40000000 + i, f'Server {i}', 'Artist', 'Album', i + 1) for i in range(50)])
+    # songtable's columns that are read (servertable has them all: patch/catalogue.c makes it from serverall)
+    db.execute('create table servertable(id integer, name, songer, album, track integer, fileurl, time integer, time_end integer)')
+    db.executemany('insert into servertable values (?, ?, ?, ?, ?, ?, 0, 0)',
+                   [(0x40000000 + i, f'Server {i}', 'Artist', 'Album', i + 1, f'http://server/{i}') for i in range(50)])
     db.commit()
     db.close()
     r = Run(binary, work, 300, '--catalogue', cat)
