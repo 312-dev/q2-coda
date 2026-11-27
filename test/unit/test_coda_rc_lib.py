@@ -482,3 +482,16 @@ def gone_pid():
     """A pid no process has (the top of pid_max downwards), as a restarted demo's old one."""
     top = int(pathlib.Path('/proc/sys/kernel/pid_max').read_text())
     return next(p for p in range(top - 1, 1, -1) if not pathlib.Path(f'/proc/{p}').exists())
+
+
+def test_the_playlists_list_answers_with_no_server_signed_in(lib, tmp_path):
+    """the art's coalesce() has the server's cover first only with a catalogue attached: without one it must still be
+    a call SQLite takes (one argument is refused: "wrong number of arguments to function coalesce()")"""
+    q2 = Q2(lib, tmp_path)
+    db = sqlite3.connect(tmp_path / 'mnt/data/database.db')
+    db.execute("insert into playlist values (1, 'Road', '', 1)")
+    db.execute("insert into playlist values (101, 'Alpha', '/mnt/mmc/a/1.flac', 1)")
+    db.commit()
+    db.close()
+    listing = q2.browse('playlists')
+    assert not isinstance(listing, str) and titles(listing) == ['Road'], listing
