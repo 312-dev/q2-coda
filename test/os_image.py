@@ -558,6 +558,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/sv/q2libd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'ui-slow':  # q2ui's finish waits 10 s whatever the end, as before hot reload
         (fs/'etc/sv/q2ui/finish').write_text('#!/bin/sh\nsleep 10\n')
+    if perturb == 'player-bounce':  # q2player stopped as q2ui restarts: the hot reload check's player gone away
+        (fs/'etc/sv/q2ui/finish').write_text('#!/bin/sh\nsv restart /etc/sv/q2player\n')
     if perturb == 'sysd-off':  # no q2sysd
         (fs/'etc/sv/q2sysd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'playd-off':  # no q2playd
@@ -675,7 +677,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         before, after, restarted = played[3]
         check(restarted, 'hot reload: q2ui ended from outside is started again within 5 s')
         check(before.get('state') == '2' and after.get('state') == '2' and before.get('id') == after.get('id') == '1'
-              and b'q2playd: the player went away' not in (work/'console.log').read_bytes(),
+              and b'q2playd: the player went away' not in (work/'console.log').read_bytes().split(b'powering off')[0],  # before the hold's shutdown, which stops both
               f'hot reload: q2playd keeps the song and q2player across q2ui\'s restart (state {before.get("state")} then '
               f'{after.get("state")}), and it plays out after')
     lines = (emu/'record').read_text().splitlines()
@@ -742,7 +744,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()
