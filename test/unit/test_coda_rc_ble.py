@@ -12,6 +12,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sysconfig
 import tempfile
 import threading
 import time
@@ -27,7 +28,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 PATCH = ROOT / 'patch'
 SOURCES = [PATCH / 'coda_rc.c', PATCH / 'coda_rc_core.c', PATCH / 'coda_rc_lib.c', PATCH / 'coda_rc_mdns.c',
            PATCH / 'coda_rc_ble.c', PATCH / 'monocypher/monocypher.c', PATCH / 'monocypher/monocypher-ed25519.c']
-SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'
+SQLITE = f"/usr/lib/{sysconfig.get_config_var('MULTIARCH')}/libsqlite3.so.0"
 WAIT = time.sleep  # conftest makes time.sleep return at once during a test; the daemon's loop needs real time
 CONNECT = socket.socket.connect  # conftest refuses connect: these are AF_UNIX sockets in a folder the test made
 

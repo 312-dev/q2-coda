@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, STRIP_SEARCH, Deques, Files, Rows, claim, favdir_card, fnv1a, high_halves, in_fork, stock_prop_str, ui_name
+from conftest import O, STRIP_SEARCH, Deques, Files, Rows, callback_at, claim, favdir_card, fnv1a, high_halves, in_fork, stock_prop_str, ui_name
 
 W_X, W_PARENT, W_EMITTER = O['W_X'], O['W_PARENT'], O['W_EMITTER']
 EMIT_TYPE, EMIT_PENDING_REMOVE, EMIT_NEXT = O['EMIT_TYPE'], O['EMIT_PENDING_REMOVE'], O['EMIT_NEXT']
@@ -911,12 +911,13 @@ def test_a_long_press_of_a_side_button_is_the_editors(editor, ui, fw):
 
 # Stock code at a fixed address, for a handler the C calls there. Only ever in a fork.
 def stock_handler(address, result=0):
-    """x86-64 at address: its first two arguments and the event's x (rsi + EVENT_X) logged, result returned."""
+    """A stand-in at address: its first two arguments and the event's x (the second's EVENT_X) logged, result returned."""
     log = (C.c_long * 3)()
     claim(address)
-    code = (b'\x48\xb8' + struct.pack('<Q', C.addressof(log)) + bytes.fromhex('488938 48897008') +
-            b'\x8b\x4e' + bytes([EVENT_X]) + bytes.fromhex('48894810') + b'\xb8' + struct.pack('<I', result) + b'\xc3')
-    C.memmove(address, code, len(code))
+    def handler(a, b, _):
+        log[0], log[1], log[2] = a, b, C.c_uint32.from_address(b + EVENT_X).value
+        return result & 0xffffffff
+    callback_at(address, handler)
     return log
 
 

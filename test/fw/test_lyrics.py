@@ -8,7 +8,7 @@ import struct
 import pytest
 import host
 
-from conftest import O, ROOT, Deques, Files, block, libc, text
+from conftest import O, ROOT, Deques, Files, block, code_at, jump_code, libc, low_map, text
 
 FAR = 0x7fffffff
 TAG_MAX = 65536
@@ -1015,14 +1015,12 @@ class TagLib:
     def __init__(self, fw, tags, bound=True):
         self.tags, self.calls = tags, []
         self.keep: list[object] = []
-        self.lib = libc.mmap(None, 0x10000, 7, 0x62, -1, 0)  # read, write, run; MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT
-        assert self.lib and self.lib < 1 << 32
+        self.lib = low_map(0x10000, 7)  # read, write, run
         for at, kind, fn in ((GET, C.CFUNCTYPE(C.c_void_p, C.c_void_p, C.c_char_p), self.get),
                              (FREE, C.CFUNCTYPE(None, C.c_void_p), self.free)):
             callback = kind(fn)
             self.keep.append(callback)
-            code = b'\x48\xb8' + struct.pack('<Q', C.cast(callback, C.c_void_p).value) + b'\xff\xe0'  # movabs rax; jmp rax
-            C.memmove(self.lib + at, code, len(code))
+            code_at(self.lib + at, jump_code(C.cast(callback, C.c_void_p).value))
         stub = C.cast(fw.lib.taglib_file_new, C.c_void_p).value or 0
         C.c_uint.from_address(O['TAGLIB_NEW_GOT']).value = (self.lib + NEW if bound else stub) & 0xffffffff
         fw.mock('taglib_file_new', lambda path, *_: self.calls.append(('new', C.string_at(path))) or FILE)

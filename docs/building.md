@@ -16,6 +16,7 @@
 - The test dependencies: `pip install -r requirements.txt`
 - For the rebuilt third-party libraries ([third-party.md](third-party.md)): network access on the first build, which fetches the Codescape MIPS toolchain (2.3 GB) and the pinned sources into `~/.cache/q2-thirdparty`, and about an hour to compile them once; bwrap and qemu-mipsel for `test/thirdparty.py`
 - Only to change `remote/iroh-sidecar` (`q2-iroh`, which a build otherwise takes pinned from the cache): Rust nightly-2026-11-18 with `rust-src` ([remote: Building it](remote.md#building-it)). On GRAYTHINKPAD it is installed in `~/.cache/q2-rust` (`rustup` and `cargo` there; `~/.cache/q2-rust/wrap/cargo` runs `cargo +nightly` on that nightly). The pinned binary is reproduced byte for byte only with that toolchain and its target folder: `RUSTUP_HOME=~/.cache/q2-rust/rustup CARGO_HOME=~/.cache/q2-rust/cargo PATH=~/.cache/q2-rust/wrap:$PATH CARGO_TARGET_DIR=~/.cache/q2-rust/target python3 tools/iroh.py` (a later nightly, or another target folder, makes a different binary of the same crate). The crate's unit tests run on the host the same way with `cargo +nightly test --offline --release --manifest-path remote/iroh-sidecar/Cargo.toml` and `CARGO_TARGET_DIR=~/.cache/q2-rust/target-host`.
+- All of the above come in the native arm64 container that `tools/mac/q2env` runs on the MacBook Pro, the supported build host: [Building on macOS](#building-on-macos)
 - The original stock ZIP. Its SHA-256 is:
 
 ```text
@@ -102,6 +103,55 @@ All three kernel-module experiments were on by default from 1.5.0 to 1.6.1 and w
 `--dev --mcu-idle-sleep` is off in release builds. It adds an interruptible MCU sleep with an explicit wake handshake. See [MCU sleep](mcu-sleep.md).
 
 Every build installs the player, `q2player` ([player-plan.md](player-plan.md)), as `/usr/bin/hciplayer`, where stock's player was, so demo starts and stops it by that name. It builds `q2player` with `tools/player.py` (FFmpeg on first use, some minutes; the toolchain and mbedTLS that `tools/thirdparty.py` keeps in `~/.cache/q2-thirdparty`) against the image's own `libasound.so.2`, and records `q2player_sha256` in the manifest. The root filesystem holds 75,497,472 bytes (`ROOTFS_ROOM`: mtd2 less a bad-block spare, [hardware](hardware.md#flash-layout)): past that the build stops and says by how much.
+
+## Building on macOS
+
+The supported way to build and test is the native arm64 Linux container on the MacBook Pro: `tools/mac/q2env CMD` runs CMD there, in the current directory (no CMD: a shell). The laptop (GRAYTHINKPAD, WSL) path in the rest of this file and in [orchestration](orchestration.md) is no longer maintained.
+
+```sh
+B=$(tools/mac/q2env python3 tools/ci/rebuild.py --dev | tail -1)
+tools/mac/q2env python3 tools/ci/affected.py --run "$B"              # or --all
+```
+
+The image (`tools/mac/Dockerfile`) is Ubuntu 24.04 arm64 with the [Requirements](#requirements) (clang and lld 18.1.3, squashfs-tools 4.6.1, ImageMagick 6.9.12, qemu-user 8.2.2, bwrap 0.9.0, Go 1.22.2, ccache 4.9.1) and a venv of `requirements.txt`, `test/unit/requirements.txt`, pytest-xdist and mypy made from the arm64 PIE Python 3.12.16 that `actions/setup-python` installs ([Firmware tests](#firmware-tests) refuse a non-PIE one). `q2env` builds it on first use and again when the Dockerfile, `tools/mac/cc` or the pinned requirements change.
+
+- **The same paths inside and out.** The Mac's home is mounted at its own path and is `HOME`, and the command runs as the Mac's user, so a worktree, `~/.cache/q2-builds/...` or `~/q2-stock/Q2 Firmware V1.36.zip` (`rebuild.py`'s default ZIP) is the same file in either shell.
+- **`~/.cache/q2-thirdparty` is also at `/home/gray/.cache/q2-thirdparty`**, where its components were built, and `Q2_THIRDPARTY_CACHE` names it: `tools/thirdparty.py`'s cache keys and its output's compiler paths include the cache's path (`REPRODUCIBLE`), so only there are they reused and rebuilt to the same bytes.
+- **The Codescape MIPS toolchain is x86-64**, the one x86 dependency left. It runs under the Colima VM's Rosetta handler, with the image's amd64 libc: every build runs its `strip` on adbd (`thirdparty.stripped`), and a third-party or q2player recipe that changes compiles with it; the cached outputs in `~/.cache/q2-thirdparty/out` and `~/.cache/q2-player` cover the recipes as they are. Moving these builds to an arm64 toolchain of Vamp OS's own is open. The toolchain is in a Docker volume, `q2-toolchain`, because the Mac's home is case-insensitive APFS and its sysroots hold 136 pairs of paths that differ only in case (`xt_MARK.h` and `xt_mark.h`); `q2env` unpacks `dl/mti-linux-2020.06-01.tar.gz` there once, as `toolchain()` does.
+- **`-m32` test programs** (`test/coverflow.py`, `test/peq.py`'s audio writer) are built by `i686-linux-gnu-gcc` (`tools/mac/cc` takes `cc -m32` there) and run under the VM's qemu-i386 against the image's i386 libc. `/tmp` is a 2 GB tmpfs, because on overlayfs a 32-bit program's `readdir` there stops at once with `EOVERFLOW`.
+- **Namespaces and `/proc`.** bwrap and `unshare -Ur` need user namespaces: `q2env` turns off Docker's seccomp and AppArmor profiles, and the VM must have `kernel.apparmor_restrict_unprivileged_userns=0`. The [Seam test](#seam-test)'s `unshare --mount-proc` needs `/proc` unmasked (`systempaths=unconfined`).
+- **The emulator** ([Emulator pool](#emulator-pool)) execs the MIPS rootfs's programs in a bwrap chroot through a qemu-mipsel binfmt handler at `/usr/libexec/qemu-binfmt/mipsel-binfmt-P`, which the VM registers (below), and `~/q2-emu-server/qemu-mipsel-static` must be the arm64 build, the image's `/usr/bin/qemu-mipsel-static`. The pool's card fixture is `~/.cache/q2-emu-pool/card`.
+- **No `q2-heavy`** (no systemd in the container): the gate runs suites bare, and its memory rule (a 4 GB floor) holds against the VM's memory. A failed suite's second try runs with nothing beside it, so one failure serializes the rest of an `--all` run.
+- **Core dumps are off** (`--ulimit core=0`).
+
+Colima runs the VM (`~/.colima/default/colima.yaml`): `vmType: vz`, `rosetta: true` (the toolchain), `mountType: virtiofs` with the home mounted writable, 9 CPUs and 11 GB (the Mac has 18 GB, shared with an Ollama model of about 9.4 GB when it is loaded), 80 GB of disk, and system provision steps run at every start:
+
+```yaml
+provision:
+  - mode: system
+    script: echo kernel.apparmor_restrict_unprivileged_userns=0 > /etc/sysctl.d/60-q2-userns.conf && sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+  - mode: system
+    script: echo ':qemu-mipsel:M:0:\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x08\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00:\xff\xff\xff\xff\xff\xff\xff\x00\x00\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x20\x00\x00\x00:/usr/libexec/qemu-binfmt/mipsel-binfmt-P:PO' > /etc/binfmt.d/qemu-mipsel.conf && systemctl restart systemd-binfmt
+```
+
+Measured on the MacBook Pro on 2026-11-26 (the VM at 9 CPUs and 11 GB), against GRAYTHINKPAD's last figures:
+
+| Step | Mac | GRAYTHINKPAD |
+| ---- | --- | ------------ |
+| `rebuild.py --dev --force` | 24 s | 36 to 56 s |
+| `test/patch.py`, alone | 347 s (268 s on an idle VM) | 4:39 |
+| `test/unit`, alone | 330 s | about 280 s |
+| `affected.py --all --smoke`, wall | 823 s | about 31 min, the suites one after another |
+| `test/player/run.py`, `test/iap_probe.py`, beside the others | 656 s, 546 s | about 270 s, 9:02 |
+| `test/subsonic_seam.py`, smoke, beside the others | 170 s, 114 s | about 75 s, about 95 s |
+
+A release build is byte-identical whether built here or on x86-64 (the same `update.tar`, compared on 2026-11-26).
+
+What does not pass there yet:
+
+- **`test/bluealsa.py`'s SBC packets at the MTU are not run on arm64** (`check_mtu` prints that it skips them; the rest of `test/build.py --build` runs and passes). Under Unicorn's arm64 build, 2.1.4 and its dev branch at `8317c39` alike, that one harness run (stock's bluealsa as well as the patched one) leaves `s1` and `s4` 0 after `lw s1, 492(s3)` and `lw s4, 496(s3)` (`0x406274`, `0x406278`) while memory holds 2 and 48000, and the encoder later jumps to 0; x86-64's Unicorn runs it right. The same block alone is right, and it is not the instruction count, the translation cache, range hooks or earlier instances; the cause inside Unicorn is not pinned. It reproduces with `test/bluealsa.py`'s `encode(stock, aptx, SBC, 1021)`, stock's bluealsa and libopenaptx unpacked from any build, in a fresh process. The other Unicorn suites are not affected: `test/patch.py`'s full draw-call trace (`Q2_TRACE`, 1,327,549 lines) of one release build is byte-identical under arm64's and x86-64's Unicorn (2026-11-27), and the trace does tell builds apart (a `--dev` build's differs).
+- **The emulator's first lease can miss**, cause not pinned: on 2026-11-26 `test/coda_rc_e2e.py`'s first lease of a new pool copy found no `CARREMOTE=1` in `config.ini` after the boot (its `prepare` writes it before), and one smoke run timed out on Center opening Now Playing (`STEP_S`, 8 s); both passed when run again.
+- **`tools/ci/test_orch.py` needs `systemd-run`** (it tests `q2-heavy`'s scopes), which the container has not.
 
 ## Tests
 
@@ -309,7 +359,7 @@ python3 tools/scan.py --build /tmp/q2-build # another build's rootfs
 
 `test/patch.py` runs the real MIPS payload, but it needs a build, so a stock ZIP. `test/fw` runs the firmware's C without one, on every pull request and push to `main` (`.github/workflows/firmware.yml`, with the host suites above that need no build).
 
-`test/fw/host.py` compiles `navigation.c` and `tools/peq.py`'s `UI_SOURCES`, the payload's own files, as they are for the Q2, not through `PEQ_HOST`, and links them into one library the tests load with ctypes. Their `stock.h` is `tools/build.py`'s own (`stock_header`) and `themes.inc` `tools/theme.py`'s, and `peq_platform.h` lays stock's functions out as `tools/peq.py` does, so the color path through `peq.h` is the device's. A stock call, or a libc call with effects outside the process, is a stub: it records the call and returns 0 of its declared type (a float in the float register), or what the test's `fw.mock` returns; `tk_snprintf` and `tk_strcmp` answer as `vsnprintf` and stock's `tk_strcmp` (`strcmp`, a NULL first string -1 and a NULL second 1) unless mocked, and `__errno_location` answers the address of the library's own `fw_errno`, 0 at each load. So a test can't touch the card, the network or this machine.
+`test/fw/host.py` compiles `navigation.c` and `tools/peq.py`'s `UI_SOURCES`, the payload's own files, as they are for the Q2, not through `PEQ_HOST`, and links them into one library the tests load with ctypes. Their `stock.h` is `tools/build.py`'s own (`stock_header`) and `themes.inc` `tools/theme.py`'s, and `peq_platform.h` lays stock's functions out as `tools/peq.py` does, so the color path through `peq.h` is the device's. A stock call, or a libc call with effects outside the process, is a stub: it records the call and returns 0 of its declared type (a float in the float register), or what the test's `fw.mock` returns; `tk_snprintf` and `tk_strcmp` answer as `vsnprintf` and stock's `tk_strcmp` (`strcmp`, a NULL first string -1 and a NULL second 1) unless mocked, and `__errno_location` answers the address of the library's own `fw_errno`, 0 at each load. So a test can't touch the card, the network or this machine. The compiler's own runtime calls (gcov's, the sanitizers', arm64's outline atomics `__aarch64_*`) are linked for real, not stubbed. A test that puts code at a stock address uses conftest's `ret_code`, `returns_code`, `callback_at` (a jump to a ctypes callback) and `call_returning_to`, which write this machine's own instructions, x86-64 or arm64, and `code_at`, which makes arm64's instruction cache see them.
 
 ```sh
 python3 -m pytest test/fw --basetemp ~/.cache/q2-pytest/fw
@@ -322,7 +372,7 @@ Q2_FW_STRICT=1 python3 -m pytest test/fw    # fail a test that reaches a stub to
 - **Where it writes:** each test loads its own copy of the library (about 20 MB, more under ASan), deleted as soon as it's loaded, and a passing test's directory goes (`tmp_path_retention_policy`); a run leaves the session's build, a few MB. pytest's default base is under `/tmp`, which is RAM on many systems, so `--basetemp` on disk is the safer habit. A test that crashes the C (a segfault, a divide by zero) ends the whole run: `-v` names it.
 - **Python:** stock's fixed addresses (0x400000-0xc00000) must be free, so the python has to be position-independent. Debian's and Ubuntu's own `/usr/bin/python3` isn't; one built with the toolchain's default `-pie` (Arch's, Fedora's, `actions/setup-python`'s builds) is. conftest stops with a message on one that isn't.
 - **Mirrors:** `fw.var` checks a ctypes Structure mirror against the symbol's size, so a C struct that changed fails there instead of reading wrong offsets; `host.offsets(obj, type)` reads a struct's offsets from the debug info where a mirror would be fragile.
-- **q2video:** `patch/video.c` is a program of its own on the Q2, so `test/fw/video_host.py` builds it into a library of its own, the same way: the glibc and alsa-lib calls it declares are stubs, and `fw_video_run` runs `main` to its return or its `_exit`. There is no second process: when `fork` answers a pid, the harness first runs `ffmpeg()`'s child's half in place, with that call's own arguments read off its frame where the debug info puts them, so the child's `dup2`s and `execv` reach the stubs too. Reading that frame takes x86-64's layout, so the harness builds nowhere else. `test/fw/test_video.py` answers the stubs as a simulated Q2.
+- **q2video:** `patch/video.c` is a program of its own on the Q2, so `test/fw/video_host.py` builds it into a library of its own, the same way: the glibc and alsa-lib calls it declares are stubs, and `fw_video_run` runs `main` to its return or its `_exit`. There is no second process: when `fork` answers a pid, the harness first runs `ffmpeg()`'s child's half in place, with that call's own arguments read off its frame where the debug info puts them, so the child's `dup2`s and `execv` reach the stubs too. The unwinder finds that frame (`_Unwind_GetCFA`), so it reads the same on x86-64 and arm64. `test/fw/test_video.py` answers the stubs as a simulated Q2.
 
 - **Fakes answer as stock does, NULLs included.** A fake kinder than stock hides a crash: on 2026-11-17 a NULL read on every Now Playing open passed `test/fw` because the fake `widget_get_prop_str` returned its default where stock returns NULL. `conftest.stock_prop_str` is what stock's answers (a field every widget, window or image answers itself, `text` and any int-valued prop are NULL when read as a string; the default only for a prop never set); `test_nav_lists.Ui`, which most list and window tests share, and the widget fakes of the files with a tree of their own (Cover Flow, hold, library and display pages, the painters, Up Next, the two end-to-end walks) answer through it; a one-line mock for one test's single widget may still answer by hand. `conftest.stock_start_with` is stock's `tk_str_start_with`, false for a NULL, as a never-named widget's name is.
 - **Writing one:** `fw.fn('lyrics__lrc_time', restype, *argtypes)` reaches a static as `<file>__<name>`, and `fw.mock` and `fw.calls` take stub names: a stock function's, or `fw_<name>` for libc (`fw_fopen`). Work out the expected answer from what the function is for before running it.

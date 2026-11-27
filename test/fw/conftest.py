@@ -8,7 +8,9 @@ import ctypes as C
 import functools
 import os
 import pathlib
+import platform
 import re
+import struct
 import sys
 import traceback
 
@@ -82,6 +84,7 @@ libc = C.CDLL(None)
 libc.mmap.restype, libc.mmap.argtypes = C.c_void_p, [C.c_void_p, C.c_size_t, C.c_int, C.c_int, C.c_int, C.c_long]
 libc.mprotect.argtypes = [C.c_void_p, C.c_size_t, C.c_int]
 libc.madvise.argtypes = [C.c_void_p, C.c_size_t, C.c_int]
+libc.munmap.argtypes = [C.c_void_p, C.c_size_t]
 if libc.mmap(STOCK, STOCK_SIZE, 3, 0x100022, -1, 0) != STOCK:  # read/write, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
     pytest.exit('test/fw needs a position-independent python: 0x400000-0xc00000, stock\'s addresses, is taken '
                             '(a non-PIE python lives there); use one built with -pie, e.g. actions/setup-python\'s or a venv of a PIE build', returncode=4)
@@ -110,6 +113,92 @@ def high_halves(n):
     start, _high = _high, _high + n
     assert _high <= 0x5000, 'out of high halves'
     return range(start, _high)
+
+
+# Stand-in code at a stock address, in the host's own instructions: x86-64 (GitHub's CI) or arm64 (the Mac's
+# container, docs/building.md#building-on-macos). Anything beyond a return is a ctypes callback the code jumps to.
+X86_64 = platform.machine() == 'x86_64'
+A64_RET = 0xd65f03c0
+_callbacks: list[object] = []  # what stand-ins jump to, alive for the process (a test in_fork ends with its child)
+
+
+def _a64(*words):
+    return b''.join(struct.pack('<I', w) for w in words)
+
+
+def code_at(address, code):
+    """code written at address (a claimed page), the instruction cache made to see it: arm64's does not see stores."""
+    C.memmove(address, code, len(code))
+    if not X86_64:
+        C.CDLL('libgcc_s.so.1').__clear_cache(C.c_void_p(address), C.c_void_p(address + len(code)))
+
+
+def ret_code():
+    """return"""
+    return b'\xc3' if X86_64 else _a64(A64_RET)
+
+
+def returns_code(value):
+    """return value (32 bits, zero-extended, as mov eax, imm does)"""
+    v = value & 0xffffffff
+    if X86_64:
+        return b'\xb8' + struct.pack('<I', v) + b'\xc3'
+    return _a64(0x52800000 | (v & 0xffff) << 5, 0x72a00000 | (v >> 16) << 5, A64_RET)  # movz w0; movk w0, lsl 16; ret
+
+
+def jump_code(target):
+    """a jump to target, an absolute address, with every argument register as it was"""
+    if X86_64:
+        return b'\x48\xb8' + struct.pack('<Q', target) + b'\xff\xe0'  # movabs rax, target; jmp rax
+    return _a64(0x58000050, 0xd61f0200) + struct.pack('<Q', target)  # ldr x16, [pc + 8]; br x16; the address
+
+
+def callback_code(fn, restype=C.c_uint64, argtypes=(C.c_uint64,) * 3):
+    """Code that hands its call to fn (Python): a jump to a ctypes callback, kept alive."""
+    callback = C.CFUNCTYPE(restype, *argtypes)(fn)
+    _callbacks.append(callback)
+    return jump_code(C.cast(callback, C.c_void_p).value)
+
+
+def callback_at(address, fn, restype=C.c_uint64, argtypes=(C.c_uint64,) * 3):
+    """callback_code written at address (a claimed page); the code, for a caller that saves and restores."""
+    code = callback_code(fn, restype, argtypes)
+    code_at(address, code)
+    return code
+
+
+def call_returning_to(ret, target):
+    """(start, code): code to write at start that calls target with the arguments it was given and returns its result,
+    the call's return address being ret, so __builtin_return_address(0) in target reads ret, as from a stock site."""
+    if X86_64:  # sub rsp, 8; movabs rax, target; call rax; add rsp, 8; ret: the callee's stack aligned as the ABI's
+        return ret - 16, bytes.fromhex('4883ec08 48b8') + struct.pack('<Q', target) + bytes.fromhex('ffd0 4883c408 c3')
+    # stp x29, x30, [sp, -16]!; ldr x16, [pc + 16]; blr x16 (at ret - 4); ldp x29, x30, [sp], 16; ret; the address
+    return ret - 12, _a64(0xa9bf7bfd, 0x58000090, 0xd63f0200, 0xa8c17bfd, A64_RET) + struct.pack('<Q', target)
+
+
+# Memory under 2 GB, for stock's 4-byte pointer fields. On x86-64 Linux MAP_32BIT asks the kernel for exactly that.
+# arm64 Linux has no MAP_32BIT (0x40 is no flag there and is ignored), and an emulator can accept the flag and ignore
+# it, handing back an address near 128 TB. low_map then maps at a chosen
+# address instead, with MAP_FIXED_NOREPLACE so it never lands on a mapping already there. LOW_AT holds the candidates:
+# 16 MB steps from 1.5 GB, clear of stock's fixed range (STOCK) and of the fixed low pages other files map (0x10000000,
+# 0x30000000, 0x3e000000, 0x5c000000-0x5e000000), and below AddressSanitizer's shadow (from 0x7fff8000).
+MAP_32BIT, MAP_FIXED_NOREPLACE, MAP_PRIVATE_ANONYMOUS = 0x40, 0x100000, 0x22
+LOW_AT = range(0x60000000, 0x7f000000, 0x1000000)
+
+
+def low_map(size, prot=3):
+    """size bytes of private anonymous memory that ends at or below 2 GB, with protection prot."""
+    failed = C.c_void_p(-1).value
+    if platform.machine() == 'x86_64':
+        p = libc.mmap(0, size, prot, MAP_PRIVATE_ANONYMOUS | MAP_32BIT, -1, 0)
+        if p and p != failed and p + size <= 1 << 31:
+            return p
+        if p and p != failed:  # the flag ignored: the map is somewhere above
+            libc.munmap(p, size)
+    for at in LOW_AT:
+        if at + size <= 1 << 31 and libc.mmap(at, size, prot, MAP_PRIVATE_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0) == at:
+            return at
+    raise AssertionError(f'no free {size:#x} bytes under 2 GB')
 
 
 @pytest.fixture(scope='session')
@@ -225,7 +314,7 @@ def ask_cover(fw):
     call, as its stand-in at tidal.c's own define only returns. The stand-in is code at stock's address: call it in_fork."""
     at = int(re.findall(r'#define player_set_coverinfo \(\(.*\)(0x[0-9a-f]+)u\)', (ROOT/'patch/tidal.c').read_text())[0], 16)
     claim(at)
-    C.memmove(at, b'\xc3', 1)  # ret
+    code_at(at, ret_code())
     fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
     rec, id_ = C.create_string_buffer(0x60), C.create_string_buffer(b'app:1:0')  # a card app's record
     C.c_void_p.from_address(C.addressof(rec) + O['REC_TIDAL_ID']).value = C.addressof(id_)
