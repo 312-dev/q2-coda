@@ -8,6 +8,8 @@
                                       with CC; the program in SRC/stage/usr/bin/adbd
     pins.py adb-mdns-sources          tools/build.py's ADB_MDNS_SOURCES
     pins.py release-key               the release key's public half (assets/signing/q2-coda-release.pub) as a C array
+    pins.py uac1                      Car Audio's usb_f_uac1.ko: tools/uac1.py's pinned module in the third-party cache,
+                                      its SHA-256 checked; the build stops when it is not there
 
 Run from the tree tools/vampos.py exported, so the settings are those of the commit the image names.
 """
@@ -46,6 +48,13 @@ elif sys.argv[1:] == ['adb-mdns-sources']:
     tree = ast.parse((TOOLS/'build.py').read_text())
     value = next(n.value for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, 'id', None) == 'ADB_MDNS_SOURCES' for t in n.targets))
     print(' '.join(ast.literal_eval(value)))
+elif sys.argv[1:] == ['uac1']:
+    import hashlib
+    import uac1
+    ko = uac1.CACHE/uac1.PIN[0]/'usb_f_uac1.ko'
+    if not ko.exists() or hashlib.sha256(ko.read_bytes()).hexdigest() != uac1.PIN[0]:
+        sys.exit(f'pins.py: no {ko} with its pinned SHA-256: python3 tools/uac1.py builds it')
+    print(ko)
 elif sys.argv[1:] == ['release-key']:
     import signing
     key = signing.public_key(signing.PUBLIC_KEY.read_bytes())

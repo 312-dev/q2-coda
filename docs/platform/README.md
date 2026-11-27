@@ -25,7 +25,7 @@ Every API 1 socket is the same ([roadmap: Process model](../vamp-os.md#process-m
 
 ## Capabilities
 
-`caps` answers `caps` and the service's capability words, one per command family it serves, in a fixed order. Within a major version changes are additive: a new command comes with a new word, so a client asks `caps` and uses what is there, and an older service, which lacks a word, is handled without an error. A word is never removed within a major version; a protocol that must change incompatibly is a new major version (`Q2PLAY/2`), served beside the old one while an app in the signed list uses it.
+`caps` answers `caps` and the service's capability words, one per command family it serves, in a fixed order; a word with a dash names a command's first words (`usb-dac` is `usb dac`). Within a major version changes are additive: a new command comes with a new word, so a client asks `caps` and uses what is there, and an older service, which lacks a word, is handled without an error. A word is never removed within a major version; a protocol that must change incompatibly is a new major version (`Q2PLAY/2`), served beside the old one while an app in the signed list uses it.
 
 ## Naming
 

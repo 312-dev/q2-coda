@@ -1,0 +1,6 @@
+#!/bin/sh
+# Car Audio's gadget on Vamp OS (docs/car-audio-os.md): today's Vamp's q2car (patch/q2car.sh) with Vamp OS's paths:
+# the UAC1 module from the image, q2-iap reading q2libd's library, and q2player as the player that holds the car's PCM.
+Q2CAR_MODULE=/usr/lib/vamp/usb_f_uac1.ko Q2CAR_PLAYER=q2player \
+    Q2CAR_IAP_ARGS="--lib-db /mnt/data/vamp/library.db --lib-cat /mnt/mmc/.vamp/catalogue.db" \
+    exec /usr/libexec/vamp/q2car "$@"

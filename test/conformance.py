@@ -45,9 +45,10 @@ def caps_words(page):
 
 
 def check_coverage(page):
-    """every capability word is sent as a command by some block, so no command is served undocumented"""
-    sent = {t.split()[0] for b in blocks(page) for k, t in b if k == '>'}
-    missing = [w for w in caps_words(page) if w not in sent]
+    """every capability word is sent as a command by some block, so no command is served undocumented; a word with a
+    dash names a command's first words (usb-dac: `usb dac`)"""
+    sent = [t for b in blocks(page) for k, t in b if k == '>']
+    missing = [w for w in caps_words(page) if not any(f'{t} '.startswith(w.replace('-', ' ') + ' ') for t in sent)]
     assert not missing, f'{page}: caps words never sent by a transcript: {missing}'
 
 

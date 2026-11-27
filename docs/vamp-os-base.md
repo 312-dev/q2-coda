@@ -53,6 +53,8 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | `q2player` | `/usr/bin/q2player`, built as every Vamp image's (Car Audio's output on) against this image's alsa-lib, FFmpeg 7.1.5 and mbedTLS | `q2playd` on `/tmp/sock_play` (it waits for it up to 5 s, then `finish` waits 10 s before the next try) |
 | `q2sysd` | `/usr/bin/q2sysd` ([q2sysd](sysd.md)): the power key (a press: the screen off or on; held 3 s: power off), the backlight, the battery (`/run/vamp/battery`), Q2SYS/1 | the input devices with `KEY_POWER`, `/sys/class/backlight`, the CW2015 |
 | `q2ui` | `/usr/bin/q2ui --db /mnt/data/vamp/library.db --catalogue /mnt/mmc/.vamp/catalogue.db --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons` | `q2libd`'s library, which is there (empty at first) before anything else |
+| `q2pkgd-confirm` | After an install ([q2pkgd](pkgd.md#the-rescue-copy)), a minute after the boot: `q2pkgd confirm`, the install no longer pending | a minute |
+| `q2dacloop` | `/usr/bin/q2dacloop` ([dacloop](dacloop.md)): USB DAC mode's audio, the gadget's capture to the DAC. Down at boot (its `down` file) | q2sysd's `usb dac` (`sv up`) |
 
 ## adb
 
@@ -158,6 +160,8 @@ Everything here has been run only under the emulator and on this machine. What o
 | Battery | The CW2015's and the charger's files under this init | [q2sysd](sysd.md#needs-a-q2) |
 | Charging | `PE22` driven through the kernel's GPIO class, and the charger stopping | [q2sysd](sysd.md#needs-a-q2) |
 | USB storage | The mass-storage gadget on the real controller, the card seen by a computer and mounted again | [q2sysd](sysd.md#needs-a-q2) |
+| Car Audio | The UAC1 module under this init, the iPhone gadget beside q2adb's park, a drive | [car-audio-os](car-audio-os.md#needs-a-q2) |
+| USB DAC mode | `usb_f_uac2` with Shanling's rates and its `Capture Rate` control; the DAC free of the player; the sound at each rate | [dacloop](dacloop.md#needs-a-q2) |
 | Standby | `mem` suspend with Vamp OS's services, its wake sources, its current | [q2sysd](sysd.md#needs-a-q2) |
 | Sound | The DAC powered and in PCM mode with no `demo`; the driver's 0-100 volume law in decibels | [q2playd](playd.md#the-volume) |
 | Wi-Fi | Association, DHCP and DNS; the radio's power when `wlan0` is down | [q2netd](netd.md#needs-a-q2) |

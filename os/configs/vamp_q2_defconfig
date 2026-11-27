@@ -37,6 +37,8 @@ BR2_PACKAGE_Q2SYSD=y
 BR2_PACKAGE_Q2LIBD=y
 BR2_PACKAGE_Q2NETD=y
 BR2_PACKAGE_Q2PKGD=y
+BR2_PACKAGE_Q2DACLOOP=y
+BR2_PACKAGE_Q2_IAP=y
 # the image's mksquashfs composes LZO images (q2pkgd); gzip, its default, not needed
 BR2_PACKAGE_SQUASHFS_LZO=y
 # BR2_PACKAGE_SQUASHFS_GZIP is not set

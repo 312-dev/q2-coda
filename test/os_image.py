@@ -29,7 +29,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -158,7 +158,7 @@ def check_image(build, fs, manifest, perturb=None):
         if sha256(f) in stock:
             found.append(rel)
         facts = elf_facts(f)
-        if facts is None:
+        if facts is None or rel == 'usr/lib/vamp/usb_f_uac1.ko':  # the kernel's ABI (soft float), checked by its pin below
             continue
         elves += 1
         flags, program, interp = facts
@@ -184,8 +184,12 @@ def check_image(build, fs, manifest, perturb=None):
     actions = [l.split(':')[2] for l in table]
     check(actions.count('sysinit') == 1 and table[0] == '::sysinit:/etc/init.d/rcS'
           and '::respawn:/usr/bin/runsvdir -P /etc/sv' in table, 'inittab: rcS, the one sysinit, then runsvdir over /etc/sv')
+    import uac1  # noqa: E402  (tools/, on the path as vampos is)
+    ko = fs/'usr/lib/vamp/usb_f_uac1.ko'
+    check(os.access(fs/'usr/bin/q2-iap', os.X_OK) and os.access(fs/'usr/libexec/vamp/q2car', os.X_OK) and os.access(fs/'usr/bin/q2car', os.X_OK)
+          and ko.exists() and hashlib.sha256(ko.read_bytes()).hexdigest() == uac1.PIN[0], "Car Audio: q2-iap, q2car and tools/uac1.py's pinned usb_f_uac1.ko")
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['adb-wifi', 'adbd', 'q2libd', 'q2netd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+    check(services == ['adb-wifi', 'adbd', 'q2dacloop', 'q2libd', 'q2netd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(not (fs/'etc/init.d').exists() or sorted(p.name for p in (fs/'etc/init.d').iterdir()) == ['rcK', 'rcS'],
           '/etc/init.d holds rcS and rcK alone')
@@ -471,6 +475,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     (fs/'run/vamp').mkdir(parents=True, exist_ok=True)
     (fs/'run/vamp/boot.log').write_text('')
     want = expected_modules(fs)  # before any perturbation: what Shanling's scripts say
+    if perturb == 'dac-up':  # USB DAC mode's loop started at boot: the DAC taken from the player
+        (fs/'etc/sv/q2dacloop/down').unlink()
     if perturb == 'rescue-late':  # rcS without its restore: the 60 s confirm alone would put it back
         rcs = (fs/'etc/init.d/rcS').read_text().replace('if [ -e /mnt/mmc/.vamp/rescue/pending ]; then', 'if false; then')
         (fs/'etc/init.d/rcS').write_text(rcs)
@@ -637,6 +643,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     at_r, at_fb = first('rescue: recovery-update/ restored'), first('fb0: present')
     check(got == rescue and at_r is not None and at_fb is not None and at_r < at_fb and at_r < (first('q2player: start') or 10**9),
           'rcS puts the rescue copy back in recovery-update/ before the framebuffer and the services')
+    check(first('q2dacloop: start') is None and first('q2playd: start') is not None,
+          "USB DAC mode's loop stays down at boot (it waits for q2sysd's usb dac)")
     marks = [('mount proc', first('mount -t proc')), ('mount /dev', first('mount -t tmpfs -o mode=0755,nosuid tmpfs /dev')),
              ('mdev -s', first('mdev -s')), ('mdev -d', first('mdev -d')), ('data', first('data: ')),
              ('first insmod', first('insmod ')), ('last insmod', max((i for i, s in enumerate(order) if s.startswith('insmod ')), default=None)),
@@ -660,7 +668,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()

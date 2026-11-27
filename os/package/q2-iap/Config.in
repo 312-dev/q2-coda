@@ -1,0 +1,7 @@
+config BR2_PACKAGE_Q2_IAP
+	bool "q2-iap"
+	select BR2_PACKAGE_SQLITE
+	help
+	  Car Audio (docs/iphone-mode.md, docs/car-audio-os.md): q2-iap, the iPhone a car sees over
+	  USB, q2car, its gadget, and usb_f_uac1.ko, the USB Audio 1.0 function, from the tree
+	  tools/vampos.py exported and the pinned module in the third-party cache.

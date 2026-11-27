@@ -13,12 +13,16 @@
  *
  *   - Charge Limit (Q2POD CHARGELIMIT in config.ini, as the payload's charge_poll): charging stopped at 80% and handed
  *     back at 75% through the charger's active-low enable line, PE22.
- *   - USB modes: adb (q2adb's gadget, the default) and storage (the card to the computer: the player stopped, the card
- *     unmounted, a mass-storage gadget as stock's storage_config.sh makes it), and back.
+ *   - USB modes: adb (q2adb's gadget, the default), storage (the card to the computer: the player stopped, the card
+ *     unmounted, a mass-storage gadget as stock's storage_config.sh makes it) and dac (the Q2 a USB Audio 2.0 DAC for
+ *     the computer: the player stopped, a UAC2 gadget as stock's uac_device_config.sh makes it, and the q2dacloop
+ *     service up to carry its audio to the DAC, docs/dacloop.md) and car (Car Audio: today's Vamp's q2car shows the
+ *     host an iPhone and q2-iap decides whether it is a car, docs/car-audio-os.md; anything else is back to adb), and
+ *     back.
  *   - Standby: the screen off, the music paused, Wi-Fi off, then the kernel's suspend (/sys/power/state mem) until a
  *     wake source (the power key) resumes it; then the screen on.
  *
- * Q2SYS/1 on /run/vamp/sys.sock (docs/platform/system.md): screen on|off|toggle, brightness P, battery, usb, usb adb|storage,
+ * Q2SYS/1 on /run/vamp/sys.sock (docs/platform/system.md): screen on|off|toggle, brightness P, battery, usb, usb adb|storage|dac|car,
  * standby, watch, caps.
  * --root prefixes every path and --poweroff names the command, for test/sysd.py. */
 #define _GNU_SOURCE
@@ -268,7 +272,10 @@ static void charge_poll(void) {
 
 /* ---- USB modes ---- */
 
-static int usb_storage; /* the card is the computer's */
+enum { USB_ADB, USB_STORAGE, USB_DAC, USB_CAR };
+static int usb_mode;      /* USB_ADB, or the card the computer's, the Q2 its DAC, or an iPhone for a car */
+static const char *const USB_NAMES[] = {"adb", "storage", "dac", "car"};
+static int car_told;      /* the car's verdict told to watchers */
 static char card_dev[64]; /* the card's block device while it is shared, as /proc/mounts named it */
 
 static int find_card(char *dev, size_t room) {
@@ -289,6 +296,8 @@ static int gadget_write(const char *p, const char *text) {
     close(fd);
     return ok ? 0 : -1;
 }
+
+static int bind_udc(const char *g);
 
 /* stock's storage_config.sh's gadget: mass storage of one LUN, the card's block device, writable and removable */
 static int storage_gadget(const char *dev) {
@@ -317,13 +326,7 @@ static int storage_gadget(const char *dev) {
     snprintf(link, sizeof link, "%s/configs/c.1/mass_storage.msg", g);
     snprintf(target, sizeof target, "%s/functions/mass_storage.msg", g);
     if (symlink(target, link) && errno != EEXIST) return -1;
-    char udc[256] = "";
-    DIR *d = opendir(path("/sys/class/udc"));
-    for (struct dirent *e; d && (e = readdir(d));)
-        if (e->d_name[0] != '.') snprintf(udc, sizeof udc, "%s", e->d_name);
-    if (d) closedir(d);
-    snprintf(p, sizeof p, "%s/UDC", g);
-    return *udc && !gadget_write(p, udc) ? 0 : -1;
+    return bind_udc(g);
 }
 
 static void storage_gadget_remove(void) {
@@ -336,10 +339,63 @@ static void storage_gadget_remove(void) {
     for (unsigned i = 0; i < sizeof dirs / sizeof *dirs; ++i) snprintf(p, sizeof p, "%s/%s", g, dirs[i]), rmdir(p);
 }
 
+static int bind_udc(const char *g) {
+    char udc[256] = "", p[400];
+    DIR *d = opendir(path("/sys/class/udc"));
+    for (struct dirent *e; d && (e = readdir(d));)
+        if (e->d_name[0] != '.') snprintf(udc, sizeof udc, "%s", e->d_name);
+    if (d) closedir(d);
+    snprintf(p, sizeof p, "%s/UDC", g);
+    return *udc && !gadget_write(p, udc) ? 0 : -1;
+}
+
+/* USB DAC mode's gadget, with stock's uac_device_config.sh's descriptors, so a computer that knew the Q2 as a DAC
+ * knows it again: one UAC2 function, capture only (the computer plays into it), stereo, 32-bit, the rates stock
+ * offers, asynchronous, no mute or volume control (the Q2's own volume stays the DAC's) */
+static int dac_gadget(void) {
+    char g[300], p[400];
+    snprintf(g, sizeof g, "%s/usb_gadget/q2dac", path("/sys/kernel/config"));
+    if (mkdir(g, 0755) && errno != EEXIST) return -1;
+    static const char *const top[][2] = {{"idVendor", "0x20B1"}, {"idProduct", "0x301F"}, {"bcdUSB", "0x200"},
+                                        {"bcdDevice", "0x100"}, {"bDeviceClass", "0x00"}, {"bDeviceSubClass", "0x00"},
+                                        {"bDeviceProtocol", "0x00"}};
+    for (unsigned i = 0; i < sizeof top / sizeof *top; ++i) snprintf(p, sizeof p, "%s/%s", g, top[i][0]), gadget_write(p, top[i][1]);
+    static const char *const dirs[] = {"strings", "configs", "functions", "strings/0x409", "configs/c.1", "configs/c.1/strings",
+                                       "configs/c.1/strings/0x409", "functions/uac2.a"};
+    for (unsigned i = 0; i < sizeof dirs / sizeof *dirs; ++i) snprintf(p, sizeof p, "%s/%s", g, dirs[i]), mkdir(p, 0755);
+    static const char *const attrs[][2] = {
+        {"strings/0x409/manufacturer", "Shanling"}, {"strings/0x409/product", "Q2"}, {"configs/c.1/MaxPower", "20"},
+        {"configs/c.1/bmAttributes", "0x80"}, {"configs/c.1/strings/0x409/configuration", "uac2"},
+        {"functions/uac2.a/if_ctrl_name", "Q2"}, {"functions/uac2.a/c_chmask", "0x03"}, {"functions/uac2.a/c_ssize", "4"},
+        {"functions/uac2.a/c_srate", "32000,44100,48000,64000,88200,96000,128000,176400,192000,352800,384000"},
+        {"functions/uac2.a/c_hs_bint", "2"}, {"functions/uac2.a/req_number", "32"}, {"functions/uac2.a/p_chmask", "0"},
+        {"functions/uac2.a/c_sync", "async"}, {"functions/uac2.a/c_mute_present", "0"}, {"functions/uac2.a/c_volume_present", "0"},
+        {"functions/uac2.a/p_mute_present", "0"}, {"functions/uac2.a/p_volume_present", "0"}};
+    for (unsigned i = 0; i < sizeof attrs / sizeof *attrs; ++i)
+        if (snprintf(p, sizeof p, "%s/%s", g, attrs[i][0]), gadget_write(p, attrs[i][1])) return -1;
+    char link[400], target[400];
+    snprintf(link, sizeof link, "%s/configs/c.1/uac2.a", g);
+    snprintf(target, sizeof target, "%s/functions/uac2.a", g);
+    if (symlink(target, link) && errno != EEXIST) return -1;
+    return bind_udc(g);
+}
+
+static void dac_gadget_remove(void) {
+    char g[300], p[400];
+    snprintf(g, sizeof g, "%s/usb_gadget/q2dac", path("/sys/kernel/config"));
+    snprintf(p, sizeof p, "%s/UDC", g), gadget_write(p, "\n");
+    snprintf(p, sizeof p, "%s/configs/c.1/uac2.a", g), unlink(p);
+    static const char *const dirs[] = {"functions/uac2.a", "configs/c.1/strings/0x409", "configs/c.1", "strings/0x409", ""};
+    for (unsigned i = 0; i < sizeof dirs / sizeof *dirs; ++i) snprintf(p, sizeof p, "%s/%s", g, dirs[i]), rmdir(p);
+}
+
 /* the card to the computer: nothing may hold it, so the player is stopped and the card unmounted first; adb's gadget
  * parked (it has the controller otherwise). Any step that fails puts back what was done. */
+static int usb_set_adb(void);
+
 static int usb_set_storage(void) {
-    if (usb_storage) return 0;
+    if (usb_mode == USB_STORAGE) return 0;
+    if (usb_mode != USB_ADB) usb_set_adb();
     if (find_card(card_dev, sizeof card_dev)) return say("no card mounted"), -1;
     ask("/run/vamp/play.sock", "Q2PLAY/1", "stop");
     run_tool("/bin/sync");
@@ -350,18 +406,81 @@ static int usb_set_storage(void) {
         run_tool("/bin/mount %s /mnt/mmc", card_dev), run_tool("/usr/bin/q2adb-gadget unpark");
         return say("the storage gadget failed"), -1;
     }
-    usb_storage = 1;
+    usb_mode = USB_STORAGE;
     say("USB: the card is the computer's (%s)", card_dev);
     tell("usb storage");
     return 0;
 }
 
+/* the Q2 the computer's DAC: the player stopped (the DAC is the loop's), adb's gadget parked, the UAC2 gadget bound and
+ * the loop's service up. Any step that fails puts back what was done. */
+static int usb_set_dac(void) {
+    if (usb_mode == USB_DAC) return 0;
+    if (usb_mode != USB_ADB) usb_set_adb();
+    ask("/run/vamp/play.sock", "Q2PLAY/1", "stop");
+    run_tool("/usr/bin/q2adb-gadget park");
+    if (dac_gadget()) {
+        dac_gadget_remove();
+        run_tool("/usr/bin/q2adb-gadget unpark");
+        return say("the USB DAC gadget failed"), -1;
+    }
+    run_tool("/usr/bin/sv up /etc/sv/q2dacloop");
+    usb_mode = USB_DAC;
+    say("USB: the Q2 is the computer's DAC");
+    tell("usb dac");
+    return 0;
+}
+
+/* Car Audio (docs/car-audio-os.md): q2car makes the iPhone gadget and starts q2-iap, which parks and unparks adb's
+ * gadget itself and writes what it decided to /tmp/q2car.state (verdict=car|computer|silent|failed, then down=1 once
+ * its gadget is gone). car_poll follows it. */
+static int usb_set_car(void) {
+    if (usb_mode == USB_CAR) return 0;
+    if (usb_mode != USB_ADB) usb_set_adb();
+    ask("/run/vamp/play.sock", "Q2PLAY/1", "pause"); /* the song moves to the car's PCM itself if it is a car; nothing jumps */
+    if (run_tool("/usr/bin/q2car start")) return say("q2car did not start"), -1;
+    usb_mode = USB_CAR, car_told = 0;
+    say("USB: shown as an iPhone, waiting for q2-iap's verdict");
+    tell("usb car");
+    return 0;
+}
+
+/* while the iPhone is shown, twice a second: a car stays; anything else, once q2car has removed its gadget, is adb */
+static void car_poll(void) {
+    char raw[512] = "", *v;
+    FILE *f = fopen(path("/tmp/q2car.state"), "r");
+    size_t n = f ? fread(raw, 1, sizeof raw - 1, f) : 0;
+    if (f) fclose(f);
+    raw[n] = 0;
+    if (!(v = strstr(raw, "verdict="))) return;
+    v += 8;
+    if (!strncmp(v, "car", 3) && (v[3] == '\n' || !v[3])) {
+        if (!car_told) say("USB: a car"), tell("car"), car_told = 1;
+    } else if (strstr(raw, "down=1")) {
+        say("USB: not a car (%.*s): adb", (int)strcspn(v, "\n"), v);
+        usb_mode = USB_ADB;
+        tell("usb adb");
+    }
+}
+
 static int usb_set_adb(void) {
-    if (!usb_storage) return 0;
-    storage_gadget_remove();
-    if (run_tool("/bin/mount %s /mnt/mmc", card_dev)) say("the card did not mount again");
+    if (usb_mode == USB_ADB) return 0;
+    if (usb_mode == USB_CAR) {
+        run_tool("/usr/bin/q2car stop"); /* q2-iap ended, the gadget gone, adb's unparked */
+        usb_mode = USB_ADB;
+        say("USB: adb");
+        tell("usb adb");
+        return 0;
+    }
+    if (usb_mode == USB_DAC) {
+        run_tool("/usr/bin/sv down /etc/sv/q2dacloop"); /* the loop closes the gadget's PCM before the gadget goes */
+        dac_gadget_remove();
+    } else {
+        storage_gadget_remove();
+        if (run_tool("/bin/mount %s /mnt/mmc", card_dev)) say("the card did not mount again");
+    }
     run_tool("/usr/bin/q2adb-gadget unpark");
-    usb_storage = 0;
+    usb_mode = USB_ADB;
     say("USB: adb");
     tell("usb adb");
     return 0;
@@ -479,7 +598,7 @@ static void client_line(struct client *c, const char *line) {
         c->hello = 1;
         client_say(c, "Q2SYS/1 ok");
     } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps screen brightness usb standby battery watch");
+        client_say(c, "caps screen brightness usb usb-dac usb-car standby battery watch");
     } else if (!strcmp(line, "battery")) {
         char text[160];
         read_battery();
@@ -493,9 +612,10 @@ static void client_line(struct client *c, const char *line) {
     } else if (sscanf(line, "brightness %d", &v) == 1) {
         client_say(c, set_brightness(v) ? "err brightness" : "ok");
     } else if (!strcmp(line, "usb")) {
-        client_say(c, "usb %s", usb_storage ? "storage" : "adb");
-    } else if (!strcmp(line, "usb storage") || !strcmp(line, "usb adb")) {
-        client_say(c, (line[4] == 's' ? usb_set_storage() : usb_set_adb()) ? "err usb" : "ok");
+        client_say(c, "usb %s", USB_NAMES[usb_mode]);
+    } else if (!strcmp(line, "usb storage") || !strcmp(line, "usb adb") || !strcmp(line, "usb dac") || !strcmp(line, "usb car")) {
+        int r = line[4] == 's' ? usb_set_storage() : line[4] == 'd' ? usb_set_dac() : line[4] == 'c' ? usb_set_car() : usb_set_adb();
+        client_say(c, r ? "err usb" : "ok");
     } else if (!strcmp(line, "standby")) {
         client_say(c, "ok"); /* answered first: the write that suspends returns only at the resume */
         standby();
@@ -565,6 +685,7 @@ int main(int argc, char **argv) {
             if (hold < wait) wait = hold;
         }
         if (!n_in && (long long)(scanned_at + RESCAN_MS) - (long long)t < wait) wait = (long long)(scanned_at + RESCAN_MS) - (long long)t;
+        if (usb_mode == USB_CAR && wait > 500) wait = 500;
         if (wait < 0) wait = 0;
         if (poll(p, (nfds_t)n, (int)wait) < 0 && errno != EINTR) break;
         if (p[0].revents & POLLIN) {
@@ -581,6 +702,7 @@ int main(int argc, char **argv) {
         if (pressed_at && t >= pressed_at + HOLD_MS) power_off();
         if (t >= battery_at + BATTERY_S * 1000ull) read_battery(), battery_at = t;
         if (!n_in && t >= scanned_at + RESCAN_MS) open_inputs(), scanned_at = t;
+        if (usb_mode == USB_CAR) car_poll();
     }
     unlink(path("/run/vamp/sys.sock"));
     return 0;

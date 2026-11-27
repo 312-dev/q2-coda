@@ -1,0 +1,7 @@
+#!/bin/sh
+# q2dacloop (docs/dacloop.md): USB DAC mode's audio, the gadget's capture to the Q2's DAC. Down until q2sysd's
+# `usb dac` brings it up (sv up), and down again when the mode ends.
+. /usr/libexec/vamp/log
+step "q2dacloop: start"
+exec 2>&1
+exec /usr/bin/q2dacloop

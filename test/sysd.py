@@ -57,8 +57,8 @@ TOOL = '#!/bin/sh\necho "$(basename "$0") $*" >> {root}/tools.log\nexit $(cat {r
 
 @pytest.fixture
 def tools(tree):
-    """mount, umount, sync and q2adb-gadget as stand-ins that log to tools.log; NAME.status sets one's exit status"""
-    for rel in ('bin/mount', 'bin/umount', 'bin/sync', 'usr/bin/q2adb-gadget'):
+    """mount, umount, sync, q2adb-gadget, sv and q2car as stand-ins that log to tools.log; NAME.status sets one's exit status"""
+    for rel in ('bin/mount', 'bin/umount', 'bin/sync', 'usr/bin/q2adb-gadget', 'usr/bin/sv', 'usr/bin/q2car'):
         put(tree, rel, TOOL.format(root=tree))
         (tree/rel).chmod(0o755)
     return tree
@@ -312,6 +312,73 @@ def test_conformance_system(run, n):
     root, keys = run
     play, net = Service(root/'run/vamp/play.sock', 'Q2PLAY/1'), Service(root/'run/vamp/net.sock', 'Q2NET/1')
     conformance.replay(root/'run/vamp/sys.sock', conformance.blocks('system.md')[n])
+
+
+def test_usb_dac_stops_the_player_binds_stock_s_uac2_gadget_and_starts_the_loop(run):
+    root, _ = run
+    play = usb_tree(root)
+    g = root/'sys/kernel/config/usb_gadget/q2dac'
+    # sv notes whether the gadget was still bound when it was called: the loop must close its PCM before the gadget goes
+    put(root, '/usr/bin/sv', f'#!/bin/sh\necho "sv $* udc=$(cat {g}/UDC 2>/dev/null)" >> {root}/tools.log\n')
+    a = Api(root)
+    a.line()
+    a.say('usb dac')
+    assert a.line() == 'ok'
+    assert play.lines == ['stop']
+    assert read(root, '/tools.log').splitlines() == ['q2adb-gadget park', 'sv up /etc/sv/q2dacloop udc=13500000.otg']
+    f = g/'functions/uac2.a'
+    got = {n: (f/n).read_text() for n in ('c_chmask', 'c_ssize', 'c_srate', 'p_chmask', 'c_sync', 'c_volume_present')}
+    assert got == {'c_chmask': '0x03', 'c_ssize': '4', 'c_srate': '32000,44100,48000,64000,88200,96000,128000,176400,192000,352800,384000',
+                   'p_chmask': '0', 'c_sync': 'async', 'c_volume_present': '0'}
+    assert ((g/'idVendor').read_text(), (g/'idProduct').read_text(), (g/'strings/0x409/product').read_text()) == ('0x20B1', '0x301F', 'Q2')
+    assert (g/'UDC').read_text().strip() == '13500000.otg' and (g/'configs/c.1/uac2.a').is_symlink()
+    a.say('usb')
+    assert a.line() == 'usb dac'
+    a.say('usb storage')  # from the DAC to the card: through adb's, the loop down before its gadget goes
+    assert a.line() == 'ok'
+    assert read(root, '/tools.log').splitlines()[2:5] == ['sv down /etc/sv/q2dacloop udc=13500000.otg', 'q2adb-gadget unpark', 'sync ']
+    assert (g/'UDC').read_text().strip() == '' and not (g/'configs/c.1/uac2.a').exists()
+    a.say('usb')
+    assert a.line() == 'usb storage'
+
+
+def test_usb_car_shows_the_iphone_and_follows_q2_iap_s_verdict(run):
+    root, _ = run
+    play = usb_tree(root)
+    (root/'tmp').mkdir(exist_ok=True)
+    a = Api(root)
+    a.line()
+    a.say('watch')
+    assert a.line() == 'ok'
+    a.say('usb car')
+    assert [a.line(), a.line()] == ['usb car', 'ok'], 'the watchers told first, then the answer'
+    assert play.lines == ['pause'] and read(root, '/tools.log').splitlines() == ['q2car start']
+    put(root, '/tmp/q2car.state', 'host=car\nverdict=car\n')
+    assert a.line() == 'car', 'a car: told once, and the mode stays'
+    a.say('usb')
+    assert a.line() == 'usb car'
+    a.say('usb adb')  # leaving it: q2car stops (it unparks adb's gadget itself)
+    assert [a.line(), a.line()] == ['usb adb', 'ok']
+    assert read(root, '/tools.log').splitlines()[-1] == 'q2car stop'
+
+
+def test_not_a_car_is_adb_once_q2car_has_removed_its_gadget(run):
+    root, _ = run
+    usb_tree(root)
+    (root/'tmp').mkdir(exist_ok=True)
+    a = Api(root)
+    a.line()
+    a.say('usb car')
+    assert a.line() == 'ok'
+    put(root, '/tmp/q2car.state', 'verdict=computer\n')
+    time.sleep(1.2)
+    a.say('usb')
+    assert a.line() == 'usb car', 'the gadget is still q2car\'s until it says down=1'
+    put(root, '/tmp/q2car.state', 'verdict=computer\ndown=1\n')
+    time.sleep(1.2)
+    a.say('usb')
+    assert a.line() == 'usb adb'
+    assert read(root, '/tools.log').splitlines() == ['q2car start'], 'q2car stopped itself: no stop sent'
 
 
 if __name__ == '__main__':
