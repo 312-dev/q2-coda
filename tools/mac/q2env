@@ -59,7 +59,19 @@ if ! docker run --rm --platform linux/arm64 -v q2-toolchain:/v "$image" \
     fi  # else tools/thirdparty.py fetches the archive into dl/, and the next q2env unpacks it
 fi
 
+# The Mac's environment does not cross into the container except as named here: every variable named Q2* or VAMP_*
+# set in the caller's does (the suites' broken copies, Q2SYSD_SOURCE and the rest, and their settings, Q2_STOCK_ZIP,
+# VAMP_TARGET), so `Q2SYSD_SOURCE=COPY tools/mac/q2env python3 test/sysd.py` tests COPY and not the tree.
+# Q2_THIRDPARTY_CACHE stays the container's own path, set above.
+pass=()
+while IFS= read -r name; do
+    case $name in
+        Q2_THIRDPARTY_CACHE) ;;
+        Q2*|VAMP_*) pass+=(-e "$name") ;;
+    esac
+done < <(compgen -e)
+
 tty=()
 [ -t 0 ] && [ -t 1 ] && tty=(-t)
 [ $# -eq 0 ] && set -- bash
-exec "${run[@]}" -i "${tty[@]}" -e TERM="${TERM:-dumb}" -w "$PWD" "$image" "$@"
+exec "${run[@]}" ${pass[@]+"${pass[@]}"} -i "${tty[@]}" -e TERM="${TERM:-dumb}" -w "$PWD" "$image" "$@"
