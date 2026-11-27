@@ -63,7 +63,7 @@ static void about_row(void *ctx, int i, ui_row *out) {
     out->value = about.value[i];
 }
 static void about_chosen(void *ctx, int i) { (void)ctx, (void)i; }
-static void about_push(void) {
+void about_push(void) {
     about_read();
     ui_source src = { .count = about_count, .row = about_row, .chosen = about_chosen, .name = "about" };
     ui_push(&list_page, &src);

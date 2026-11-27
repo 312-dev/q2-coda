@@ -185,7 +185,8 @@ static void write_stats(void) {
 }
 
 /* Where a q2ui before this one rested, when that was a moment ago: its pages and each one's row
- * (ui_route), opened again one over another with no motion. */
+ * (ui_route), opened again one over another with no motion; a page it has no name for here ends
+ * the route there, so Control Center, left for a page of demo's, gives back the page under it. */
 #define STATE_FRESH_S 600
 static void state_save(void) {
     char route[400];
@@ -213,11 +214,7 @@ static void state_restore(void) {
             if (strcmp(seg, opt.page)) break;
         } else if (!strcmp(seg, "now"))
             ui_push(&page_now, 0);
-        else if (!strcmp(seg, "settings"))
-            settings_push();
-        else if (!strcmp(seg, "display"))
-            display_push();
-        else if (!library_route(seg))
+        else if (!settings_route(seg) && !library_route(seg))
             break;
         ui_select_top(atoi(colon + 1));
     }
@@ -366,6 +363,7 @@ static int script(const char *path) {
     if (opt.trace) trace = fopen(opt.trace, "w");
     ui_clock_fake(fake_us);
     first_page();
+    state_restore(); /* as a start does: a --state another run left is come back to */
     script_frame(0, 0);
     while (fgets(line, sizeof line, f)) {
         unsigned ms = (unsigned)(fake_us / 1000u);

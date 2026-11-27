@@ -586,8 +586,13 @@ int list_trace(char *out, size_t room) {
 void list_step(ui_list *l) {
     uint64_t now = ui_time();
     traced = l;
-    /* rows changed from outside (list_rows_changed): read again, the selected switch sliding over */
-    if (l->everything_seen != everything) l->everything_seen = everything, list_reload(l);
+    /* rows changed from outside (list_rows_changed): read again, the selected switch sliding over,
+     * and counted again when rows came or went (a switch whose rows show only while it is on) */
+    if (l->everything_seen != everything) {
+        l->everything_seen = everything;
+        if (l->src.count(l->src.ctx) != l->n) list_changed(l);
+        list_reload(l);
+    }
     float dt = now > l->t ? (float)(now - l->t) / 1e6f : 0;
     l->t = now;
     double scroll = l->scroll.x;

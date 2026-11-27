@@ -111,9 +111,13 @@ static void word_of(const char *line, const char *key, char *out, size_t room) {
     size_t k = strlen(key);
     if (!strncmp(line, key, k) && line[k] == '=') snprintf(out, room, "%.*s", (int)strcspn(line + k + 1, "\r\n"), line + k + 1);
 }
-/* demo's word on key (Control Center's switches too, page_control.c) into out; 0 when it said nothing */
+static void read_told(void);
+/* demo's word on key (Control Center's switches too, page_control.c) into out; 0 when it said nothing.
+ * The file is read first if it changed since, so a page asking before the first frame (a page a
+ * start comes back to, main.c state_restore, counting its rows) has demo's word too. */
 int status_told_value(const char *key, char *out, size_t room) {
     size_t k = strlen(key);
+    if (S.told) S.told = 0, read_told();
     *out = 0;
     for (const char *line = S.told_text; *line; line = strchr(line, '\n') ? strchr(line, '\n') + 1 : "")
         if (!strncmp(line, key, k) && line[k] == '=') {
