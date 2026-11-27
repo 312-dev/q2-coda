@@ -191,7 +191,8 @@ python3 test/player/run.py                  # the new player (player/): bit-exac
 python3 test/ldac.py /tmp/q2-build         # shipped LDAC intermediate rates and native adaptive controller
 python3 test/headset_io.py /tmp/q2-build   # real MIPS headset worker with simulated kernel I/O (cc)
 python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal; SBC's bitpool; AAC's peak (fdk-aac scripted); the write MTU through each encoder
-python3 test/bluez_own.py /tmp/q2-build    # the own bluetoothd (tools/thirdparty.py's bluez, or an --own-bluez build's) beside stock's under qemu-mipsel, each on a D-Bus bus and a stand-in kernel of its own: main.conf, the store both ways, the payload's D-Bus calls (bwrap, dbus-daemon, gdbus; docs/bluez.md)
+python3 test/bluez_own.py /tmp/q2-build    # the own bluetoothd (tools/thirdparty.py's bluez, or an --own-bluez build's) beside stock's under qemu-mipsel, each on a D-Bus bus and a stand-in kernel of its own: main.conf, the store both ways, the payload's D-Bus calls, the LE attribute channel left free, shanling.bluez (bwrap, dbus-daemon, gdbus; docs/bluez.md)
+python3 test/bluez_port.py [BLUETOOTHD]   # Shanling's hooks in the own bluetoothd (tools/bluez/shanling.patch), each as MIPS under Unicorn (test/bluez_emu.py; docs/bluez.md#shanlings-changes)
 python3 test/bluetoothd.py /tmp/q2-build   # the patched bluetoothd's GetElementAttributes and its AVRCP record's cover art entry, at a load address of its own, against stock's
 python3 test/alsa.py BUILD QEMU_MIPSEL     # ALSA startup lock regression (see internals.md)
 python3 test/thirdparty.py BUILD QEMU_MIPSEL  # the rebuilt OpenSSL, curl, zlib, SQLite, libpng, BusyBox, wpa_supplicant and FFmpeg in a bwrap chroot of BUILD's rootfs: versions, links, TLS (network; --offline skips it) (third-party.md)
