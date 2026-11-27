@@ -293,7 +293,7 @@ document, not from Linux 5.10, and no L2CAP socket carries anything.
 
 For the main session, with a `--dev --own-bluez` build and `adb` or `q2remote` for a shell. To start ours by
 hand, with Bluetooth on:
-`killall -9 bluetoothd; /usr/lib/vamp-bluez/bluetoothd --noplugin=hfp,rap,fastpair -n -d >/tmp/own-bluez.log 2>&1 &`.
+`killall -9 bluetoothd; setsid nohup /usr/lib/vamp-bluez/bluetoothd --noplugin=hfp,rap,fastpair -n -d >/tmp/own-bluez.log 2>&1 < /dev/null &` (without `setsid nohup`, it dies when the adb shell closes).
 
 To go back: Bluetooth off and on in Settings (demo starts stock's), or reboot. This daemon has none of
 Shanling's hooks yet, so expected to be missing: track and play state on a headset, the receiver page, the
@@ -314,6 +314,18 @@ Quality page's say, and **Car Remote over BLE** (the attribute channel, above).
 | 10  | The pairing prompt, on stock: `hcidump -X` (or `btmon`) running, phone app connects over BLE until the prompt appears                                         | the first SMP packet and its sender, per [The BLE pairing prompt](#the-ble-pairing-prompt)                                                                                                                                             |
 | 11  | Memory and CPU of ours, as step 0                                                                                                                             | within a few hundred kB and no more CPU than stock                                                                                                                                                                                     |
 | 12  | Fallback: `killall -9 bluetoothd` while playing under ours, then Bluetooth off and on                                                                         | stock's runs; the headset reconnects; the store is intact (compare with the copy)                                                                                                                                                      |
+
+### First run on a Q2 (2026-11-26)
+
+The owner's Q2 on V24Ri, the plain 5.88 daemon (`1194d357`'s recipe) pushed to `/tmp` and started by hand with stock's store; steps 1, 2, 3 and part of 4, 5 and 11:
+
+- **Start (step 1):** `org.bluez` owned, `Adapter /org/bluez/hci0 registered`, every paired device in the store loaded, stock's bluealsa registered its endpoints with it. Two refusals from the kernel: `Failed to set privacy: Rejected (0x0b)` and `Failed to set mode: Failed (0x03)`; `hciconfig hci0` read `UP RUNNING PSCAN` where stock's reads `PSCAN ISCAN`, so the Q2 was connectable but not discoverable. Not traced yet.
+- **demo without `shanling.bluez` (step 2):** demo kept running, opened the Bluetooth page and scanned, with no hang or crash line.
+- **Store, stock to ours (step 3):** a headset paired under stock connected with no pairing prompt.
+- **A2DP (step 4, one codec):** the stream went to `TRANSPORT_STATE_ACTIVE` and `SINK_STATE_PLAYING` and the owner heard the music. Which codec was chosen is not read from the log yet (the priority hook is missing).
+- **AVRCP (step 5):** the headset's play, pause and volume keys worked (the owner).
+- **Memory (step 11, at rest after the stream started):** VmRSS 5,120 kB against stock's 7,136 kB measured the same way before the swap.
+- **A trap in the hand start:** run from an `adb shell` with a plain `&`, the daemon died when that shell closed (no crash, no log line, `pidof` empty), and the Q2 then saw no devices at all. Start it with `setsid nohup ... < /dev/null &`.
 
 ## Risks
 
