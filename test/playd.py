@@ -498,6 +498,73 @@ def test_a_list_whose_app_is_not_running_plays_its_card_songs_at_once(run):
     assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/c%0x7dd.flac')]
 
 
+class FakePkgd:
+    """q2pkgd's socket (Q2PKG/1): the lines it was sent, answered with answer"""
+    def __init__(self, root, answer='ok'):
+        import threading
+        self.lines, self.answer = [], answer
+        (root/'run/vamp').mkdir(parents=True, exist_ok=True)
+        self.s = socket.socket(socket.AF_UNIX)
+        self.s.bind(str(root/'run/vamp/pkg.sock'))
+        self.s.listen(4)
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                c, _ = self.s.accept()
+            except OSError:
+                return
+            f = c.makefile('rw')
+            for line in f:
+                line = line.rstrip('\n')
+                self.lines.append(line)
+                f.write(('Q2PKG/1 ok' if line == 'Q2PKG/1' else self.answer) + '\n')
+                f.flush()
+            c.close()
+
+
+def test_a_stopped_app_is_started_through_q2pkgd_and_handed_the_list_once_it_listens(run):
+    root, pl = run
+    pk = FakePkgd(root)
+    catalogue(root, listening=False)
+    play_list(root, [1, SERVER + 1], 1)
+    pl.pump(1.5)
+    assert pk.lines == ['Q2PKG/1', 'start navi'], 'q2playd asks q2pkgd to start navi'
+    assert not (root/'tmp/q2-navi.catplay').exists(), 'no catplay before the app listens: it would take one as answered'
+    assert pl.songs() == [], 'nor anything played'
+    s = socket.socket(socket.AF_UNIX)
+    s.bind(str(root/'tmp/q2-navi.browse.sock'))
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    (root/'tmp/navi.m3u').write_text('/mnt/mmc/.navi/cache/s1.flac\n')
+    (root/'tmp/q2-navi.play').write_text('1 /tmp/navi.m3u\n')
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/.navi/cache/s1.flac')]
+    s.close()
+
+
+def test_an_app_q2pkgd_will_not_start_plays_the_card_songs_at_once(run):
+    root, pl = run
+    pk = FakePkgd(root, 'err not-added')
+    catalogue(root, listening=False)
+    play_list(root, [SERVER + 1, 3], 0)
+    pl.pump(1.0)
+    assert pk.lines == ['Q2PKG/1', 'start navi']
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/c%0x7dd.flac')]
+
+
+def test_a_started_app_that_does_not_listen_within_15_s_has_its_card_songs_played(run):
+    root, pl = run
+    FakePkgd(root)
+    catalogue(root, listening=False)
+    play_list(root, [1, SERVER + 1, 2], 1)
+    pl.pump(13.5)
+    assert pl.songs() == [], 'it has 15 s'
+    pl.pump(3.0)
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/b.mp3')]
+    assert not (root/'tmp/q2-navi.catplay').exists()
+
+
 def test_an_answer_to_an_older_catplay_is_not_taken(run):
     root, pl = run
     sock = catalogue(root)

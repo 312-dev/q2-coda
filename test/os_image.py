@@ -29,7 +29,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -189,7 +189,7 @@ def check_image(build, fs, manifest, perturb=None):
     check(os.access(fs/'usr/bin/q2-iap', os.X_OK) and os.access(fs/'usr/libexec/vamp/q2car', os.X_OK) and os.access(fs/'usr/bin/q2car', os.X_OK)
           and ko.exists() and hashlib.sha256(ko.read_bytes()).hexdigest() == uac1.PIN[0], "Car Audio: q2-iap, q2car and tools/uac1.py's pinned usb_f_uac1.ko")
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
-    check(services == ['adb-wifi', 'adbd', 'q2-airplay', 'q2dacloop', 'q2dlnad', 'q2libd', 'q2netd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
+    check(services == ['adb-wifi', 'adbd', 'q2-airplay', 'q2dacloop', 'q2dlnad', 'q2libd', 'q2netd', 'q2pkgd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(os.readlink(fs/'etc/passwd') == '/run/vamp/passwd' and os.readlink(fs/'etc/group') == '/run/vamp/group'
           and (fs/'etc/passwd.base').read_text().startswith('root:x:0:0:') and (fs/'etc/group.base').read_text().startswith('root:x:0:'),
@@ -396,6 +396,49 @@ def outer_check(outer, log, adbd=True):
           f"no ifconfig ({alive}, {greet}, {wpas}, {touched})")
 
 
+NAVI_RUN = r"""#!/bin/sh
+pid=/tmp/q2-navi
+[ -f $pid ] && kill -0 "$(cat $pid)" 2>/dev/null && exit 0
+( cat /tmp/q2-addon.caps > /mnt/mmc/.navi/caps
+  sleep 1000 &
+  s=$!
+  trap 'kill $s; rm -f $pid; exit 0' TERM
+  wait $s ) </dev/null >/dev/null 2>&1 &
+echo $! > $pid
+"""
+
+
+def launch_check(fs):
+    """q2pkgd's launcher in the booted image (docs/platform/packages.md#starting-and-stopping-q2pkg1): Q2PKG/1 starts
+    the card's API 0 app under its own runsv, its caps line the image's words, and stops it"""
+    def say(*lines):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(15)
+        s.connect(str(fs/'run/vamp/pkg.sock'))
+        f = s.makefile('rw')
+        out = []
+        for line in ('Q2PKG/1',) + lines:
+            f.write(line + '\n')
+            f.flush()
+            out.append(f.readline().strip())
+        s.close()
+        return out
+    try:
+        first = say('status navi', 'start navi')
+        end = time.monotonic() + 15
+        caps = fs/'mnt/mmc/.navi/caps'
+        while time.monotonic() < end and not (caps.exists() and caps.read_text()):
+            time.sleep(0.2)
+        mid = say('status navi', 'stop navi', 'status navi')
+    except OSError as e:
+        return check(False, f'q2pkgd: Q2PKG/1 on /run/vamp/pkg.sock ({e!r})')
+    check(first == ['Q2PKG/1 ok', 'status navi stopped', 'ok'] and mid == ['Q2PKG/1 ok', 'status navi running', 'ok', 'status navi stopped'],
+          f'q2pkgd: an API 0 app started and stopped over Q2PKG/1 ({first + mid[1:]})')
+    got = caps.read_text() if caps.exists() else None
+    check(got == 'catalogue playlist\n', f"q2pkgd: the app's caps line is the image's words ({got!r})")
+    check((fs/'run/vamp/sv/navi/supervise/stat').exists(), 'q2pkgd: the app ran under a runsv of its own, /run/vamp/sv/navi')
+
+
 def netd_check(fs, card):
     """q2netd in the booted image: Q2NET/1 answers; with no saved network the radio is off, unless the Wi-Fi adbd let a
     computer in (adb_checks, before this), whose use mark holds it on for 30 minutes (Smart Wi-Fi's rule)"""
@@ -507,6 +550,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/sv/q2sysd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'playd-off':  # no q2playd
         (fs/'etc/sv/q2playd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
+    if perturb == 'pkgd-off':  # no q2pkgd serve: nothing starts an app
+        (fs/'etc/sv/q2pkgd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'adb-off':  # no Wi-Fi adbd at all
         (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'module':
@@ -534,6 +579,12 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     db.commit()
     db.close()
     wav(fs/'mnt/mmc/song1.wav', seconds=60)
+    # an API 0 card app for the launcher (launch_check): its run script starts its loop in the background, as
+    # q2-subsonic's does, and the loop notes the caps line it found
+    navi = fs/'mnt/mmc/.navi'
+    navi.mkdir(parents=True, exist_ok=True)
+    (navi/'q2app').write_text('name=Navi\ncatalogue=1\n')
+    (navi/'run').write_text(NAVI_RUN)
     # an install pending and recovery-update/ gone, as after Shanling's recovery has flashed it: rcS must put it back
     rescue = {'xImage': b'stock kernel' * 100, 'rootfs.squashfs': b'stock rootfs' * 100}
     (fs/'mnt/mmc/.vamp/rescue').mkdir(parents=True, exist_ok=True)
@@ -585,6 +636,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             adb_checks(fs)
         if proc.poll() is None:
             netd_check(fs, card)
+        if not card and proc.poll() is None:
+            launch_check(fs)
         if card and proc.poll() is None:
             outer_check(outer, emu/'record', outer_adbd)
             if not outer_adbd:
@@ -675,7 +728,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()

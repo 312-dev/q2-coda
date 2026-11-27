@@ -298,7 +298,7 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
-| `q2pkgd.c` | `q2pkgd stage`: a signed release checked, composed with this Q2's vendor set, staged for Shanling's recovery; never writes flash | `stage`, `read_release` | [pkgd](pkgd.md) |
+| `q2pkgd.c` | `q2pkgd stage`: a signed release checked, composed with this Q2's vendor set, staged for Shanling's recovery; never writes flash. The packages' users (`app-add`, `accounts`, `app-run`) and the launcher, `q2pkgd serve` (Q2PKG/1: apps started and stopped under runit) | `stage`, `read_release`, `app_run`, `serve`, `launch_start` | [pkgd](pkgd.md), [Packages](platform/packages.md#starting-and-stopping-q2pkg1) |
 | `Makefile` | Its build, with the release key's public half (the image) or a test key (`test/pkgd.py`) | | [pkgd](pkgd.md) |
 
 ## tools/
@@ -382,8 +382,9 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | `q2update` and `q2flash` (`--dev`) | `q2update.py`: the helper under the host `sh` against a fake demo; demo's side is `fw/test_q2update.py`, the host tool's `unit/test_q2flash.py` | `sh` |
 | Vamp OS's base image | `os_image.py`: the pins, the image's contents and ABI, the composed `/vendor`, and a boot of it under `qemu-mipsel` (and `--card-boot`); `q2vampos.py`: the card boot's hand-off under the host `sh` | `BUILD`, the ZIP, bwrap, `sh` |
 | The card boot end to end | `card_e2e.py`: the image on a stand-in card, the real q2vampos.sh with a stand-in loop mount and chroot, the image's rcS and services up, a song played, the next boot the usual one | `BUILD`, the ZIP, bwrap, sh |
-| q2playd | `playd.py`: q2playd built for this machine against a stand-in q2player: the FIFO and list file, Q2PLAY/1, the now file, ends, cuts and failures | `cc`, the host's SQLite |
+| q2playd | `playd.py`: q2playd built for this machine against a stand-in q2player: the FIFO and list file, Q2PLAY/1, the now file, ends, cuts and failures, server songs' catplay (a stand-in q2pkgd starting a stopped app) | `cc`, the host's SQLite |
 | Vamp API 1's permissions | `perm.py`: the three services' checks (a member, a refusal, root) and, in a user namespace per uid, packages' users from `q2pkgd app-add` reaching only their services; `q2pkgd`'s users, groups and `app-run` | `cc`, bwrap |
+| q2pkgd's launcher | `launch.py`: `q2pkgd serve` built for this machine with BusyBox's own `runsv` built from Buildroot's tarball: Q2PKG/1's transcripts, the API 0 caps line, stops, an API 1 app through `app-run`, a service kept up, who may ask, and q2playd starting a stopped app for a server play | `cc`, bwrap, `make`, `~/.cache/q2-os/dl` |
 | q2dlnad | `dlnad.py`: q2dlnad built for this machine against stand-ins for Q2PLAY/1 and Q2NET/1, and once the real q2playd: the switch, SSDP, the descriptions, each action, events, the radio's hold | `cc`, python3 |
 | q2sysd | `sysd.py`: q2sysd built for this machine on a stand-in `/sys` and `/dev/input`: the power key's press and hold, the backlight, the battery file, Q2SYS/1 | `cc` |
 | q2libd | `libd.py`: q2libd built for this machine on a stand-in card of songs ffmpeg makes: tags, ids across scans, catalogues, q2ui's query, the service's first library | `cc`, ffmpeg, the host's FFmpeg and SQLite |

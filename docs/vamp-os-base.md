@@ -53,6 +53,7 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | `q2player` | `/usr/bin/q2player`, built as every Vamp image's (Car Audio's output on) against this image's alsa-lib, FFmpeg 7.1.5 and mbedTLS | `q2playd` on `/tmp/sock_play` (it waits for it up to 5 s, then `finish` waits 10 s before the next try) |
 | `q2sysd` | `/usr/bin/q2sysd` ([q2sysd](sysd.md)): the power key (a press: the screen off or on; held 3 s: power off), the backlight, the battery (`/run/vamp/battery`), Q2SYS/1 | the input devices with `KEY_POWER`, `/sys/class/backlight`, the CW2015 |
 | `q2ui` | `/usr/bin/q2ui --db /mnt/data/vamp/library.db --catalogue /mnt/mmc/.vamp/catalogue.db --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons` | `q2libd`'s library, which is there (empty at first) before anything else |
+| `q2pkgd` | `/usr/bin/q2pkgd serve` ([Packages: Starting and stopping](platform/packages.md#starting-and-stopping-q2pkg1)): the launcher, Q2PKG/1 on `/run/vamp/pkg.sock`; each app it starts a runit service of its own under `/run/vamp/sv`, its `runsv` started by `q2pkgd` | nothing: an app's start fails until the card is there |
 | `q2pkgd-confirm` | After an install ([q2pkgd](pkgd.md#the-rescue-copy)), a minute after the boot: `q2pkgd confirm`, the install no longer pending | a minute |
 | `q2dacloop` | `/usr/bin/q2dacloop` ([dacloop](dacloop.md)): USB DAC mode's audio, the gadget's capture to the DAC. Down at boot (its `down` file) | q2sysd's `usb dac` (`sv up`) |
 | `q2scrobd` | `/usr/bin/q2scrobd` ([scrobbling](vamp-os-services.md#scrobbling)): each listen heard over Q2PLAY/1 into the card's `.scrobbler.log`, uploaded by itself with `[SCROBBLE] AUTO=1` | Q2PLAY/1 (tried every 2 s) |
@@ -141,8 +142,8 @@ In the order it is needed:
 
 1. **A first run on a Q2**, from the card ([below](#first-boot-on-a-q2)): whether the kernel has loop devices, whether `q2ui` and `q2player` run on its kernel, then a boot from flash: whether the modules load under this init, whether the kernel has what it assumes (a tmpfs `/dev` and mdev, UBI, LZO squashfs), whether the watchdog runs.
 2. **The rescue page**, and a first-key Allow card in `q2ui`: until then a Q2 that trusts no computer is reached only by putting a key in the card's `adb_keys` ([adb](#adb)).
-3. The rest of `q2playd` and `q2libd` ([q2playd](playd.md#what-is-missing), [q2libd](libd.md#what-is-missing)): starting a stopped app for a server play, offline copies, the servers' playlists, a library socket.
-4. **The rest of Vamp API 1's run-time permissions** ([Packages: Users and groups](platform/packages.md#users-and-groups)): Q2PLAY/1, Q2SYS/1 and Q2NET/1 check a package's groups and `q2pkgd` makes its user; the library's files, the card, `q2ui`'s permissions and starting packages under the supervisor are not done.
+3. The rest of `q2playd` and `q2libd` ([q2playd](playd.md#what-is-missing), [q2libd](libd.md#what-is-missing)): offline copies, the servers' playlists, a library socket.
+4. **The rest of Vamp API 1's run-time permissions** ([Packages: Users and groups](platform/packages.md#users-and-groups)): Q2PLAY/1, Q2SYS/1 and Q2NET/1 check a package's groups and `q2pkgd` makes its user; `q2pkgd` starts and stops packages under runit as their users (Q2PKG/1); the library's files, the card, `q2ui`'s permissions and its asking `q2pkgd` to open a foreground app are not done.
 5. **The rest of q2sysd** ([Needs a Q2](sysd.md#needs-a-q2) first): Standby, the screen's idle timeout, the jack and the DAC's power and volume, Charge Limit, heat, USB modes.
 6. **The rest of the installer** ([q2pkgd](pkgd.md)): its first slice checks, composes and stages a signed release (the image's own `mksquashfs` composes the build machine's bytes under QEMU); the download, the automatic hand-off to the recovery and packages are not built.
 7. q2ui's icons: it looks for `oled_*_w.png` in `--icons`, stock's art, which the image does not have; the pages draw without them.
@@ -173,7 +174,7 @@ Everything here has been run only under the emulator and on this machine. What o
 | Library | A real card's first scan time and memory under FFmpeg | [q2libd](libd.md#what-is-missing) |
 | Updates | Shanling's recovery's folder contract, and that it removes the folder after flashing (inferred from installs); `mksquashfs`'s time and memory on the Q2 | [q2pkgd](pkgd.md#needs-a-q2) |
 | Hot reload | `kill -HUP`'s in-place restart (QEMU's `/proc/self/exe` is QEMU) | [Hot reload](#hot-reload) |
-| App isolation | Which of mount and network namespaces, cgroups and seccomp the kernel has, for what a package's permissions can hold; a package run by `q2pkgd app-run` as its own uid refused by a root service (a laptop has one uid for both ends) | [Packages: Users and groups](platform/packages.md#users-and-groups) |
+| App isolation | Which of mount and network namespaces, cgroups and seccomp the kernel has, for what a package's permissions can hold; a package run by `q2pkgd app-run` as its own uid refused by a root service, and one started over Q2PKG/1 running as its own uid (a laptop has one uid for both ends: there `app-run` cannot drop to the package's user, and runs nothing) | [Packages: Users and groups](platform/packages.md#users-and-groups) |
 
 ## First boot on a Q2
 

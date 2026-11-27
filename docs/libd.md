@@ -51,6 +51,6 @@ At its start: an empty library first when there is none, so `q2ui` always has on
 
 ## What is missing
 
-- Server songs play through their app by `q2playd`'s catplay ([q2playd: Server songs](playd.md#server-songs)); starting a stopped app for it and the offline copies are not done yet.
+- Server songs play through their app by `q2playd`'s catplay ([q2playd: Server songs](playd.md#server-songs)); a stopped app is started for it by `q2pkgd`, and the offline copies are not done yet.
 - Duplicates by MusicBrainz id or the same file, the servers' playlists (`p` and `i` rows), `catalogue.avail`'s offline copies, thumbnails of covers, a changed cover picked up without its file removed.
 - Scans driven by inotify instead of a 10 s look, and progress for a long first scan: measured under QEMU only, not on a Q2's card.

@@ -1,7 +1,7 @@
 """Vamp API 1's conformance transcripts (docs/platform/README.md#conformance): the `conformance` blocks of a protocol
 page, replayed against the real service. `> line` is sent; `< line` must be the next answer byte for byte, `< ~ regex`
 must match it whole; `<* ~ regex` passes over any answers that match. Each suite (test/playd.py, test/sysd.py,
-test/netd.py) calls blocks() and replay() from its own test_conformance with its stand-in Q2; test/api.py runs
+test/netd.py, test/launch.py) calls blocks() and replay() from its own test_conformance with its stand-in Q2; test/api.py runs
 the three."""
 import os
 import pathlib

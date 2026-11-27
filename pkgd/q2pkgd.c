@@ -8,6 +8,7 @@
  *     q2pkgd app-add DIR | app-remove ID [--root DIR]         a package's user and groups made, or retired
  *     q2pkgd accounts [--root DIR]                            /run/vamp/passwd and group composed (rcS, at each boot)
  *     q2pkgd app-run DIR [--root DIR]                         the package's entry, run as its user
+ *     q2pkgd serve [--root DIR] [--runsv PROG] [--self PROG]  the launcher: Q2PKG/1 on /run/vamp/pkg.sock
  *
  * The card's recovery-update/ (xImage and rootfs.squashfs, stock's) is the owner's only way back when a boot fails:
  * hold Previous and power on with Centre, and Shanling's recovery flashes it. So nothing here leaves the card without a
@@ -51,18 +52,33 @@
  *               user and its own group, and each permission's group listing the users that may use it.
  *   app-run     the entry of an added app as its user: the groups of its permissions as the registry has them (what
  *               was approved at app-add, not what the manifest says now), then its gid and uid; when any of those does
- *               not take, or uid 0 could be taken back, it runs nothing. HOME is its data folder.
+ *               not take, or uid 0 could be taken back, it runs nothing. HOME is its data folder. An API 0 app's
+ *               run script instead, as root as today's Vamp runs it, and then its loop waited for (app_run0).
+ *
+ * The launcher (docs/platform/packages.md#starting-and-stopping-q2pkg1), the owner's ruling of 2026-11-27: q2pkgd owns
+ * the packages, their users and their permissions, so it alone starts and stops them.
+ *
+ *   serve       Q2PKG/1 on /run/vamp/pkg.sock: start, stop and status of an app by its id, checked against the
+ *               caller's SO_PEERCRED uid (root any app; a package its own status and stop). Each app started is a
+ *               runit service of its own, /run/vamp/sv/<id>, its run "q2pkgd app-run DIR" and its runsv started here;
+ *               a service kind is kept up, any other runs once. An API 0 app's start writes /tmp/q2-addon.caps first.
  */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <grp.h>
@@ -623,11 +639,333 @@ static int app_remove(const char *id) {
     return 0;
 }
 
+/* ---- the launcher: Q2PKG/1 on /run/vamp/pkg.sock (docs/platform/packages.md#starting-and-stopping-q2pkg1) ---- */
+
+/* The capability line an API 0 app reads once at its start (/tmp/q2-addon.caps, today's Vamp's ADDON_CAPS): only the
+ * words this image serves. catalogue: q2libd reads the app's catalogue.tsv and q2playd hands it the Library's plays
+ * (.catplay); playlist: q2playd plays the m3u its .play names. The rest of today's words are its UI's, Q2SPOT/1's pages. */
+#define API0_CAPS "catalogue playlist"
+#define PKG_CLIENTS 8
+#define PKG_LINE 512
+#define RUNSV_UP_MS 2000 /* a new runsv has this long to open its control */
+#define STOP_MS 5000     /* an app stopped has this long to end before stop answers err stop */
+
+static char runsv_prog[300] = "/usr/bin/runsv", self_prog[300] = "/usr/bin/q2pkgd";
+
+static void logf_(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "q2pkgd: ");
+    vfprintf(stderr, fmt, ap);
+    fputc('\n', stderr);
+    va_end(ap);
+}
+
+static void sleep_ms(int ms) {
+    struct timespec t = {ms / 1000, (long)(ms % 1000) * 1000000L};
+    nanosleep(&t, 0);
+}
+
+static int valid_id(const char *id) {
+    if (!*id || strlen(id) > 63) return 0;
+    for (const char *c = id; *c; ++c)
+        if (!(*c >= 'a' && *c <= 'z') && !(*c >= '0' && *c <= '9') && *c != '-') return 0;
+    return 1;
+}
+
+/* whether pid is a process that has not ended (a zombie, ended and not yet reaped, has) */
+static int alive(long pid) {
+    char p[40], b[160] = "";
+    if (pid <= 1 || (kill((pid_t)pid, 0) && errno != EPERM)) return 0;
+    snprintf(p, sizeof p, "/proc/%ld/stat", pid);
+    FILE *f = fopen(p, "r");
+    if (f) {
+        if (!fgets(b, sizeof b, f)) *b = 0;
+        fclose(f);
+    }
+    const char *s = strrchr(b, ')'); /* "pid (comm) S ...": the state after the name, which may hold anything */
+    return !(s && s[1] == ' ' && s[2] == 'Z');
+}
+
+/* an API 0 app's loop: the pid in /tmp/q2-<id>, when that process lives; else 0 */
+static long api0_pid(const char *id) {
+    char p[120], b[32] = "";
+    snprintf(p, sizeof p, "/tmp/q2-%s", id);
+    FILE *f = fopen(rp(p), "r");
+    if (f) {
+        if (!fgets(b, sizeof b, f)) *b = 0;
+        fclose(f);
+    }
+    long pid = strtol(b, 0, 10);
+    return alive(pid) ? pid : 0;
+}
+
+/* the app's runsv: whether it runs (its supervise/ok has a reader), and whether its service runs */
+static int sv_alive(const char *sv) {
+    char p[760];
+    snprintf(p, sizeof p, "%s/supervise/ok", sv);
+    int fd = open(p, O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return 0;
+    close(fd);
+    return 1;
+}
+static int sv_running(const char *sv) {
+    char p[760], b[64] = "";
+    snprintf(p, sizeof p, "%s/supervise/stat", sv);
+    FILE *f = fopen(p, "r");
+    if (f) {
+        if (!fgets(b, sizeof b, f)) *b = 0;
+        fclose(f);
+    }
+    return sv_alive(sv) && !strncmp(b, "run", 3);
+}
+static int sv_control(const char *sv, char c) {
+    char p[760];
+    snprintf(p, sizeof p, "%s/supervise/control", sv);
+    int fd = open(p, O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return -1;
+    int r = write(fd, &c, 1) == 1 ? 0 : -1;
+    close(fd);
+    return r;
+}
+
+/* /run/vamp/sv/<id>: its run (q2pkgd app-run DIR) and a down file, so runsv starts nothing before it is told */
+static int sv_make(const char *id, const char *dir, char *sv, size_t room) {
+    char rel[120], p[760], text[1600];
+    mkdir(rp("/run"), 0755), mkdir(rp("/run/vamp"), 0755), mkdir(rp("/run/vamp/sv"), 0755);
+    snprintf(rel, sizeof rel, "/run/vamp/sv/%s", id);
+    snprintf(sv, room, "%s", rp(rel));
+    if (mkdir(sv, 0755) && errno != EEXIST) return logf_("%s: %s", sv, strerror(errno)), -1;
+    snprintf(text, sizeof text, "#!/bin/sh\n# made by q2pkgd serve: app %s (docs/platform/packages.md#starting-and-stopping-q2pkg1)\n"
+             "exec %s app-run %s%s%s 2>&1\n", id, self_prog, dir, *proot ? " --root " : "", proot);
+    snprintf(p, sizeof p, "%s/run", sv);
+    if (write_whole(p, text, 0755)) return -1;
+    snprintf(p, sizeof p, "%s/down", sv);
+    return write_whole(p, "", 0644);
+}
+
+/* the app's runsv, started when it is not running (its own session: it outlives this process) */
+static int sv_up(const char *sv) {
+    if (sv_alive(sv)) return 0;
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (!pid) {
+        setsid();
+        signal(SIGCHLD, SIG_DFL), signal(SIGPIPE, SIG_DFL); /* an ignored signal stays ignored across exec */
+        int null = open("/dev/null", O_RDONLY);
+        if (null >= 0) dup2(null, 0), close(null);
+        dup2(2, 1); /* the apps' output into this service's log */
+        execl(runsv_prog, "runsv", sv, (char *)0);
+        _exit(127);
+    }
+    for (int t = 0; t < RUNSV_UP_MS; t += 20) {
+        if (sv_alive(sv)) return 0;
+        sleep_ms(20);
+    }
+    return -1;
+}
+
+struct launch { char id[64], dir[700], sv[700]; struct manifest m; struct app *a; };
+
+/* id's app on the card, as start, stop and status take it: 0, or the err word */
+static const char *launch_find(const char *id, struct launch *l) {
+    char p[120];
+    memset(l, 0, sizeof *l);
+    if (!valid_id(id)) return "app";
+    snprintf(l->id, sizeof l->id, "%s", id);
+    snprintf(p, sizeof p, "/mnt/mmc/.%s", id);
+    snprintf(l->dir, sizeof l->dir, "%s", rp(p));
+    snprintf(p, sizeof p, "/run/vamp/sv/%s", id);
+    snprintf(l->sv, sizeof l->sv, "%s", rp(p));
+    if (manifest(l->dir, &l->m)) return "app";
+    if (!l->m.new_keys) {
+        char run[720];
+        struct stat st;
+        snprintf(run, sizeof run, "%s/run", l->dir);
+        return stat(run, &st) || !S_ISREG(st.st_mode) ? "app" : 0;
+    }
+    if (!*l->m.entry) return "app";
+    apps_read();
+    l->a = app_find(id);
+    return !l->a || !strcmp(l->a->perms, "-") ? "not-added" : 0;
+}
+
+static int launch_running(const struct launch *l) { return sv_running(l->sv) || (!l->m.new_keys && api0_pid(l->id)); }
+
+static const char *launch_start(struct launch *l) {
+    if (launch_running(l)) return 0;
+    if (!l->m.new_keys && write_whole(rp("/tmp/q2-addon.caps"), API0_CAPS "\n", 0644)) return "start";
+    if (sv_make(l->id, l->dir, l->sv, sizeof l->sv) || sv_up(l->sv)) return logf_("%s: runsv did not come up", l->id), "start";
+    /* a service is kept up; anything else runs once, and its own exit (an app's idle exit) stands */
+    if (sv_control(l->sv, !strcmp(l->m.kind, "service") ? 'u' : 'o')) return "start";
+    for (int t = 0; t < RUNSV_UP_MS && !sv_running(l->sv); t += 20) sleep_ms(20); /* runsv's word that it runs it */
+    logf_("started %s", l->id);
+    return 0;
+}
+
+static const char *launch_stop(struct launch *l) {
+    if (sv_alive(l->sv)) sv_control(l->sv, 'd');
+    long pid = l->m.new_keys ? 0 : api0_pid(l->id);
+    if (pid && !sv_running(l->sv)) kill((pid_t)pid, SIGTERM); /* a loop started elsewhere: today's Stop, a TERM */
+    for (int t = 0; t < STOP_MS; t += 50) {
+        if (!launch_running(l)) return logf_("stopped %s", l->id), (const char *)0;
+        sleep_ms(50);
+    }
+    return logf_("%s: still running %d s after its stop", l->id, STOP_MS / 1000), "stop";
+}
+
+/* the caller's uid may run cmd on id: root any; a package's own uid its own status and stop */
+static int launch_allowed(int fd, const char *cmd, const char *id) {
+    long uid = q2perm_peer_uid(fd);
+    if (uid == 0) return 1;
+    apps_read();
+    const struct app *own = 0;
+    for (int i = 0; i < n_apps; ++i)
+        if (apps[i].uid == uid && strcmp(apps[i].perms, "-")) own = &apps[i];
+    if (own && strcmp(cmd, "start") && !strcmp(own->id, id)) return 1;
+    char who[100];
+    if (own) snprintf(who, sizeof who, "app-%s", own->id);
+    else snprintf(who, sizeof who, "no package");
+    logf_("refused uid %ld (%s): %s %s", uid, who, cmd, id);
+    return 0;
+}
+
+static struct pkg_client { int fd, hello; size_t n; char buf[PKG_LINE + 1]; } pc[PKG_CLIENTS];
+
+static void say(struct pkg_client *c, const char *fmt, ...) {
+    char b[700];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(b, sizeof b - 1, fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    if (n > (int)sizeof b - 2) n = (int)sizeof b - 2;
+    b[n++] = '\n';
+    if (send(c->fd, b, (size_t)n, MSG_NOSIGNAL) != n) close(c->fd), c->fd = -1;
+}
+
+/* one line: 0 to go on, -1 to close */
+static int pkg_line(struct pkg_client *c, char *line) {
+    if (!c->hello) {
+        if (strcmp(line, "Q2PKG/1")) return say(c, "err version"), -1;
+        c->hello = 1;
+        return say(c, "Q2PKG/1 ok"), 0;
+    }
+    if (!strcmp(line, "caps")) return say(c, "caps start stop status"), 0;
+    char cmd[16], id[PKG_LINE], extra[4];
+    if (sscanf(line, "%15s %511s %3s", cmd, id, extra) != 2 || (strcmp(cmd, "start") && strcmp(cmd, "stop") && strcmp(cmd, "status")))
+        return say(c, "err command"), 0;
+    if (!launch_allowed(c->fd, cmd, id)) return say(c, "err permission"), 0;
+    struct launch l;
+    const char *err = launch_find(id, &l);
+    if (!err && !strcmp(cmd, "status")) return say(c, "status %s %s", id, launch_running(&l) ? "running" : "stopped"), 0;
+    if (!err) err = !strcmp(cmd, "start") ? launch_start(&l) : launch_stop(&l);
+    return err ? say(c, "err %s", err) : say(c, "ok"), 0;
+}
+
+static volatile sig_atomic_t serving = 1;
+static void on_term(int s) { (void)s, serving = 0; }
+
+static int serve(void) {
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    snprintf(a.sun_path, sizeof a.sun_path, "%s", rp("/run/vamp/pkg.sock"));
+    mkdir(rp("/run"), 0755), mkdir(rp("/run/vamp"), 0755);
+    signal(SIGCHLD, SIG_IGN); /* the runsvs it starts are reaped by the kernel */
+    signal(SIGPIPE, SIG_IGN);
+    signal(SIGTERM, on_term), signal(SIGINT, on_term);
+    int lfd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    unlink(a.sun_path);
+    if (lfd < 0 || bind(lfd, (struct sockaddr *)&a, sizeof a) || listen(lfd, PKG_CLIENTS))
+        return fail("%s: %s", a.sun_path, strerror(errno));
+    chmod(a.sun_path, 0666); /* no permission guards the hello: each command is checked (launch_allowed) */
+    for (int i = 0; i < PKG_CLIENTS; ++i) pc[i].fd = -1;
+    logf_("serving Q2PKG/1 on %s", a.sun_path);
+    while (serving) {
+        struct pollfd p[1 + PKG_CLIENTS];
+        p[0] = (struct pollfd){.fd = lfd, .events = POLLIN};
+        for (int i = 0; i < PKG_CLIENTS; ++i) p[1 + i] = (struct pollfd){.fd = pc[i].fd, .events = POLLIN};
+        if (poll(p, 1 + PKG_CLIENTS, -1) < 0 && errno != EINTR) break;
+        if (p[0].revents & POLLIN) {
+            int fd = accept4(lfd, 0, 0, SOCK_CLOEXEC), i = 0;
+            while (fd >= 0 && i < PKG_CLIENTS && pc[i].fd >= 0) ++i;
+            if (fd >= 0 && i == PKG_CLIENTS) close(fd);
+            else if (fd >= 0) pc[i] = (struct pkg_client){.fd = fd};
+        }
+        for (int i = 0; i < PKG_CLIENTS; ++i) {
+            struct pkg_client *c = &pc[i];
+            if (c->fd < 0 || p[1 + i].fd != c->fd || !p[1 + i].revents) continue;
+            ssize_t n = recv(c->fd, c->buf + c->n, PKG_LINE - c->n, 0);
+            if (n <= 0) {
+                close(c->fd), c->fd = -1;
+                continue;
+            }
+            c->n += (size_t)n;
+            char *nl;
+            while (c->fd >= 0 && (nl = memchr(c->buf, '\n', c->n))) {
+                *nl = 0;
+                if (nl > c->buf && nl[-1] == '\r') nl[-1] = 0;
+                int r = pkg_line(c, c->buf);
+                if (c->fd < 0) break;
+                size_t used = (size_t)(nl + 1 - c->buf);
+                memmove(c->buf, nl + 1, c->n - used), c->n -= used;
+                if (r) close(c->fd), c->fd = -1;
+            }
+            if (c->fd >= 0 && c->n == PKG_LINE) close(c->fd), c->fd = -1; /* a line too long */
+        }
+    }
+    unlink(a.sun_path);
+    return 0;
+}
+
+/* An API 0 app as today's Vamp starts it, as root (it has no user): its run script, which starts the app's loop in the
+ * background, leaves the loop's pid in /tmp/q2-<id> and returns; then that loop waited for until it ends, so runsv sees
+ * the app running while it lives. This process is the loop's subreaper, so the loop, orphaned when its launcher
+ * returns, is its child to reap. A TERM (sv down, Q2PKG/1's stop) goes on to the loop, as today's Stop. */
+static volatile sig_atomic_t run0_term;
+static void on_run0_term(int s) { (void)s, run0_term = 1; }
+static int app_run0(const char *dir, const char *id) {
+    char run[720];
+    snprintf(run, sizeof run, "%s/run", dir);
+    struct sigaction sa = {.sa_handler = on_run0_term}; /* no SA_RESTART: a TERM ends the wait below */
+    sigaction(SIGTERM, &sa, 0);
+    signal(SIGCHLD, SIG_DFL);
+    if (prctl(PR_SET_CHILD_SUBREAPER, 1)) return fail("%s: %s", id, strerror(errno));
+    pid_t p = fork();
+    if (p < 0) return fail("%s: %s", id, strerror(errno));
+    if (!p) {
+        execl("/bin/sh", "sh", run, (char *)0);
+        _exit(127);
+    }
+    int st = 0;
+    while (waitpid(p, &st, 0) < 0 && errno == EINTR) {
+    }
+    if (!WIFEXITED(st) || WEXITSTATUS(st)) return fail("%s: its run script failed", id);
+    long pid = api0_pid(id);
+    if (!pid) return fail("%s: no loop in /tmp/q2-%s after its run script", id, id);
+    for (pid_t w = 0; !run0_term && w != (pid_t)pid;) /* each orphan reaped, the loop's own end the last */
+        if ((w = waitpid(-1, &st, 0)) < 0 && errno == ECHILD) {
+            if (!alive(pid)) break; /* started elsewhere (its run script found it running): not this process's child */
+            sleep_ms(500);
+        }
+    if (run0_term && alive(pid)) {
+        kill((pid_t)pid, SIGTERM);
+        for (int t = 0; t < 3000 && alive(pid); t += 50) {
+            while (waitpid(-1, &st, WNOHANG) > 0) {
+            }
+            sleep_ms(50);
+        }
+    }
+    while (waitpid(-1, &st, WNOHANG) > 0) { /* the loop, ended: reaped here, not left a zombie to init */
+    }
+    return 0;
+}
+
 static int app_run(const char *dir) {
     struct manifest m;
     const char *id = app_id(dir);
     if (manifest(dir, &m)) return 1;
-    if (!m.new_keys || !*m.entry) return fail("%s: not an API 1 app with an entry", id);
+    if (!m.new_keys) return app_run0(dir, id);
+    if (!*m.entry) return fail("%s: a %s has no entry to run", id, m.kind);
     apps_read();
     struct app *a = app_find(id);
     if (!a || !strcmp(a->perms, "-")) return fail("%s: not added (q2pkgd app-add)", id);
@@ -657,10 +995,13 @@ static int apps_main(int argc, char **argv) {
     const char *arg = 0;
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "--root") && i + 1 < argc) snprintf(proot, sizeof proot, "%s", argv[++i]);
+        else if (!strcmp(argv[1], "serve") && !strcmp(argv[i], "--runsv") && i + 1 < argc) snprintf(runsv_prog, sizeof runsv_prog, "%s", argv[++i]);
+        else if (!strcmp(argv[1], "serve") && !strcmp(argv[i], "--self") && i + 1 < argc) snprintf(self_prog, sizeof self_prog, "%s", argv[++i]);
         else if (!arg && argv[i][0] != '-') arg = argv[i];
         else return fprintf(stderr, "q2pkgd: %s: unknown argument %s\n", argv[1], argv[i]), 2;
     }
     if (!strcmp(argv[1], "accounts")) return arg ? 2 : accounts();
+    if (!strcmp(argv[1], "serve")) return arg ? 2 : serve();
     if (!arg) return fprintf(stderr, "q2pkgd: %s needs %s\n", argv[1], strcmp(argv[1], "app-remove") ? "DIR" : "ID"), 2;
     if (!strcmp(argv[1], "app-add")) return app_add(arg);
     if (!strcmp(argv[1], "app-remove")) return app_remove(arg);
@@ -671,10 +1012,12 @@ static int apps_main(int argc, char **argv) {
 int main(int argc, char **argv) {
     const char *rootfs = "/", *card = "/mnt/mmc", *usage =
         "usage: q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR] | install | restore | confirm [--card DIR]"
-        " | app-check DIR | app-add DIR | app-remove ID | app-run DIR | accounts [--root DIR]\n";
+        " | app-check DIR | app-add DIR | app-remove ID | app-run DIR | accounts [--root DIR]"
+        " | serve [--root DIR] [--runsv PROG] [--self PROG]\n";
     if (argc < 2) return fputs(usage, stderr), 2;
     if (!strcmp(argv[1], "app-check")) return argc == 3 ? app_check(argv[2]) : (fputs(usage, stderr), 2);
-    if (!strcmp(argv[1], "app-add") || !strcmp(argv[1], "app-remove") || !strcmp(argv[1], "app-run") || !strcmp(argv[1], "accounts")) {
+    if (!strcmp(argv[1], "app-add") || !strcmp(argv[1], "app-remove") || !strcmp(argv[1], "app-run") || !strcmp(argv[1], "accounts") ||
+        !strcmp(argv[1], "serve")) {
         int r = apps_main(argc, argv);
         return r == 2 ? (fputs(usage, stderr), 2) : r;
     }

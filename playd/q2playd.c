@@ -447,10 +447,15 @@ static void volume_save(void) { air_vol.on ? ini_set("Q2POD", "AIRVOL", q.volume
  * A list with server rows is handed to the app whose catalogue they are: /tmp/q2-<id>.catplay, "<seq> <start>" (the
  * chosen song's place in the list) and a path a line in play order (a server row's fileurl, a card file's path), written whole, while the app listens
  * (/tmp/q2-<id>.browse.sock). Its answer is /tmp/q2-<id>.play, "<seq> <m3u>": the m3u's card paths (Stream Cache copies
- * for server songs) from the row at <start> on, played in place of the list. No answer within CATPLAY_WAIT_MS, or the app not listening: the list
- * is played from its card rows alone. */
+ * for server songs) from the row at <start> on, played in place of the list. No answer within CATPLAY_WAIT_MS: the list
+ * is played from its card rows alone. An app that is not listening is started first by q2pkgd (Q2PKG/1 start, the
+ * launcher: docs/platform/packages.md#starting-and-stopping-q2pkg1), and the catplay written once its socket is there
+ * (an app takes a .catplay there at its start as one answered); q2pkgd refusing, or no socket within CATPLAY_START_MS,
+ * and the card rows alone play. */
 #define CATPLAY_WAIT_MS 4000
-static struct { int on, at; char app[64], before[600]; unsigned seq; unsigned long long until; } cp;
+#define CATPLAY_START_MS 15000 /* an app started for a catplay has this long to listen (today's Vamp's catalogue.c) */
+#define PKG_ASK_MS 3000        /* q2pkgd's answer to a start, waited for in the loop */
+static struct { int on, at, starting; char app[64], before[600]; unsigned seq; unsigned long long until; } cp;
 
 static void free_paths(void) {
     for (int i = 0; i < q.np; ++i) free(q.paths[i]);
@@ -485,29 +490,71 @@ static int app_of(const char *fileurl, char *app, size_t room) {
     return 0;
 }
 
-/* 1: handed to the app (an answer awaited); 0: nothing of the list is a server's */
+/* q2pkgd asked to start app (Q2PKG/1 start): 0 when it answers ok */
+static int pkg_start(const char *app) {
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    snprintf(a.sun_path, sizeof a.sun_path, "%s", path("/run/vamp/pkg.sock"));
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    struct timeval tv = {PKG_ASK_MS / 1000, (PKG_ASK_MS % 1000) * 1000};
+    char b[256], req[100];
+    size_t n = 0;
+    if (fd < 0) return -1;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv), setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    int len = snprintf(req, sizeof req, "Q2PKG/1\nstart %s\n", app);
+    if (connect(fd, (struct sockaddr *)&a, sizeof a) || send(fd, req, (size_t)len, MSG_NOSIGNAL) != len) return close(fd), -1;
+    for (char *nl; n < sizeof b - 1;) { /* two lines: the hello's answer and the start's */
+        ssize_t k = recv(fd, b + n, sizeof b - 1 - n, 0);
+        if (k <= 0) break;
+        n += (size_t)k, b[n] = 0;
+        if ((nl = strchr(b, '\n')) && strchr(nl + 1, '\n')) break;
+    }
+    close(fd);
+    b[n] = 0;
+    if (strncmp(b, "Q2PKG/1 ok\n", 11)) return logf_("q2pkgd did not answer the start of %s", app), -1;
+    b[strcspn(b + 11, "\n") + 11] = 0;
+    if (strcmp(b + 11, "ok")) return logf_("q2pkgd will not start %s: %s", app, b + 11), -1;
+    return 0;
+}
+
+/* the catplay written for cp.app: 0, or the card rows alone played */
+static int catplay_write(void) {
+    char tmp[300], dst[300], play[300];
+    snprintf(tmp, sizeof tmp, "/tmp/q2-%s.catplay.q2playd", cp.app), snprintf(dst, sizeof dst, "/tmp/q2-%s.catplay", cp.app);
+    snprintf(play, sizeof play, "/tmp/q2-%s.play", cp.app);
+    read_small(path(play), cp.before, sizeof cp.before);
+    FILE *f = fopen(path(tmp), "w");
+    if (!f) return cp.on = 0, play_offline(cp.at), -1;
+    fprintf(f, "%u %d\n", ++cp.seq, cp.at);
+    for (int i = 0; i < q.n; ++i) fprintf(f, "%s\n", song_lookup(q.ids[q.order[i]]) ? q.file : "");
+    if (fclose(f) || rename(path(tmp), path(dst))) return cp.on = 0, play_offline(cp.at), -1;
+    cp.starting = 0, cp.until = now_ms() + CATPLAY_WAIT_MS;
+    logf_("list handed to %s (catplay %u)", cp.app, cp.seq);
+    return 0;
+}
+
+static int listening(const char *app) {
+    char sock[300];
+    snprintf(sock, sizeof sock, "/tmp/q2-%s.browse.sock", app);
+    return !access(path(sock), F_OK);
+}
+
+/* 1: handed to the app, or to q2pkgd to start it (an answer awaited); 0: nothing of the list is a server's */
 static int catplay(int at) {
-    char app[64] = "", sock[300], tmp[300], dst[300];
+    char app[64] = "";
     int server = 0;
     for (int i = 0; i < q.n && !server; ++i)
         if ((unsigned)q.ids[q.order[i]] >= CAT_ID_BASE && song_lookup(q.ids[q.order[i]]) && !app_of(q.file, app, sizeof app)) server = 1;
     if (!server) return 0;
-    snprintf(sock, sizeof sock, "/tmp/q2-%s.browse.sock", app);
-    if (access(path(sock), F_OK)) {
+    snprintf(cp.app, sizeof cp.app, "%s", app);
+    cp.on = 1, cp.at = at;
+    if (listening(app)) return catplay_write(), 1;
+    if (pkg_start(app)) {
+        cp.on = 0;
         logf_("%s is not running: the list's server songs cannot stream", app);
         return play_offline(at), 1;
     }
-    snprintf(tmp, sizeof tmp, "/tmp/q2-%s.catplay.q2playd", app), snprintf(dst, sizeof dst, "/tmp/q2-%s.catplay", app);
-    snprintf(sock, sizeof sock, "/tmp/q2-%s.play", app);
-    read_small(path(sock), cp.before, sizeof cp.before);
-    FILE *f = fopen(path(tmp), "w");
-    if (!f) return play_offline(at), 1;
-    fprintf(f, "%u %d\n", ++cp.seq, at);
-    for (int i = 0; i < q.n; ++i) fprintf(f, "%s\n", song_lookup(q.ids[q.order[i]]) ? q.file : "");
-    if (fclose(f) || rename(path(tmp), path(dst))) return play_offline(at), 1;
-    snprintf(cp.app, sizeof cp.app, "%s", app);
-    cp.on = 1, cp.at = at, cp.until = now_ms() + CATPLAY_WAIT_MS;
-    logf_("list handed to %s (catplay %u)", app, cp.seq);
+    cp.starting = 1, cp.until = now_ms() + CATPLAY_START_MS;
+    logf_("%s started for the list (q2pkgd)", app);
     return 1;
 }
 
@@ -515,6 +562,15 @@ static int catplay(int at) {
 static void catplay_poll(void) {
     char p[300], now[600];
     if (!cp.on) return;
+    if (cp.starting) {
+        if (listening(cp.app)) catplay_write();
+        else if (now_ms() >= cp.until) {
+            cp.on = cp.starting = 0;
+            logf_("%s did not listen within %d s of its start", cp.app, CATPLAY_START_MS / 1000);
+            play_offline(cp.at);
+        }
+        return;
+    }
     snprintf(p, sizeof p, "/tmp/q2-%s.play", cp.app);
     read_small(path(p), now, sizeof now);
     unsigned seq = 0;
@@ -563,7 +619,7 @@ static int play_ids(const int *ids, int n, int at, int shuffle) {
         }
         at = 0;
     }
-    free_paths(), cp.on = 0;
+    free_paths(), cp.on = cp.starting = 0;
     if (catplay(at)) return 0;
     return start_at(at);
 }

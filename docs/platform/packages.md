@@ -38,9 +38,65 @@ The image's `/etc` is read-only, so `/etc/passwd` and `/etc/group` are links to 
 
 `q2pkgd app-run DIR` starts an added package's entry as its user: the groups of the permissions recorded at `app-add` (what the owner approved, not what the manifest says now), then its gid and uid, in its folder with `HOME` its data folder; if any of those fails, or uid 0 could be taken back, it runs nothing.
 
-**Enforced at run time**: Q2PLAY/1 (`playback`), Q2SYS/1 (`settings`) and Q2NET/1 (`network-hold`). Each answers the hello of a caller that is not root and whose user `/etc/group` does not list in its group with `err permission`, closes the connection, and logs `refused uid N (app-x): no playback permission`. The caller's uid is `SO_PEERCRED`'s, fixed when it connected; its user and groups are read from the files, not from the process, so a package cannot give itself a group. Each socket is mode 0660 and its group's. **Not yet enforced**: `library` and `library-write` (the library is two SQLite files any process can read, until they are the group's and 0640), `music-files` (the card is FAT or exFAT, with no owners: all or nothing, and today all), `screen`, `notices` and `ask` (`q2ui` serves no socket yet), and `background` (nothing yet starts packages under the supervisor). Whether the Q2's kernel offers what would hold an app further (mount and network namespaces, cgroups, seccomp) is a question for the Q2 ([vamp-os-base: Needs a device](../vamp-os-base.md#needs-a-device)); without network namespaces or netfilter's owner match, network access cannot be withheld.
+**Enforced at run time**: Q2PLAY/1 (`playback`), Q2SYS/1 (`settings`) and Q2NET/1 (`network-hold`). Each answers the hello of a caller that is not root and whose user `/etc/group` does not list in its group with `err permission`, closes the connection, and logs `refused uid N (app-x): no playback permission`. The caller's uid is `SO_PEERCRED`'s, fixed when it connected; its user and groups are read from the files, not from the process, so a package cannot give itself a group. Each socket is mode 0660 and its group's. **Not yet enforced**: `library` and `library-write` (the library is two SQLite files any process can read, until they are the group's and 0640), `music-files` (the card is FAT or exFAT, with no owners: all or nothing, and today all), `screen`, `notices` and `ask` (`q2ui` serves no socket yet), and `background` (`q2pkgd` starts packages under the supervisor, [below](#starting-and-stopping-q2pkg1), but nothing yet ends an app without it when it leaves the front: that waits on `q2ui` asking `q2pkgd` to open and close foreground apps). Whether the Q2's kernel offers what would hold an app further (mount and network namespaces, cgroups, seccomp) is a question for the Q2 ([vamp-os-base: Needs a device](../vamp-os-base.md#needs-a-device)); without network namespaces or netfilter's owner match, network access cannot be withheld.
 
 **Tests.** `python3 test/perm.py` (pytest): each of the three services, built for this machine, refusing and logging a caller whose user lacks its group or whose uid has no user, and letting a member in; and, with a service in a user namespace of its own (`bwrap --unshare-user --uid N`, where the suite's connections arrive as uid N), root let in with no groups and each package's uid, from `q2pkgd app-add`'s files, reaching only the services it was given, and a removed one's refused. Of `q2pkgd`: the users, groups and registry `app-add` writes byte for byte, the data folder's mode, the same uid on a second add, a removed package's uid kept from the next, an API 0 app and a bad manifest given none, `accounts` with no packages, and `app-run` starting nothing when it cannot become the package's user. Copies without root's exception, without the members' check, with no members written, with a removed uid given away, with `app-run` going on past a failed `setgroups`, with a data folder others can read, with one service's check left out or checking the wrong group each fail it (`Q2PERM_DIR` for a copy of `perm/`, and each service's `*_SOURCE`). On this machine a service and its client have one real uid between them, so no test here tells `SO_PEERCRED`'s uid from the service's own: a Q2, where the services are root and a package is not, does ([vamp-os-base: Needs a device](../vamp-os-base.md#needs-a-device)).
+
+## Starting and stopping: Q2PKG/1
+
+`q2pkgd` is the launcher: it owns the packages, their users and groups and their permissions, so it alone starts and stops them (the owner's ruling, 2026-11-27). `q2pkgd serve`, the image's `q2pkgd` service, makes each app it starts a runit service of its own, `/run/vamp/sv/<id>` (its `runsv` started by `q2pkgd`; `sv status /run/vamp/sv/<id>` from a shell), whose `run` is `q2pkgd app-run /mnt/mmc/.<id>`:
+
+- **An API 1 app** runs as its user ([Users and groups](#users-and-groups)). A `service` is kept up (`runsv` starts it again when it ends); any other kind runs once, and its own exit stands.
+- **An API 0 app** runs as today, as root with no user of its own: its `run` script, which starts the app's loop in the background, leaves the loop's pid in `/tmp/q2-<id>` and returns; `app-run` then watches that pid, so runit sees the app running while its loop lives, and a stop is a TERM to the loop, as today's Stop is. Before each start `q2pkgd` writes `/tmp/q2-addon.caps`, the capability line an API 0 app reads once when it starts ([internals: Card apps](../internals.md)), with the words this image serves: `catalogue` (`q2libd` reads the app's `catalogue.tsv`, and `q2playd` hands it the Library's plays of its songs) and `playlist` (`q2playd` plays the m3u its `.play` names). Today's Vamp's other words are its UI's, Q2SPOT/1's pages, which Vamp OS does not serve yet.
+
+`q2playd` asks it to start a stopped app before a server play ([q2playd: Server songs](../playd.md#server-songs)); `q2ui` will ask it to open a foreground app.
+
+The socket is `/run/vamp/pkg.sock`, in [the common shape](README.md#the-common-shape), mode 0666: no permission guards the hello, and each command is checked against the caller's uid (`SO_PEERCRED`'s). Root, which the system's services are, may start, stop and ask about any app; a package's own uid (from `/mnt/data/vamp/apps`) may ask its own `status` and `stop` itself; anything else is answered `err permission` and logged `refused uid N (app-x): start navi`.
+
+| Command | Answer |
+| --- | --- |
+| `start ID` | `ok` once runit runs it, or when it runs already; `err app` (no `.<id>` on the card with a manifest this page accepts, or one with nothing to run: a theme, a language, an API 0 app with no `run`), `err not-added` (an API 1 app that `app-add` has not given a user, or one removed), `err start` (its `runsv` not up within 2 s) |
+| `stop ID` | `ok` once it has ended, at most 5 s; `err stop` when it has not |
+| `status ID` | `status ID running` or `status ID stopped` (an API 0 app also runs while the pid in `/tmp/q2-<id>` lives, however it was started); `err app` |
+| `caps` | `caps start stop status` |
+
+The examples' card: `.navi`, an API 0 app with a `catalogue=1` manifest and a `run` script as q2-subsonic's; `.radio`, the API 1 app [below](#examples), not added; `.dusk`, a theme.
+
+```conformance
+> Q2PKG/1
+< Q2PKG/1 ok
+> caps
+< caps start stop status
+> status navi
+< status navi stopped
+> start navi
+< ok
+> status navi
+< status navi running
+> start navi
+< ok
+> stop navi
+< ok
+> status navi
+< status navi stopped
+> start radio
+< err not-added
+> start dusk
+< err app
+> start nobody
+< err app
+> status ../navi
+< err app
+> launch navi
+< err command
+```
+
+```conformance
+> Q2PKG/2
+< err version
+```
+
+**Tests.** `python3 test/launch.py` (pytest): `q2pkgd serve` built for this machine, with BusyBox 1.37.0's own `runsv` (the image's, built for this machine from the same source) and a stand-in for q2-subsonic, replays these transcripts as root (`q2pkgd` in a user namespace where the suite's connections arrive as uid 0); checks the caps file's words, the API 0 loop ended by `stop` and by `sv down`, an API 1 app started through `app-run` as its user (here it cannot become that user, and runs nothing), a `service` started again by `runsv`; a package's uid allowed only its own `status` and `stop`; and `q2playd` and `q2pkgd` together: a server play of a stopped app starts it and plays the m3u it answers.
 
 ## Examples
 

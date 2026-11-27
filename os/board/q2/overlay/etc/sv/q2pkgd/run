@@ -1,0 +1,7 @@
+#!/bin/sh
+# q2pkgd serve (docs/platform/packages.md#starting-and-stopping-q2pkg1): the launcher, Q2PKG/1 on /run/vamp/pkg.sock.
+# Each app it starts is a runit service of its own under /run/vamp/sv, its runsv started by q2pkgd.
+. /usr/libexec/vamp/log
+step "q2pkgd: start"
+exec 2>&1
+exec /usr/bin/q2pkgd serve
