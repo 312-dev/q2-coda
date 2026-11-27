@@ -207,8 +207,9 @@ def check_image(build, fs, manifest, perturb=None):
           '/etc/init.d holds rcS and rcK alone')
     zones = (fs/'usr/share/vamp/timezones').read_text().splitlines() if (fs/'usr/share/vamp/timezones').exists() else []
     missing = [z for z in zones if not (fs/'usr/share/zoneinfo'/z).is_file()]
+    missing += [t for t in ('usr/sbin/ntpd', 'sbin/hwclock', 'bin/date') if not os.path.lexists(fs/t)]  # q2netd's, q2sysd's
     check(os.readlink(fs/'etc/localtime') == '/run/vamp/localtime' and zones == vamp_os.zone_names() and not missing,
-          f"the clock: /etc/localtime a link into /run/vamp, q2sysd's {len(zones)} zones, each in the image's tzdata"
+          f"the clock: /etc/localtime a link into /run/vamp, q2sysd's {len(zones)} zones, each in the image's tzdata, and ntpd, hwclock and date"
           f"{': not ' + ', '.join(missing[:5]) if missing else ''}")
 
 
@@ -352,6 +353,15 @@ def day_zone(fs):
             if 10 <= datetime.datetime.now(zoneinfo.ZoneInfo.from_file(f)).hour < 16:
                 return i, name
     raise SystemExit('no zone in the table is at midday now')
+
+
+def light_check(fb):
+    """q2ui's Light Mode with no [IPOD] LIGHT saved is Auto (the owner's ruling, 2026-11-27; ui/config.c): at midday by the
+    zone q2sysd set, the screen is light. The pixel at (5, 200) is the page's background (test/ui.py light_default's), white
+    when light, black when dark; either of the framebuffer's two pages may be the one shown."""
+    data = fb.read_bytes()
+    px = [data[o:o + 3] for o in (((200 * 320 + 5) * 4), 320 * 375 * 4 + ((200 * 320 + 5) * 4))]
+    check(b'\xff\xff\xff' in px, f"q2ui: Light Mode never chosen is Auto, light at midday (pixel (5, 200): {[p.hex() for p in px]})")
 
 
 def sysd_checks(fs, power_key, log):
@@ -681,7 +691,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (emu/'data').mkdir(exist_ok=True)
         (emu/'data/database.db').write_bytes((fs/'mnt/data/database.db').read_bytes())
         (emu/'data/wpa_supplicant.conf').write_text('network={\n\tssid="Home"\n\tpsk="secret123"\n}\n')  # networks saved
-        # a zone chosen: q2sysd sets it (a zone at midday now, for q2ui's Light Mode)
+        # a zone chosen and Light Mode never: the zone's clock at midday, so Auto is light (light_check)
         zone_index, zone_want = day_zone(fs)
         (emu/'data/config.ini').write_text(f'[SYSSET]\nTIMEZONE={zone_index}\n')
         (emu/'modules').write_text(''.join(f'{ko[:-3]} 16384 0 - Live 0x00000000\n' for ko, _ in want))
@@ -723,6 +733,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             outer_check(outer, emu/'record', outer_adbd)
             got = sys_heat(fs)
             check(got == 'heat off', f"q2sysd: no heat of its own on a card boot, today's Vamp's q2guard's ({got})")
+            light_check(fb)
             if not outer_adbd:
                 adb_checks(fs, emu/'data/adb_keys')
         if proc.poll() is None:
