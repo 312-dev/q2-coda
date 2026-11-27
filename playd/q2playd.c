@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -38,6 +39,7 @@
 #define ERRORS_MAX 20    /* songs in a row that do not open before the queue stops */
 
 static char root[256], db_path[300];
+static int dac = -1, dac_missing;
 static const char *now_path_rel = "/tmp/coda-rc.now", *list_rel = "/tmp/coda-rc.list", *cmdq_rel = "/tmp/coda-rc.cmdq",
                   *sock_rel = "/tmp/sock_play", *push_rel = "/tmp/q2player.push", *api_rel = "/run/vamp/play.sock";
 
@@ -227,6 +229,83 @@ static void ask_status(void) {
     }
 }
 
+/* ---- the DAC's volume (docs/playd.md#the-volume) ----
+ * The CS43131s' volume, as stock's mclSetLocalVol sets it: one ioctl on /dev/shanling_dac (codec_cs43131.ko), its
+ * argument the left channel's level in bits 8-15 and the right's in bits 0-7, each on the same 0 to 100 scale as the
+ * volume itself; the driver maps that to the chips' attenuation. Sent at the start and at each change. */
+#define DAC_SET_VOLUME 0xc0044d00u
+
+static void dac_volume(void) {
+    if (dac < 0 && !dac_missing) {
+        dac = open(path("/dev/shanling_dac"), O_RDWR | O_CLOEXEC);
+        if (dac < 0) dac_missing = 1, logf_("no /dev/shanling_dac: the volume is kept and shown, not set");
+    }
+    if (dac < 0) return;
+    int both = (q.volume & 0xff) << 8 | (q.volume & 0xff);
+    if (ioctl(dac, DAC_SET_VOLUME, &both) < 0) logf_("the DAC refused volume %d: %s", q.volume, strerror(errno));
+}
+
+/* ---- the volume's settings, in stock's config.ini (docs/playd.md#the-volume) ----
+ * [PLAYSET] VOLUME (the level), MAXVOLUME (a cap, 100 when absent), BOOTVOLFLAG and BOOTVOLUME (Default Volume: the
+ * level every boot starts at). Read at the start; VOLUME written back VOLUME_SAVE_MS after the last change, the file
+ * rewritten whole with that one line changed, so stock and today's Vamp read it as before. */
+#define VOLUME_SAVE_MS 2000
+static int max_volume = 100;
+static unsigned long long volume_dirty_at;
+
+static int ini_get(const char *text, const char *section, const char *key, int fallback) {
+    char head[64];
+    snprintf(head, sizeof head, "[%s]", section);
+    const char *sec = strstr(text, head);
+    if (!sec) return fallback;
+    size_t k = strlen(key);
+    for (const char *l = strchr(sec, '\n'); l && *++l && *l != '['; l = strchr(l, '\n'))
+        if (!strncmp(l, key, k) && l[k] == '=') return atoi(l + k + 1);
+    return fallback;
+}
+
+static char *read_all(const char *p) {
+    FILE *f = fopen(p, "r");
+    if (!f) return 0;
+    char *b = calloc(1, 65537);
+    size_t n = b ? fread(b, 1, 65536, f) : 0;
+    fclose(f);
+    if (b) b[n] = 0;
+    return b;
+}
+
+static void volume_load(void) {
+    char *t = read_all(path("/mnt/data/config.ini"));
+    if (!t) return;
+    max_volume = ini_get(t, "PLAYSET", "MAXVOLUME", 100);
+    if (max_volume < 0 || max_volume > 100) max_volume = 100;
+    int v = ini_get(t, "PLAYSET", "BOOTVOLFLAG", 0) ? ini_get(t, "PLAYSET", "BOOTVOLUME", -1) : ini_get(t, "PLAYSET", "VOLUME", -1);
+    if (v >= 0 && v <= 100) q.volume = v > max_volume ? max_volume : v;
+    free(t);
+}
+
+/* VOLUME=q.volume in [PLAYSET], the rest of the file as it was */
+static void volume_save(void) {
+    char *t = read_all(path("/mnt/data/config.ini")), tmp[340], line[32];
+    if (!t) return;
+    snprintf(line, sizeof line, "VOLUME=%d", q.volume);
+    char *sec = strstr(t, "[PLAYSET]"), *at = 0, *end = 0;
+    for (char *l = sec ? strchr(sec, '\n') : 0; l && *++l && *l != '['; l = strchr(l, '\n'))
+        if (!strncmp(l, "VOLUME=", 7)) { at = l, end = l + strcspn(l, "\r\n"); break; }
+    snprintf(tmp, sizeof tmp, "%s.q2playd", path("/mnt/data/config.ini"));
+    FILE *f = fopen(tmp, "w");
+    if (f) {
+        if (at) fprintf(f, "%.*s%s%s", (int)(at - t), t, line, end);
+        else if (sec) { /* no VOLUME line: one after the section's header */
+            char *nl = strchr(sec, '\n');
+            if (nl) fprintf(f, "%.*s%s\n%s", (int)(nl + 1 - t), t, line, nl + 1);
+            else fprintf(f, "%s\n%s\n", t, line);
+        } else fprintf(f, "%s%s[PLAYSET]\n%s\n", t, *t && t[strlen(t) - 1] != '\n' ? "\n" : "", line);
+        if (!fclose(f)) rename(tmp, path("/mnt/data/config.ini"));
+    }
+    free(t);
+}
+
 /* ---- commands: the same verbs from the FIFO and from Q2PLAY/1 ---- */
 
 static unsigned rnd = 0x9e3779b9u;
@@ -304,8 +383,9 @@ static int command(const char *verb, const int *ids, int n_ids) {
         return 0;
     }
     if (sscanf(verb, "volume %d", &a) == 1 && a >= 0 && a <= 100) {
-        /* kept and shown; on the DAC its own volume is q2sysd's to set (docs/playd.md#what-is-missing) */
-        if (a != q.volume) q.volume = a, ++q.seq;
+        if (a > max_volume) a = max_volume; /* Max Volume's cap */
+        if (a != q.volume) q.volume = a, ++q.seq, volume_dirty_at = now_ms() | 1;
+        dac_volume();
         return 0;
     }
     if (!strcmp(verb, "stop")) {
@@ -483,7 +563,9 @@ int main(int argc, char **argv) {
     if (mkfifo(path(cmdq_rel), 0600)) logf_("%s: %s", path(cmdq_rel), strerror(errno));
     cmdq_fd = open(path(cmdq_rel), O_RDWR | O_NONBLOCK | O_CLOEXEC); /* RDWR: never an EOF when a writer leaves */
     if (listen_fd < 0) return 1;
+    volume_load();
     now_write();
+    dac_volume();
     unsigned long long polled = 0;
     while (!stopping) {
         struct pollfd p[5 + CLIENTS];
@@ -499,6 +581,10 @@ int main(int argc, char **argv) {
         if (q.loaded) wait = (int)(polled + POLL_MS > t ? polled + POLL_MS - t : 0);
         if (q.seq != now_written_seq) {
             int w = (int)(now_written_at + NOW_EVERY_MS > t ? now_written_at + NOW_EVERY_MS - t : 0);
+            if (wait < 0 || w < wait) wait = w;
+        }
+        if (volume_dirty_at) {
+            int w = (int)(volume_dirty_at + VOLUME_SAVE_MS > t ? volume_dirty_at + VOLUME_SAVE_MS - t : 0);
             if (wait < 0 || w < wait) wait = w;
         }
         if (poll(p, (nfds_t)n, wait) < 0 && errno != EINTR) break;
@@ -525,11 +611,13 @@ int main(int argc, char **argv) {
             if (cl[i].fd >= 0 && p[5 + i].fd == cl[i].fd && p[5 + i].revents) client_read(&cl[i]);
         t = now_ms();
         if (q.loaded && t >= polled + POLL_MS) ask_status(), polled = t;
+        if (volume_dirty_at && t >= volume_dirty_at + VOLUME_SAVE_MS) volume_save(), volume_dirty_at = 0;
         if (q.seq != now_written_seq && t >= now_written_at + NOW_EVERY_MS) {
             now_write(), tell_watchers();
             now_written_seq = q.seq, now_written_at = t;
         }
     }
+    if (volume_dirty_at) volume_save();
     unlink(path(sock_rel)), unlink(path(push_rel)), unlink(path(api_rel)), unlink(path(cmdq_rel));
     return 0;
 }

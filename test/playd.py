@@ -35,6 +35,40 @@ def binary(tmp_path_factory):
     return out/'q2playd'
 
 
+SHIM = r"""
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+/* the DAC's ioctl recorded (Q2_IOCTL_LOG), every other passed on */
+int ioctl(int fd, unsigned long req, ...) {
+    va_list ap;
+    va_start(ap, req);
+    void *arg = va_arg(ap, void *);
+    va_end(ap);
+    if (req == 0xc0044d00ul) {
+        FILE *f = fopen(getenv("Q2_IOCTL_LOG"), "a");
+        if (f) fprintf(f, "%d\n", *(int *)arg), fclose(f);
+        return 0;
+    }
+    int (*real)(int, unsigned long, ...) = (int (*)(int, unsigned long, ...))dlsym(RTLD_NEXT, "ioctl");
+    return real(fd, req, arg);
+}
+"""
+
+
+@pytest.fixture(scope='session')
+def shim(tmp_path_factory):
+    out = tmp_path_factory.mktemp('shim')
+    (out/'shim.c').write_text(SHIM)
+    subprocess.run(['cc', '-shared', '-fPIC', '-o', str(out/'shim.so'), str(out/'shim.c'), '-ldl'], check=True)
+    return out/'shim.so'
+
+
+CONFIG = '[SYSSET]\nLANGUAGE=2\n[PLAYSET]\nVOLUME=37\nMAXVOLUME=80\nGAPLESS=1\n[Q2POD]\nTHEME=0\n'
+
+
 class Player:
     """q2player's side of /tmp/sock_play: what it was sent, and what it says."""
     def __init__(self, root):
@@ -83,15 +117,23 @@ class Player:
 
 
 @pytest.fixture
-def run(binary, tmp_path):
-    for d in ('tmp', 'run', 'mnt/data'):
+def config():
+    return CONFIG
+
+
+@pytest.fixture
+def run(binary, shim, tmp_path, config):
+    for d in ('tmp', 'run', 'mnt/data', 'dev'):
         (tmp_path/d).mkdir(parents=True)
+    (tmp_path/'dev/shanling_dac').write_text('')
+    (tmp_path/'mnt/data/config.ini').write_text(config)
     db = sqlite3.connect(tmp_path/'mnt/data/database.db')
     db.execute('create table songtable(id integer primary key, fileurl, name, songer, album, track)')
     db.executemany('insert into songtable values (?, ?, ?, ?, ?, 0)', SONGS)
     db.commit()
     db.close()
-    p = subprocess.Popen([str(binary), '--root', str(tmp_path)], stderr=subprocess.PIPE)
+    env = dict(os.environ, LD_PRELOAD=str(shim), Q2_IOCTL_LOG=str(tmp_path/'dac.log'))
+    p = subprocess.Popen([str(binary), '--root', str(tmp_path)], stderr=subprocess.PIPE, env=env)
     player = Player(tmp_path)
     yield tmp_path, player
     p.terminate()
@@ -209,12 +251,28 @@ def test_the_position_and_length_come_from_media_info(run):
     assert (n['pos'], n['len']) == ('42000', '200')
 
 
-def test_the_volume_is_kept_and_shown(run):
+def dac(root):
+    """the levels the DAC was set to, each as (left, right)"""
+    return [(int(v) >> 8, int(v) & 0xff) for v in (root/'dac.log').read_text().split()] if (root/'dac.log').exists() else []
+
+
+def test_the_volume_starts_as_saved_reaches_the_dac_is_capped_and_is_saved(run):
     root, pl = run
+    assert now(root, 0.5)['volume'] == '37' and dac(root) == [(37, 37)]
     fifo(root, 'volume 61')
-    assert now(root)['volume'] == '61'
+    assert now(root)['volume'] == '61' and dac(root)[-1] == (61, 61)
     fifo(root, 'volume 101')
-    assert now(root)['volume'] == '61'
+    assert now(root)['volume'] == '61', 'out of range: refused'
+    fifo(root, 'volume 95')
+    assert now(root)['volume'] == '80' and dac(root)[-1] == (80, 80), "Max Volume's cap"
+    time.sleep(2.5)
+    assert (root/'mnt/data/config.ini').read_text() == CONFIG.replace('VOLUME=37', 'VOLUME=80'), 'only the one line changed'
+
+
+@pytest.mark.parametrize('config', [CONFIG.replace('MAXVOLUME=80', 'MAXVOLUME=80\nBOOTVOLFLAG=1\nBOOTVOLUME=12')])
+def test_default_volume_sets_the_start(run):
+    root, pl = run
+    assert now(root, 0.5)['volume'] == '12' and dac(root) == [(12, 12)]
 
 
 def test_a_player_that_goes_away_leaves_nothing_playing_and_the_next_is_taken(run):
