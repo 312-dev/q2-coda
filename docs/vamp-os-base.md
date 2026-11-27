@@ -154,9 +154,9 @@ Measured on the MacBook Pro (M-series, `tools/mac/q2env`'s native arm64 image, t
 
 | | |
 | --- | --- |
-| `vampos.squashfs` | 6,569,984 bytes (6.3 MiB), 9% of mtd2's 72 MiB (`ROOTFS_ROOM`) |
-| Composed, with `/vendor` | 8,650,752 bytes (8.3 MiB) |
-| Largest files | `q2player` 3.2 MB (FFmpeg and mbedTLS inside), `libc.so.6` 2.0 MB, `sqlite3` (the shell) 1.9 MB, `libsqlite3` 1.2 MB, `libasound` 1.2 MB, `busybox` 1.1 MB, the two Inter faces 0.8 MB, `q2ui` 0.2 MB |
+| `vampos.squashfs` | 16,404,480 bytes (15.6 MiB), 22% of mtd2's 72 MiB (`ROOTFS_ROOM`), at `1f034c79` (2026-11-27, with Bluetooth and LocalSend's OpenSSL: 13,873,152 bytes before OpenSSL) |
+| Composed, with `/vendor` | 18,513,920 bytes (17.7 MiB) |
+| Largest files | `libcrypto.so.3` 4.8 MB (OpenSSL, for LocalSend's `q2send`), `q2player` 3.2 MB (FFmpeg and mbedTLS inside), `q2libd` 3.0 MB, `libgio` 2.3 MB, `libc.so.6` 2.0 MB, `bluetoothd` 1.8 MB, `libssl.so.3` 1.1 MB, `sqlite3` (the shell) 1.9 MB, `libsqlite3` 1.2 MB, `libasound` 1.2 MB, `busybox` 1.1 MB, the two Inter faces 0.8 MB, `q2ui` 0.2 MB |
 | A full build from an empty build directory, downloads cached | 929 s and 909 s (two runs, `make clean` before each, `BR2_JLEVEL=4`, niced), most of it the toolchain (binutils, GCC twice, glibc) |
 | A build after a commit, toolchain and FFmpeg built | 8 s to a few minutes, by what changed |
 | The build directory, `/home/gray/.cache/q2-os/out` | 6.7 GB; downloads in `~/.cache/q2-os/dl` 0.95 GB |
