@@ -6,7 +6,7 @@
  * (lib_open), and nothing is ever written to it. While demo lets the card go (CARD_HOLD, before Standby, a power-off or
  * a restart) the catalogue on the card is not opened, and a SIGUSR1 closes the connection (lib_release), so nothing
  * of the daemon's holds the card as it is unmounted. Play.resume's places, the song each list last played from a phone was on,
- * are the daemon's own file (PLACES). */
+ * are the daemon's own file (PLACES). Under Vamp OS (crc_vampos) the library is q2libd's instead (docs/carrd.md#the-library). */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
 #include "stream_path.h"
@@ -15,6 +15,12 @@
 #define CAT "/mnt/mmc/.q2pod/catalogue.db"
 #define CARD_HOLD "/tmp/mmc_hold" /* demo's pid while it lets the card go (card_release.c) */
 #define DURATIONS "/mnt/data/ringnav-durations-v1"
+/* --library vampos: Vamp OS's library, q2libd's (docs/libd.md): stock's songtable with each song's length in its time
+ * column, in seconds, and stock's playlist; no myfav (Favorites empty) and no durations file. Stock's database.db and
+ * today's Vamp's catalogue on the card are not read, as Vamp OS leaves both alone; the servers' songs, in q2libd's
+ * own catalogue, are not offered yet. */
+#define VAMPOS_DB "/mnt/data/vamp/library.db"
+int crc_vampos;
 #define SPLIT 120         /* a list longer than this opens as letter buckets (q2bridge.py SPLIT) */
 #define CAP 500           /* and a bucket longer than this splits again; no list sends more (CAP) */
 #define PLAY_MAX 20000    /* songs one Play may queue */
@@ -111,7 +117,7 @@ int lib_card_held(void) {
 int lib_stream_song(const char *path, lib_song_t *o) {
     char app[64], sid[64], p[256], like[80];
     memset(o, 0, sizeof *o);
-    if (!stream_sid(path, app, sizeof app, sid, sizeof sid) || lib_card_held()) return 0;
+    if (crc_vampos || !stream_sid(path, app, sizeof app, sid, sizeof sid) || lib_card_held()) return 0;
     sqlite3 *c = 0;
     sqlite3_stmt *st;
     int ok = 0;
@@ -290,7 +296,7 @@ static void f_dur(sqlite3_context *c, int n, sqlite3_value **v) {
  * they are always in the Library (no setting since 2026-11-19) */
 int lib_has_server(void) {
     char p[256];
-    return !lib_card_held() && access(crc_path(p, sizeof p, CAT), 0) == 0;
+    return !crc_vampos && !lib_card_held() && access(crc_path(p, sizeof p, CAT), 0) == 0;
 }
 
 /* stock's library filter (offsets.inc MUSIC_WHERE): no audiobooks, podcasts or M4B in the music library */
@@ -317,20 +323,21 @@ typedef struct {
 static lib_key_t lib_key;
 
 static void lib_key_now(lib_key_t *k) {
-    static const char *const files[3] = {DB, CAT, DURATIONS};
+    static const char *const files[3] = {DB, CAT, DURATIONS}, *const vampos[3] = {VAMPOS_DB, 0, 0};
     memset(k, 0, sizeof *k);
     int held = lib_card_held(); /* the catalogue counted as absent: the tables made again without it, and after */
     for (int i = 0; i < 3; ++i) {
         char p[256];
-        if (held && i == 1) continue; /* files[1]: CAT */
-#ifdef CODA_HOST
+        const char *file = crc_vampos ? vampos[i] : files[i];
+        if (!file || (held && i == 1)) continue; /* files[1]: CAT */
+#if defined(CODA_HOST) || defined(CODA_LIBC)
         struct stat st;
-        if (stat(crc_path(p, sizeof p, files[i]), &st)) continue;
+        if (stat(crc_path(p, sizeof p, file), &st)) continue;
         k->ino[i] = st.st_ino, k->size[i] = st.st_size;
         k->mtime[i] = (long long)st.st_mtim.tv_sec * 1000000000 + st.st_mtim.tv_nsec;
 #else
         int st[40]; /* glibc's MIPS o32 struct stat as words: st_ino 4, st_size 12, st_mtim 16 and 17 */
-        if (__xstat(3, crc_path(p, sizeof p, files[i]), st)) continue;
+        if (__xstat(3, crc_path(p, sizeof p, file), st)) continue;
         k->ino[i] = (unsigned)st[4], k->size[i] = (unsigned)st[12];
         k->mtime[i] = (long long)st[16] * 1000000000 + st[17];
 #endif
@@ -363,7 +370,7 @@ static int lib_open(void) {
     if (db && !memcmp(&k, &lib_key, sizeof k)) return 0;
     lib_drop();
     lib_key = k;
-    if (sqlite3_open_v2(crc_path(p, sizeof p, DB), &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) {
+    if (sqlite3_open_v2(crc_path(p, sizeof p, crc_vampos ? VAMPOS_DB : DB), &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) {
         crc_log("lib: %s", db ? sqlite3_errmsg(db) : "no database");
         lib_drop();
         return -1;
@@ -385,8 +392,10 @@ static int lib_open(void) {
     cat_on = server;
     /* no format string: MUSIC_WHERE's LIKE patterns hold '%' */
     snprintf(sql, sizeof sql, "%s%s%s",
-             "create temp view songs as " SONG_COLS("songtable", "t", "dur(songtable.fileurl)", "0")
-             " from main.songtable where " MUSIC_WHERE,
+             crc_vampos ? "create temp table myfav(fileurl);create temp view songs as "
+                          SONG_COLS("songtable", "t", "ifnull(songtable.time,0)", "0") " from main.songtable where " MUSIC_WHERE
+                        : "create temp view songs as " SONG_COLS("songtable", "t", "dur(songtable.fileurl)", "0")
+                          " from main.songtable where " MUSIC_WHERE,
              server ? " union all " SONG_COLS("s", "c", "ifnull(m.seconds,0)", "1")
                       " from cat.servertable s left join cat.servermeta m on m.fileurl = s.fileurl"
                     : "",
@@ -571,7 +580,7 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         l->order = order_of("tracks", l->sort, &l->bucketed, &l->years, &bk);
         snprintf(l->title, sizeof l->title, "Favorites");
         snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "0")
-                 " from s2 where url in (select fileurl from main.myfav)", bk);
+                 " from s2 where url in (select fileurl from %s.myfav)", bk, crc_vampos ? "temp" : "main");
     } else if (!strcmp(kind, "recent")) {
         /* the RECENT_CAP songs added last, newest first; one order, so no letters */
         l->actions = 3;

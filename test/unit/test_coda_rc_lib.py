@@ -1,6 +1,7 @@
 """coda-rc's library (patch/coda_rc_lib.c, remote/coda-rc.proto "browse"): Browse and Play over a stock database
 (and, Local + Server, a card app's catalogue) made here, with no socket: the library built for this machine with test/unit/coda_rc_host.c and coda_rc_lib_host.c
-as the daemon around it, its device paths under a temporary root."""
+as the daemon around it, its device paths under a temporary root. CODA_RC_LIB_SOURCE builds another copy of
+coda_rc_lib.c, to show a broken one fails here."""
 import ctypes
 import os
 import pathlib
@@ -9,6 +10,7 @@ import sqlite3
 import struct
 import subprocess
 import sysconfig
+import time
 
 import pytest
 
@@ -16,7 +18,7 @@ import coda_rc_client as client
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PATCH = ROOT / 'patch'
-SOURCES = [PATCH / 'coda_rc_core.c', PATCH / 'coda_rc_lib.c', PATCH / 'monocypher/monocypher.c',
+SOURCES = [PATCH / 'coda_rc_core.c', pathlib.Path(os.environ.get('CODA_RC_LIB_SOURCE') or PATCH / 'coda_rc_lib.c'), PATCH / 'monocypher/monocypher.c',
            PATCH / 'monocypher/monocypher-ed25519.c', ROOT / 'test/unit/coda_rc_host.c',
            ROOT / 'test/unit/coda_rc_lib_host.c']
 SQLITE = f"/usr/lib/{sysconfig.get_config_var('MULTIARCH')}/libsqlite3.so.0"  # stock's is 3.54; the host's answers the same SQL
@@ -483,3 +485,65 @@ def gone_pid():
     """A pid no process has (the top of pid_max downwards), as a restarted demo's old one."""
     top = int(pathlib.Path('/proc/sys/kernel/pid_max').read_text())
     return next(p for p in range(top - 1, 1, -1) if not pathlib.Path(f'/proc/{p}').exists())
+
+
+# ---- Vamp OS's library (--library vampos, docs/carrd.md#the-library) ----
+
+def vampos_files(root):
+    """q2libd's library.db (docs/libd.md: stock's songtable, every column, its time in seconds; stock's playlist; no
+    myfav), beside a stock database.db and today's Vamp's card catalogue that Vamp OS leaves alone: neither is read."""
+    Q2.files(root, songs=[(9, 'z/9.flac', 'Stock Only', 'Zed', 'Old', 1)], favs=(9,), server=SERVER)
+    (root / 'mnt/data/vamp').mkdir(parents=True)
+    db = sqlite3.connect(root / 'mnt/data/vamp/library.db')
+    db.execute('create table songtable(id integer primary key, filename varchar(256), fileurl varchar(256), '
+               'album varchar(256), songer varchar(256), style varchar(256), name varchar(256), composer varchar(256), '
+               'albumsonger varchar(256), year integer, track integer, cd_num integer, time integer, time_end integer, '
+               'time_create integer, Initial varchar(8), bitdepth integer, samprate integer)')
+    db.execute('create table playlist(id integer, name varchar(256), filename varchar(256), fileurl varchar(256), '
+               'cd_num integer)')
+    for i, f, title, artist, album, added in SONGS:
+        db.execute('insert into songtable(id, filename, fileurl, album, songer, style, name, albumsonger, year, track, '
+                   'cd_num, time, time_create) values (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                   (i, f.split('/')[-1], '/mnt/mmc/' + f, album, artist, 'Rock', title, artist, 2001, i, 1, 60 * i, added))
+    db.commit()
+    db.close()
+
+
+@pytest.fixture
+def vampos(lib, tmp_path):
+    flag = ctypes.c_int.in_dll(lib, 'crc_vampos')
+    flag.value = 1
+    vampos_files(tmp_path)
+    q2 = Q2.__new__(Q2)
+    Q2.__init__(q2, lib, tmp_path / 'unused')  # a session; its own files under a root not used
+    ctypes.memmove(ctypes.addressof(ctypes.c_char.in_dll(lib, 'root')), str(tmp_path).encode() + b'\0',
+                   len(str(tmp_path)) + 1)
+    q2.root = tmp_path
+    yield q2
+    flag.value = 0
+
+
+def test_vamp_os_s_library_is_q2libd_s_with_its_lengths_and_nothing_of_stock_s(vampos):
+    """Under Vamp OS coda-rc reads q2libd's /mnt/data/vamp/library.db: its songs, each with its length from the time
+    column (no durations file there), and no stock database.db's songs or today's Vamp's catalogue on the card"""
+    tracks = vampos.browse('tracks')
+    assert titles(tracks) == ['Alpha', 'Bravo', 'Charlie', 'Delta'], titles(tracks)
+    assert [i.get('duration_ms') for i in tracks['items']] == [60000, 120000, 180000, 240000], tracks['items']
+    assert vampos.play('tracks') == ['1', '2', '3', '4']
+
+
+def test_vamp_os_has_no_favorites_yet_so_its_list_is_empty(vampos):
+    """q2libd keeps no myfav: Favorites is an empty list, not an error"""
+    assert vampos.browse('favorites')['total'] == 0
+
+
+def test_vamp_os_s_library_is_read_again_once_q2libd_has_changed_it(vampos):
+    """the tables are kept while the library's file is unchanged (lib_open's key): q2libd's file, not stock's"""
+    assert len(titles(vampos.browse('tracks'))) == 4
+    time.sleep(0.01)
+    db = sqlite3.connect(vampos.root / 'mnt/data/vamp/library.db')
+    db.execute("insert into songtable(id, filename, fileurl, album, songer, name, time, time_create) "
+               "values (7, '7.flac', '/mnt/mmc/c/7.flac', 'Third', 'Cy', 'Echo', 30, 700)")
+    db.commit()
+    db.close()
+    assert titles(vampos.browse('tracks')) == ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo']

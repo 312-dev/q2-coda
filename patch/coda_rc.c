@@ -1303,6 +1303,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--no-ble")) use_ble = 0;
         else if (!strcmp(argv[i], "--mdns-if") && i + 1 < argc) mdns_if = argv[++i];
         else if (!strcmp(argv[i], "--no-mdns")) mdns_if = 0;
+        else if (!strcmp(argv[i], "--library") && i + 1 < argc) crc_vampos = !strcmp(argv[++i], "vampos");
 #ifdef CODA_HOST
         else if (!strcmp(argv[i], "--ble-sim") && i + 1 < argc) ble_sim(argv[++i]);
 #endif
