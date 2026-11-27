@@ -6,6 +6,8 @@ case "$MDEV" in
 mmcblk[0-9]) ls /dev/"$MDEV"p[0-9]* > /dev/null 2>&1 && exit 0 ;;
 esac
 if [ "$ACTION" = add ]; then
+    # mounted already: a boot from the card (docs/vamp-os-base.md#card-boot), whose mdev -s replays the card's add
+    grep -q ' /mnt/mmc ' /proc/mounts && exit 0
     if mount /dev/"$MDEV" /mnt/mmc; then step "card: /dev/$MDEV on /mnt/mmc"; else step "card: mount of /dev/$MDEV failed"; fi
 elif [ "$ACTION" = remove ]; then
     sync
