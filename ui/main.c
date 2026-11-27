@@ -395,7 +395,8 @@ static int key_code(const char *name) {
  * networks FILE and btdevices FILE (the same for demo's Wi-Fi networks and Bluetooth devices) |
  * notice COMMAND (a Q2UI/1 command, as a connection's: its answers go to the trace, "said ...") |
  * touch X Y | move X Y | lift (a finger on the upright screen, as ui/input.c reads hyn_ts) |
- * swipe X0 Y0 X1 Y1 MS (a finger down, moved a frame at a time over MS, lifted).
+ * swipe X0 Y0 X1 Y1 MS (a finger down, moved a frame at a time over MS, lifted) |
+ * spin N DPS (N ticks, one a frame, the wheel turning at DPS degrees a second; a tick's is 0).
  * Each input goes in with the next frame. */
 static void script_said(const char *line) {
     if (trace) fprintf(trace, "t=%llu said %s\n", (unsigned long long)fake_us, line);
@@ -422,6 +423,11 @@ static int script(const char *path) {
             int n = atoi(arg);
             for (int i = 0; i < abs(n); ++i) {
                 input_t in = { IN_TICK, n > 0 ? 1 : -1, 0, (unsigned)(fake_us / 1000u) };
+                script_frame(&in, 1);
+            }
+        } else if (sscanf(line, "spin %d %d", &tx, &ty) == 2) {
+            for (int i = 0; i < abs(tx); ++i) {
+                input_t in = { IN_TICK, tx > 0 ? 1 : -1, 0, (unsigned)(fake_us / 1000u), 0, 0, ty };
                 script_frame(&in, 1);
             }
         } else if (sscanf(line, "tug %319s", arg) == 1) {

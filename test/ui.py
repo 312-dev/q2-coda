@@ -1420,6 +1420,64 @@ def control_center_sheet(binary, work, home):
     return good
 
 
+def wheel_volume(binary, work):
+    """The wheel's volume steps by its speed, as demo's (patch/volume.c vol_accel, Rockbox's iPod curve): (speed / 270)^4
+    a tick, 1 to 10, the speed measured as demo's wheel thread does (patch/playback.c wheel_speed_sample). The owner's
+    report (2026-11-27): q2ui's volume had lost the acceleration demo's has. Control Center's and the lists' sliders step
+    the same way."""
+    good = True
+    seen = {}
+    for name, walk in (('slow', ['rest', 'tick 3', 'run 100']), ('fast', ['rest', 'spin 3 1000', 'run 100']),
+                       ('400', ['rest', 'spin 1 400', 'run 100']), ('270', ['rest', 'spin 1 270', 'run 100'])):
+        _, _, _, (sent, _, _) = script(binary, work, 5, walk, '--page', 'now', now=NOW, queue=True)
+        seen[name] = [line.split(' ', 1)[1] for line in sent]
+    good &= check("Now Playing's volume: a slow turn 1 a tick, a fast spin 10, 400 degrees a second 5, 270 still 1",
+                  seen == {'slow': ['volume 41', 'volume 42', 'volume 43'], 'fast': ['volume 50', 'volume 60', 'volume 70'],
+                           '400': ['volume 45'], '270': ['volume 41']}, str(seen))
+    levels = {}
+    for gap in (0.3, 0.02):
+        r = Run(binary, work, 5, '--page', 'now')
+        try:
+            (r.dir/'now').write_text(NOW)
+            r.rest()
+            r.sent()
+            r.ticks(8, gap)
+            time.sleep(0.5)
+            got = [int(line.split()[-1]) for line in r.sent() if ' volume ' in f' {line} ']
+            levels[gap] = got[-1] if got else None
+        finally:
+            r.proc.kill()
+            r.proc.wait(timeout=5)
+            os.close(r.queue)
+    good &= check('live, eight ticks spun fast take the volume further than the same eight turned slowly, which go 1 a tick',
+                  levels[0.3] == 48 and (levels[0.02] or 0) > 60, str(levels))
+    return good
+
+
+def playing_row(binary, work):
+    """The playing song's row (docs/oled-design.md): in a song list the song playing or paused, known by its id (demo's
+    now file's id=, never its title), has its title in the accent and four level bars on the right column; Centre on it
+    opens Now Playing and sends nothing, the song playing on. Nothing playing, no row is marked."""
+    good = True
+    probe = folder(work, 60)
+    db = sqlite3.connect(probe/'library.db')
+    order = [r[0] for r in db.execute('select id from songtable order by name collate nocase, id')]
+    k = 3  # row 0 is Shuffle, row 1 the selected first song: the third song plays
+    now = NOW.replace('id=5', f'id={order[k - 1]}')
+    bars = lambda p: sum(1 for x in range(325, 352) if p.at(x, BAR_H + k * ROW_H + 16) == ACCENT)  # noqa: E731 (across the bars' middle row)
+    _, pics, _ = script(binary, work, 60, ['rest', 'shot @list.ppm'], now=now)
+    _, idle, _ = script(binary, work, 60, ['rest', 'shot @list.ppm'], now=now.replace('state=1', 'state=0'))
+    good &= check("the playing song's row has the level bars in the accent on the right; with nothing playing none",
+                  bars(pics['list']) >= 6 and bars(idle['list']) == 0,
+                  f"{bars(pics['list'])} {bars(idle['list'])}")
+    walk = ['rest', f'tick {k - 1}', 'rest', 'key centre', 'rest']
+    _, _, stats, (sent, _, _) = script(binary, work, 60, walk, now=now, queue=True)
+    good &= check('Centre on it opens Now Playing and sends no play', stats['top'] == 'now' and sent == [], f"{stats['top']} {sent}")
+    _, _, stats, (sent, _, _) = script(binary, work, 60, walk, now=now.replace('state=1', 'state=0'), queue=True)
+    good &= check('with nothing playing Centre on the same row plays it', stats['top'] == 'now' and len(sent) == 1, f"{stats['top']} {sent}")
+    return good
+
+
 def album_covers(binary, work, home):
     """Albums' rows lead with their covers (ui/art.c), found as Cover Flow names them; one it has not made shows the
     placeholder. Read in place by a script, and by the worker in a live run."""
@@ -2268,6 +2326,10 @@ def main():
             good &= clock(binary, work)
         if not only or 'night' in only:
             good &= night_shift(binary, work, ('--page', 'home'))
+        if not only or 'playing' in only:
+            good &= playing_row(binary, work)
+        if not only or 'volume' in only:
+            good &= wheel_volume(binary, work)
         if not only or 'light' in only:
             good &= light_default(binary, work, ('--page', 'home'))
         if not only or 'notices' in only:

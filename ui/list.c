@@ -86,7 +86,6 @@
 #define MQ_FADE 12
 #define SLIDER_X 190       /* an inline slider's track starts here (docs/oled-design.md#inline-sliders), */
 #define SLIDER_END 62      /* and ends this far short of the right column, where its value ends */
-#define SLIDER_STEPS 10    /* a tick's most steps on a fast spin (patch/offsets.inc VOL_ACCEL_MAX) */
 #define SLIDER_TRACK_ON 0x7da2ea /* its track on the platter, under a white fill */
 #define CACHE 32 /* rows whose text is kept: a power of two, more than a fast glide shows */
 /* A captioned row's caption (patch/settings_pages.c, its CAP_* values): Inter 13 from the title's column, CAP_INSET
@@ -162,6 +161,7 @@ struct ui_list {
     rect_t focus_was; /* the focus layer's box as last marked */
     struct rowc rows_c[CACHE];
     wheel_accel_t accel;
+    int playing_seen; /* the playing song's id as the rows were last marked (src.song), 0 none */
     uint64_t az_at; /* the A-Z index: the last fast tick, 0 hidden */
     int az_in, az_letter; /* the right column's move while it shows; the lit letter, 0 '#', 1 to 26 A to Z */
     /* captions: the row growing to its caption (-1 none) and its lines; the row shrinking back and how tall its
@@ -181,9 +181,22 @@ struct ui_list {
     } slides[SLIDES];
 };
 
+#define PLAYING_W 28.5f /* the level bars' 16.5 px and SONG_COL_GAP's 12 before them */
+/* The playing song's id, playing or paused, 0 for none (ui/now.c: demo's file's id=, the song's row) */
+static int playing_id(void) {
+    const ui_now *n = now_get();
+    return (n->playing || n->paused) && n->id > 0 ? n->id : 0;
+}
+/* Row i as the source says, marked as the playing song's (docs/oled-design.md, the playing song's row:
+ * its title accent, the level bars on the right) when it is that song, known by its id */
+static void get_row(ui_list *l, int i, ui_row *r) {
+    l->src.row(l->src.ctx, i, r);
+    int id = l->src.song ? playing_id() : 0;
+    if (id && l->src.song(l->src.ctx, i) == id) r->flags |= ROW_PLAYING;
+}
 static int selectable(ui_list *l, int i) {
     ui_row r = { 0 };
-    l->src.row(l->src.ctx, i, &r);
+    get_row(l, i, &r);
     return !(r.flags & (ROW_GREY | ROW_HEADER));
 }
 /* How far row i reaches below its own height now: the caption it is growing to or shrinking from. */
@@ -272,7 +285,7 @@ static void retarget(ui_list *l) {
 
 static unsigned row_text_flags(ui_list *l, int i) {
     ui_row r = { 0 };
-    l->src.row(l->src.ctx, i, &r);
+    get_row(l, i, &r);
     return r.flags;
 }
 static void forget(ui_list *l) {
@@ -454,7 +467,7 @@ static struct rowc *row_text(ui_list *l, int i) {
     if (!gap.n || run_stale(&gap)) run_make(&gap, FACE_REGULAR, TITLE_PX, "  ", -1);
     ui_row *r = &c->row;
     memset(r, 0, sizeof *r);
-    l->src.row(l->src.ctx, i, r);
+    get_row(l, i, r);
     c->index = i, c->pictures = pictures, c->everything = everything, c->az_in = l->az_in;
     int two = l->row_h > ROW_H && r->sub;
     float x = (float)(l->box.x + TEXT_X + TEXT_MARGIN);
@@ -474,6 +487,7 @@ static struct rowc *row_text(ui_list *l, int i) {
         if (r->value) run_make(&c->value, FACE_REGULAR, META_PX, r->value, SLIDER_END - 8);
         end = (float)(l->box.x + SLIDER_X) - VALUE_GAP;
     } else if (r->value && *r->value) {
+        if (r->flags & ROW_PLAYING) end -= PLAYING_W; /* the bars on the right column, the value left of them */
         run_make(&c->value, FACE_REGULAR, two ? META_PX : TITLE_PX, r->value, (int)((end - x) / 2));
         end -= c->value.w + VALUE_GAP;
     } else if (r->flags & ROW_SWITCH)
@@ -610,9 +624,11 @@ static void row_paint(ui_list *l, int i, float y, int focused, float dy) {
     if (r->flags & ROW_SLIDER) {
         slider((float)(l->box.x + SLIDER_X), right - SLIDER_END, cy + iy, r->level, focused, i == l->grab);
         if (c->value.n) run_draw(&c->value, right - c->value.w, ty + (h - (float)META_PX) / 2, val, 256);
-    } else if (c->value.n)
-        run_draw(&c->value, right - c->value.w, two ? ty + 5 + 3 : ty + (h - (float)TITLE_PX) / 2, val, 256);
-    else if (r->flags & ROW_SWITCH)
+    } else if (c->value.n) {
+        float vr = r->flags & ROW_PLAYING ? right - PLAYING_W : right; /* a playlist's artist left of the bars, as a length */
+        run_draw(&c->value, vr - c->value.w, two ? ty + 5 + 3 : ty + (h - (float)TITLE_PX) / 2, val, 256);
+        if (r->flags & ROW_PLAYING) level_bars(right, cy + iy, focused ? on : RGB_ACCENT);
+    } else if (r->flags & ROW_SWITCH)
         toggle(right, cy + iy, i == l->sel ? (float)l->knob.x : r->flags & ROW_ON ? 1.0f : 0.0f, focused);
     else if (r->flags & ROW_PLAYING)
         level_bars(right, cy + iy, focused ? on : RGB_ACCENT);
@@ -798,11 +814,11 @@ static int letter_step(ui_list *l, int i, int dir) {
     ui_row r = { 0 };
     int p = l->src.pinned;
     if (i < p) return dir > 0 ? p : i;
-    l->src.row(l->src.ctx, i, &r);
+    get_row(l, i, &r);
     int c = (unsigned char)(r.title ? r.title[0] : 0) | 0x20, j = i;
     for (;;) {
         if (j + dir < p || j + dir >= l->n) return j;
-        l->src.row(l->src.ctx, j + dir, &r);
+        get_row(l, j + dir, &r);
         j += dir;
         if (((unsigned char)(r.title ? r.title[0] : 0) | 0x20) != c) return j;
     }
@@ -844,12 +860,11 @@ void list_select(ui_list *l, int i, int animate) {
 void list_event(ui_list *l, const input_t *e) {
     if (!l->n) return;
     if (e->type == IN_TICK && l->grab >= 0) { /* a grabbed slider's: the selection stays */
-        int step = wheel_accel(&l->accel, l, e->value, e->ms, 0);
-        step = step < 1 ? 1 : step > SLIDER_STEPS ? SLIDER_STEPS : step;
+        int step = wheel_steps(e->speed); /* by the wheel's speed, as demo's sliders (patch/levels.c wheel_level) */
         ui_row before = { 0 }, after = { 0 };
-        l->src.row(l->src.ctx, l->grab, &before);
+        get_row(l, l->grab, &before);
         if (l->src.adjust) l->src.adjust(l->src.ctx, l->grab, e->value * step); /* clockwise is more, as demo's sliders (patch/inline_slider.c) */
-        l->src.row(l->src.ctx, l->grab, &after);
+        get_row(l, l->grab, &after);
         if (after.level != before.level) ui_click(0); /* as demo's slider: only a change clicks */
         ui_mark(l->focus_was);
     } else if (e->type == IN_TICK) {
@@ -896,6 +911,8 @@ void list_event(ui_list *l, const input_t *e) {
         } else if (was && row_text_flags(l, l->sel) & ROW_SLIDER) { /* Centre grabs a slider and sets it down */
             l->grab = l->grab == l->sel ? -1 : l->sel;
             ui_mark(l->focus_was);
+        } else if (was && row_text_flags(l, l->sel) & ROW_PLAYING) { /* the song plays on: never sent again */
+            ui_push(&page_now, 0);
         } else if (was && l->src.chosen)
             l->src.chosen(l->src.ctx, l->sel);
     }
@@ -916,7 +933,7 @@ int list_rows_dump(const char *path) {
     if (!f) return -1;
     for (int i = 0; i < traced->n; ++i) {
         ui_row r = { 0 };
-        traced->src.row(traced->src.ctx, i, &r);
+        get_row(traced, i, &r);
         if (r.marks[0]) {
             fprintf(f, "%s\t%s\t%s\t", r.title ? r.title : "", r.value ? r.value : "", r.detail ? r.detail : "");
             for (int k = 0; k < 3 && r.marks[k]; ++k) fprintf(f, "%s%s", k ? " " : "", r.marks[k]);
@@ -936,6 +953,8 @@ int list_trace(char *out, size_t room) {
 void list_step(ui_list *l) {
     uint64_t now = ui_time();
     traced = l;
+    if (l->src.song && playing_id() != l->playing_seen) /* another song plays: its row marked, the last's not */
+        l->playing_seen = playing_id(), list_rows_changed();
     /* rows changed from outside (list_rows_changed): read again, the selected switch sliding over,
      * and counted again when rows came or went (a switch whose rows show only while it is on) */
     if (l->everything_seen != everything) {

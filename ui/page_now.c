@@ -254,9 +254,9 @@ static void n_event(void *st, const input_t *e) {
             "playermore_page"); /* a dialog over demo's page under q2ui (patch/onlinematch.c) */
     } else if (e->type == IN_TICK) {
         char verb[24];
-        /* clockwise (a tick down a list) is louder, as on demo's Now Playing (patch/volume.c
-         * vol_next) */
-        int to = (s->volume < 0 ? now_get()->volume : s->volume) + e->value;
+        /* clockwise (a tick down a list) is louder, by the wheel's speed, as on demo's Now Playing
+         * (patch/volume.c vol_next) */
+        int to = (s->volume < 0 ? now_get()->volume : s->volume) + e->value * wheel_steps(e->speed);
         to = to < 0 ? 0 : to > 100 ? 100 : to;
         snprintf(verb, sizeof verb, "volume %d", to);
         player_send(verb);
