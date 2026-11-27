@@ -4,7 +4,8 @@
  * show it: 8 bits; 6 bits cut off; 6 bits dithered; 5 bits cut off; 5 bits dithered. On the panel,
  * the first cut-off ramp that looks no worse than the 8-bit one above it is the link's depth, and
  * --panel-bits is then set to it so every frame is dithered down to what the glass can show.
- * Run with --panel-bits 8 (the default), or the card is itself dithered. Return leaves. */
+ * While the card is open nothing is dithered on the way to the panel, whatever --panel-bits says,
+ * or the card would be the thing it measures. Return leaves. */
 #include <stdio.h>
 
 #include "px.h"
@@ -56,4 +57,16 @@ static void event(void *st, const input_t *e) {
     (void)st;
     if (e->type == IN_KEY_UP && e->value == KEY_UI_RETURN) ui_pop();
 }
-const ui_page page_depth = { .name = "depth", .event = event, .draw = draw };
+static int bits_before;
+static void *open(void *arg) {
+    (void)arg;
+    bits_before = fb_bits;
+    fb_depth(8);
+    return 0;
+}
+static void close(void *st) {
+    (void)st;
+    fb_depth(bits_before);
+    ui_mark_all();
+}
+const ui_page page_depth = { .name = "depth", .open = open, .event = event, .draw = draw, .close = close };

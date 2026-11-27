@@ -7,8 +7,8 @@
  * row: patch/fb_rotate.c measured that at 0.9 ms a whole frame on a Q2, 3.3 ms a pixel at a time.
  *
  * The canvas is 8 bits a channel whatever the panel's link carries. When the link is narrower
- * (fb_bits 6 or 5: the low bits of each channel are not wired), the turn adds blue noise of one
- * step's size before the low bits go, so a ramp that would show bands of 4 or 8 levels shows
+ * (fb_bits 6 or 5, or 565 for five bits of red and blue and six of green: the low bits of each
+ * channel are not wired), the turn adds blue noise of one step's size before the low bits go, so a ramp that would show bands of 4 or 8 levels shows
  * none (docs/ui-rewrite.md#gradients). The noise is fixed to the screen, so a still picture is
  * still, and black stays black. */
 #include <fcntl.h>
@@ -80,7 +80,7 @@ uint32_t *canvas_swap(uint32_t *other) {
 }
 
 int fb_open(const char *path, int bits) {
-    fb_bits = bits == 5 || bits == 6 ? bits : 8;
+    fb_depth(bits);
     canvas = calloc(SCREEN_W * SCREEN_H, sizeof *canvas);
     fd = open(path, O_RDWR);
     if (!canvas || fd < 0) return -1;
@@ -113,29 +113,37 @@ void fb_close(void) {
 
 /* c with noise n (0-255) scaled to one step of the panel's depth added to each channel, held at
  * white, and the bits the link drops cleared */
+static unsigned bits_rb = 8, bits_g = 8; /* red and blue's bits, and green's: a 565 link gives green one more */
 static inline uint32_t narrow(uint32_t c, unsigned n) {
-    unsigned shift = (unsigned)(8 - fb_bits);
-    uint32_t add1 = n >> fb_bits, keep = (0xffu << shift) & 0xff;
-    uint32_t rb = (c & 0xff00ff) + add1 * 0x10001u, g = (c & 0xff00) + (add1 << 8);
+    uint32_t keep_rb = (0xffu << (8 - bits_rb)) & 0xff, keep_g = (0xffu << (8 - bits_g)) & 0xff;
+    uint32_t rb = (c & 0xff00ff) + (n >> bits_rb) * 0x10001u, g = (c & 0xff00) + ((n >> bits_g) << 8);
     uint32_t orb = rb & 0x1000100u, og = g & 0x10000u;
-    rb = (rb | (orb - (orb >> 8))) & (keep * 0x10001u);
-    g = (g | (og - (og >> 8))) & (keep << 8);
+    rb = (rb | (orb - (orb >> 8))) & (keep_rb * 0x10001u);
+    g = (g | (og - (og >> 8))) & (keep_g << 8);
     return 0xff000000 | rb | g;
+}
+void fb_depth(int bits) {
+    fb_bits = bits == 5 || bits == 6 || bits == 565 ? bits : 8;
+    bits_rb = fb_bits == 565 ? 5 : (unsigned)fb_bits, bits_g = fb_bits == 565 ? 6 : (unsigned)fb_bits;
 }
 static unsigned turn_narrow(uint32_t *page, rect_t r) {
     for (int y = r.y; y < r.y + r.h; ++y) {
         const uint32_t *src = canvas + y * SCREEN_W + r.x;
-        const uint8_t *noise = dither64 + (y & 63) * 64;
+        /* the noise from the table turned on its side and moved, not from the place a ramp's own
+         * dither read it (draw.c): the same value twice would have the two work against each other, each rounding up where the
+         * other already had, and a ramp between two of the canvas's levels would lean by up to
+         * two thirds of a level, in bands (ui/test_engine.c holds that it does not) */
+        const uint8_t *noise = dither64 + ((y + 41) & 63); /* the table turned: its column y + 41 */
         uint32_t *dst = page + r.x * PAGE_W + (PAGE_W - 1 - y);
         for (int i = 0; i < r.w; ++i, dst += PAGE_W)
-            *dst = src[i] & 0xffffff ? narrow(src[i], noise[(r.x + i) & 63]) : 0xff000000;
+            *dst = src[i] & 0xffffff ? narrow(src[i], noise[((r.x + i + 17) & 63) * 64]) : 0xff000000;
     }
     return (unsigned)(r.w * r.h);
 }
 
 /* r of the canvas onto page: canvas (x, y) to page (319 - y, x), BAND rows at a time */
 static unsigned turn(uint32_t *page, rect_t r) {
-    if (fb_bits < 8) return turn_narrow(page, r);
+    if (fb_bits != 8) return turn_narrow(page, r);
     int y = r.y;
     for (; y + BAND <= r.y + r.h; y += BAND) {
         const uint32_t *src = canvas + y * SCREEN_W + r.x;

@@ -215,6 +215,51 @@ static void narrow(const char *fb) {
     check("a 6-bit panel is sent no low bits", got == 320 * 375 && !low, "%d pixels with some", low);
     check("black stays black under the dither", !lit, "%d lit", lit);
     check("0x53 dithered to 6 bits is 0x53 on average", fabs(mean / n - 0x53) < 0.2, "%.3f", mean / n);
+    /* a ramp slower than the canvas's own levels (8 of them down the screen), which the canvas holds as
+     * dither between two levels: brought to 6 bits, its rows must still average what the ramp is there,
+     * wherever between two levels that falls. Rows are gathered by which of a 6-bit step's four levels
+     * the ramp is at and how far past it, since a fault of the two dithers working against each other
+     * shows as a lean that comes and goes with those. */
+    all();
+    fill_ramp((rect_t){ 0, 0, SCREEN_W, SCREEN_H }, 0x404040, 0x484848);
+    dmg_all();
+    fb_present();
+    f = fopen(fb, "rb");
+    fseek(f, (long)(fb_page() * 320 * 375 * 4), SEEK_SET);
+    got = fread(page, 4, 320 * 375, f);
+    fclose(f);
+    double lean[16] = { 0 }, worst = 0;
+    unsigned rows[16] = { 0 };
+    for (int y = 0; y < SCREEN_H; ++y) {
+        double want = 0x40 + 8.0 * y / (SCREEN_H - 1), sum = 0, part = want - floor(want);
+        for (int x = 0; x < SCREEN_W; ++x) sum += page[x * 320 + (319 - y)] & 0xff;
+        int bin = ((int)floor(want) & 3) * 4 + ((int)(part * 4) & 3); /* which of a 6-bit step's four levels, and how far past it */
+        lean[bin] += sum / SCREEN_W - want, ++rows[bin];
+    }
+    int at = 0;
+    for (int k = 0; k < 16; ++k)
+        if (rows[k] && fabs(lean[k] / rows[k]) > worst) worst = fabs(lean[k] / rows[k]), at = k;
+    /* a 565 link: five bits of red and blue, six of green, each keeping its own mean */
+    fb_depth(565);
+    for (int i = 0; i < SCREEN_W * SCREEN_H; ++i) canvas[i] = 0xff535353;
+    dmg_all();
+    fb_present();
+    f = fopen(fb, "rb");
+    fseek(f, (long)(fb_page() * 320 * 375 * 4), SEEK_SET);
+    got = fread(page, 4, 320 * 375, f);
+    fclose(f);
+    double sums[3] = { 0 };
+    int stray = 0;
+    for (int i = 0; i < 320 * 375; ++i) {
+        stray += (page[i] & 0x070307) != 0;
+        for (int ch = 0; ch < 3; ++ch) sums[ch] += page[i] >> (ch * 8) & 0xff;
+    }
+    fb_depth(6);
+    check("a 565 panel is sent five bits of red and blue and six of green, each averaging the colour",
+          !stray && fabs(sums[0] / (320 * 375) - 0x53) < 0.2 && fabs(sums[1] / (320 * 375) - 0x53) < 0.2 && fabs(sums[2] / (320 * 375) - 0x53) < 0.2,
+          "%d stray, means %.2f %.2f %.2f", stray, sums[2] / (320 * 375), sums[1] / (320 * 375), sums[0] / (320 * 375));
+    check("a ramp between the canvas's levels keeps its mean at 6 bits, wherever between two it is", got == 320 * 375 && worst < 0.12,
+          "leans %.3f of a level at level %d of four, quarter %d", lean[at] / rows[at], at / 4, at % 4);
 }
 
 int main(int argc, char **argv) {

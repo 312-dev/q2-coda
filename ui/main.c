@@ -1,7 +1,7 @@
 /* q2ui's start: options, the library, the panel, the first page, then the loop (ui.c).
  *
  *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--icons DIR]
- *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5]
+ *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5|565]
  *          [--text awtk] [--page home|songs|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--playlist FILE]
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE]
@@ -52,7 +52,7 @@ static struct {
           "/tmp/q2ui.open",
           0,
           0,
-          8 };
+          6 }; /* the Q2's panel shows 6 bits a channel or fewer (docs/ui-rewrite.md#gradients) */
 static unsigned open_ms, first_ms;
 static char bench_json[2048];
 

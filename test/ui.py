@@ -57,7 +57,8 @@ def folder(work, n):
 
 def base_args(binary, d):
     # Songs first, as these checks were written for it (a later --page wins); Home is the program's own first page
-    return [str(binary), '--page', 'songs', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
+    # 8 bits to the panel file, so its pixels are the canvas's own: the Q2's default dithers them to 6
+    return [str(binary), '--page', 'songs', '--panel-bits', '8', '--db', d/'library.db', '--catalogue', '', '--fb', d/'fb', '--fonts', d/'fonts', '--icons', d,
             '--stats', d/'stats.json', '--state', d/'state', '--cmdq', d/'cmdq', '--playlist', d/'list', '--backlight', d/'backlight',
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask']
 
