@@ -24,6 +24,7 @@ A manifest with none of `api=`, `version=`, `kind=`, `entry=` and `permissions=`
 | `library-write` | Add to playlists, ratings (a later Library) | `q2libd` |
 | `settings` | Read and set the screen, brightness, USB mode, standby ([Q2SYS/1](system.md)) | `q2sysd` |
 | `network-hold` | Hold the radio up while it works, and read Wi-Fi's state ([Q2NET/1](network.md)) | `q2netd` |
+| `bluetooth` | Read Bluetooth's state, turn it on and off, scan, pair, connect, choose the codec ([Q2BT/1](bt.md)) | `q2btd` |
 | `screen` | Take the framebuffer and raw input while in front: a `game`'s alone | `q2ui` |
 | `music-files` | Read and write the card's music folders | the card |
 | `background` | Run when it is not in front, under the supervisor: every `service` needs it | `q2pkgd` |

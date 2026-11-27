@@ -43,6 +43,7 @@ Read [docs/architecture.md](docs/architecture.md) first (20 minutes: the payload
 | Vamp OS system service (power key, screen, battery) | `sysd/q2sysd.c`, `test/sysd.py` | [sysd](docs/sysd.md) |
 | Vamp OS library service | `libd/q2libd.c`, `test/libd.py` | [libd](docs/libd.md) |
 | Vamp OS network service (Wi-Fi) | `netd/q2netd.c`, `test/netd.py` | [netd](docs/netd.md) |
+| Vamp OS Bluetooth service | `btd/q2btd.c`, `test/btd.py`, `test/btd_standin.c` | [btd](docs/btd.md) |
 | Vamp OS updates (stage a release) | `pkgd/q2pkgd.c`, `tools/vampos.py release`, `test/pkgd.py` | [pkgd](docs/pkgd.md) |
 | Vamp API 1 (the protocols, the library, app manifests) | `docs/platform/`, `test/conformance.py`, `test/api.py`, `test/apps.py` | [platform](docs/platform/README.md) |
 | Rebuilt third-party libraries             | `tools/thirdparty.py`                                                                                                    | [third-party](docs/third-party.md)                                                                                                                                                                                                                    |

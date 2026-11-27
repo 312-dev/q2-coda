@@ -7,6 +7,7 @@ The API Vamp OS offers a program that is not part of it ([roadmap: Platform](../
 | Playback | `q2playd` | `/run/vamp/play.sock` | [Q2PLAY/1](playback.md) | `playback` |
 | System: screen, battery, USB, standby | `q2sysd` | `/run/vamp/sys.sock` | [Q2SYS/1](system.md) | `settings`, `screen` |
 | Network | `q2netd` | `/run/vamp/net.sock` | [Q2NET/1](network.md) | `network-hold` |
+| Bluetooth | `q2btd` | `/run/vamp/bt.sock` | [Q2BT/1](bt.md) | `bluetooth` |
 | Media library | `q2libd` | two SQLite files, read-only | [Library 1](library.md) | `library` |
 | Packages | `q2pkgd` | the card | [Packages](packages.md) | |
 
@@ -29,7 +30,7 @@ Every API 1 socket is the same ([roadmap: Process model](../vamp-os.md#process-m
 
 ## Naming
 
-The roadmap's sketch named protocols `VAMP/1 playback`; the services already speak `Q2PLAY/1`, `Q2SYS/1` and `Q2NET/1`, which `q2ui`, the tests and `q2sysd`'s own calls to the others use, so those names are API 1's. A package's manifest names the API it needs as `api=1` ([Packages](packages.md#the-manifest)).
+The roadmap's sketch named protocols `VAMP/1 playback`; the services already speak `Q2PLAY/1`, `Q2SYS/1`, `Q2NET/1` and `Q2BT/1`, which `q2ui`, the tests and `q2sysd`'s own calls to the others use, so those names are API 1's. A package's manifest names the API it needs as `api=1` ([Packages](packages.md#the-manifest)).
 
 ## Conformance
 
@@ -39,4 +40,4 @@ Each protocol page holds `conformance` blocks: `> line` is what the client sends
 python3 test/api.py          # every protocol page against its service
 ```
 
-(the Library's page is checked against a scan instead: [Library 1](library.md#conformance)). The examples' data is the suites' stand-ins: songs 1, 2 and 3 (`Alpha` by `Ann`, `Beta` by `Bob`, `Gamma` by `Cy`) for Q2PLAY/1, a battery at 73 % and 3912 mV for Q2SYS/1, a saved network `Home` for Q2NET/1.
+(the Library's page is checked against a scan instead: [Library 1](library.md#conformance)). The examples' data is the suites' stand-ins: songs 1, 2 and 3 (`Alpha` by `Ann`, `Beta` by `Bob`, `Gamma` by `Cy`) for Q2PLAY/1, a battery at 73 % and 3912 mV for Q2SYS/1, a saved network `Home` for Q2NET/1, a pair of headphones `Fixture Buds` and a speaker `Fixture Speaker` for Q2BT/1.
