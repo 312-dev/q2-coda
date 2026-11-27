@@ -55,7 +55,7 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | `q2ui` | `/usr/bin/q2ui --db /mnt/data/vamp/library.db --catalogue /mnt/mmc/.vamp/catalogue.db --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons` | `q2libd`'s library, which is there (empty at first) before anything else |
 | `q2pkgd-confirm` | After an install ([q2pkgd](pkgd.md#the-rescue-copy)), a minute after the boot: `q2pkgd confirm`, the install no longer pending | a minute |
 | `q2dacloop` | `/usr/bin/q2dacloop` ([dacloop](dacloop.md)): USB DAC mode's audio, the gadget's capture to the DAC. Down at boot (its `down` file) | q2sysd's `usb dac` (`sv up`) |
-| `q2scrobd` | `/usr/bin/q2scrobd` ([scrobbling](vamp-os-services.md#scrobbling)): each listen heard over Q2PLAY/1 into the card's `.scrobbler.log` | Q2PLAY/1 (tried every 2 s) |
+| `q2scrobd` | `/usr/bin/q2scrobd` ([scrobbling](vamp-os-services.md#scrobbling)): each listen heard over Q2PLAY/1 into the card's `.scrobbler.log`, uploaded by itself with `[SCROBBLE] AUTO=1` | Q2PLAY/1 (tried every 2 s) |
 | `q2-airplay` | `q2pkgd app-run /mnt/mmc/.airplay` ([q2playd: AirPlay](playd.md#airplay)): the AirPlay sender, a service package, once `q2pkgd app-add` has added it; else a look every minute | the app on the card, added |
 | `q2dlnad` | `/usr/bin/q2dlnad` ([dlnad](dlnad.md)): the DLNA renderer, listening only while `[SYSSET] DLNA=1` (stock's switch, off by default) | Q2PLAY/1 (tried every 2 s) |
 
@@ -147,7 +147,7 @@ In the order it is needed:
 6. **The rest of the installer** ([q2pkgd](pkgd.md)): its first slice checks, composes and stages a signed release (the image's own `mksquashfs` composes the build machine's bytes under QEMU); the download, the automatic hand-off to the recovery and packages are not built.
 7. q2ui's icons: it looks for `oled_*_w.png` in `--icons`, stock's art, which the image does not have; the pages draw without them.
 8. Bluetooth, Wi-Fi, USB modes, the MCU's firmware load, the splash.
-9. **The remaining services** ([vamp-os-services](vamp-os-services.md)): scrobbling's log, the DLNA renderer ([q2dlnad](dlnad.md)) and the AirPlay sender's host ([q2playd: AirPlay](playd.md#airplay)) are built; the scrobble upload, LocalSend and Guest Play each wait on what that page names first.
+9. **The remaining services** ([vamp-os-services](vamp-os-services.md)): scrobbling with its upload, the DLNA renderer ([q2dlnad](dlnad.md)) and the AirPlay sender's host ([q2playd: AirPlay](playd.md#airplay)) are built; LocalSend and Guest Play each wait on what that page names first.
 
 ## Needs a device
 

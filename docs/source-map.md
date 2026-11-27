@@ -284,7 +284,7 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
-| `q2scrobd.c` | `q2scrobd`: listens heard over Q2PLAY/1 into the card's `.scrobbler.log` | `main`, `now_line` | [vamp-os-services](vamp-os-services.md#scrobbling) |
+| `q2scrobd.c` | `q2scrobd`: listens heard over Q2PLAY/1 into the card's `.scrobbler.log`, and `upload` to ListenBrainz and Last.fm (by hand, or with `AUTO=1` by itself) | `main`, `now_line`, `upload`, `auto_tick` | [vamp-os-services](vamp-os-services.md#scrobbling) |
 | `Makefile` | Its build, for the image (`os/package/q2scrobd`) and this machine (`test/scrobd.py`) | | [vamp-os-services](vamp-os-services.md#scrobbling) |
 
 ## dlnad/: Vamp OS's DLNA renderer

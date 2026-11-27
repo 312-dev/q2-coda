@@ -9,7 +9,7 @@ Q2SCROBD_SITE = $(VAMP_SRC)/vamp
 Q2SCROBD_SITE_METHOD = local
 Q2SCROBD_LICENSE = GPL-3.0+
 Q2SCROBD_LICENSE_FILES = LICENSE
-Q2SCROBD_DEPENDENCIES = sqlite
+Q2SCROBD_DEPENDENCIES = sqlite q2-mbedtls
 
 define Q2SCROBD_BUILD_CMDS
 	$(TARGET_MAKE_ENV) $(MAKE) -C $(@D)/scrobd OUT=$(@D)/out CC="$(TARGET_CC)" CFLAGS="$(TARGET_CFLAGS)" \
@@ -18,6 +18,7 @@ endef
 
 define Q2SCROBD_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/out/q2scrobd $(TARGET_DIR)/usr/bin/q2scrobd
+	$(INSTALL) -D -m 0644 $(@D)/assets/scrobble-ca.pem $(TARGET_DIR)/etc/scrobble-ca.pem
 endef
 
 $(eval $(generic-package))

@@ -1,6 +1,7 @@
 config BR2_PACKAGE_Q2SCROBD
 	bool "q2scrobd"
 	select BR2_PACKAGE_SQLITE
+	select BR2_PACKAGE_Q2_MBEDTLS
 	help
 	  The scrobble log (scrobd/, docs/vamp-os-services.md#scrobbling): listens heard over
 	  Q2PLAY/1 into the card's .scrobbler.log.
