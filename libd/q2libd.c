@@ -1,4 +1,4 @@
-/* q2libd: Vamp OS's library service (docs/vamp-os.md#who-owns-what, docs/libd.md), its first slice. It keeps two
+/* q2libd: Vamp OS's library service (docs/vamp-os.md#who-owns-what, docs/libd.md), its second slice. It keeps two
  * databases in the shapes q2ui and q2playd already read, so they need no change:
  *
  *   - /mnt/data/vamp/library.db: the card's songs, a songtable with stock's columns (id, filename, fileurl, album,
@@ -8,14 +8,18 @@
  *   - /mnt/mmc/.vamp/catalogue.db: the server library, a servertable of every signed-in card app's catalogue
  *     (/mnt/mmc/.<id>/catalogue.tsv, Q2CAT/1, docs/server-library.md), ids from 0x40000000 as the payload gives them.
  *     On the card, as today's Vamp keeps its own (/mnt/data is too small for a large server), but a file of Vamp OS's
- *     own, so today's Vamp's catalogue.db is never touched either.
+ *     own, so today's Vamp's catalogue.db is never touched either. A server song that is a card song is left out
+ *     (serverdup names it).
+ *   - Besides: each album's cover in /mnt/mmc/.vamp/covers/ (vamp_cover names each song's), and the card's M3U
+ *     playlists (/mnt/mmc/_explaylist_data/) in library.db's playlist, stock's table.
  *
  * Each is written whole beside itself and renamed over it, so a reader never sees half a scan. It scans at its start
- * once the card is mounted, when the card's mount changes, when an app's catalogue.tsv or credentials change (looked
+ * once the card is mounted, when the card's mount or a playlist file changes, when an app's catalogue.tsv or credentials change (looked
  * at every 10 s), and at SIGHUP; --once scans and ends. Before the card is there it writes an empty library, so a
  * reader always has one; after each write it runs --after's command (the image: q2ui's restart in place, so its lists
  * are the new ones). --root prefixes every path, for test/libd.py. */
 #define _GNU_SOURCE
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <libavformat/avformat.h>
@@ -76,7 +80,12 @@ static const char *SONGTABLE =
     " album varchar(512), songer varchar(256), style varchar(128), name varchar(512), composer varchar(256),"
     " albumsonger varchar(256), year integer, track integer, cd_num integer, time integer, time_end integer,"
     " time_create integer, Initial integer, bitdepth integer, samprate integer);"
-    "create table vamp_files(fileurl text primary key, size integer, mtime integer, id integer);";
+    "create table vamp_files(fileurl text primary key, size integer, mtime integer, id integer);"
+    "create table vamp_cover(id integer primary key, file text);"
+    "create table playlist(id integer primary key, filename varchar(512), fileurl varchar(1024), album varchar(512),"
+    " songer varchar(256), style varchar(128), name varchar(512), composer varchar(256), albumsonger varchar(256),"
+    " year integer, track integer, cd_num integer, time integer, time_end integer, time_create integer, Initial integer,"
+    " bitdepth integer, samprate integer);";
 
 static int initial(const char *t) { /* songtable's Initial as patch/catalogue.c gives it */
     unsigned char c = t ? (unsigned char)*t : 0;
@@ -90,10 +99,85 @@ static const char *tag(AVDictionary *m, const char *k) {
 }
 
 static sqlite3 *db;
-static sqlite3_stmt *ins, *find, *ins_file;
+static sqlite3_stmt *ins, *find, *ins_file, *ins_cover;
 static int next_id, songs, read_n;
 
 /* One file: its old row when unchanged, else its tags read. */
+/* ---- covers (docs/libd.md#covers) ----
+ * An album's cover is kept once, in /mnt/mmc/.vamp/covers/<key>.jpg (the bytes as found: a JPEG or a PNG, which q2ui
+ * reads either way), key the FNV-1a of the album artist (else the artist) and the album, lower-cased, or of the song's
+ * folder when it has no album tag. The picture is the file's own (FFmpeg's attached picture), else a cover.jpg,
+ * folder.jpg or front.jpg (or .png) in its folder. vamp_cover names each song's. A cover file there already is kept. */
+#define COVER_MAX (4 << 20)
+
+static unsigned fnv_lower(unsigned h, const char *s) {
+    for (; *s; ++s) h = (h ^ (unsigned char)tolower((unsigned char)*s)) * 16777619u;
+    return h;
+}
+
+static int write_whole(const char *to, const void *b, size_t n) {
+    char tmp[700];
+    snprintf(tmp, sizeof tmp, "%s.q2libd", to);
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return -1;
+    int ok = fwrite(b, 1, n, f) == n;
+    if (fclose(f) || !ok || rename(tmp, to)) return unlink(tmp), -1;
+    return 0;
+}
+
+static int folder_picture(const char *full, char *out, size_t room) {
+    static const char *names[] = {"cover.jpg", "folder.jpg", "front.jpg", "cover.png", "folder.png", "front.png",
+                                  "Cover.jpg", "Folder.jpg", "Front.jpg", 0};
+    const char *slash = strrchr(full, '/');
+    struct stat st;
+    for (int i = 0; slash && names[i]; ++i) {
+        snprintf(out, room, "%.*s/%s", (int)(slash - full), full, names[i]);
+        if (!stat(out, &st) && S_ISREG(st.st_mode) && st.st_size > 0 && st.st_size <= COVER_MAX) return 0;
+    }
+    return -1;
+}
+
+static void cover_of(int id, AVFormatContext *f, const char *full, const char *url, const char *aa, const char *album) {
+    char dir[400], file[500], pic[1300];
+    unsigned h = 2166136261u;
+    if (*album) {
+        h = fnv_lower(fnv_lower(fnv_lower(h, aa), "\t"), album);
+    } else { /* no album: the folder, the url less its name */
+        const char *slash = strrchr(url, '/');
+        for (const char *p = url; slash && p < slash; ++p) h = (h ^ (unsigned char)tolower((unsigned char)*p)) * 16777619u;
+    }
+    snprintf(dir, sizeof dir, "%s", path("/mnt/mmc/.vamp/covers"));
+    snprintf(file, sizeof file, "%s/%08x.jpg", dir, h);
+    struct stat st;
+    if (stat(file, &st)) {
+        const AVPacket *pk = 0;
+        for (unsigned i = 0; f && i < f->nb_streams; ++i)
+            if (f->streams[i]->disposition & AV_DISPOSITION_ATTACHED_PIC && f->streams[i]->attached_pic.size > 0) {
+                pk = &f->streams[i]->attached_pic;
+                break;
+            }
+        mkdir(path("/mnt/mmc/.vamp"), 0755), mkdir(dir, 0755);
+        if (pk && pk->size <= COVER_MAX) {
+            if (write_whole(file, pk->data, (size_t)pk->size)) return;
+        } else if (!folder_picture(full, pic, sizeof pic)) {
+            FILE *in = fopen(pic, "rb");
+            char *b = malloc(COVER_MAX);
+            size_t n = in && b ? fread(b, 1, COVER_MAX, in) : 0;
+            if (in) fclose(in);
+            int bad = !n || write_whole(file, b, n);
+            free(b);
+            if (bad) return;
+        } else {
+            return;
+        }
+    }
+    snprintf(file, sizeof file, "/mnt/mmc/.vamp/covers/%08x.jpg", h); /* the Q2's own path, whatever --root is */
+    sqlite3_bind_int(ins_cover, 1, id);
+    sqlite3_bind_text(ins_cover, 2, file, -1, SQLITE_TRANSIENT);
+    sqlite3_step(ins_cover);
+    sqlite3_reset(ins_cover);
+}
+
 static void add_file(const char *full, const char *url, const struct stat *st) {
     int id = 0, same = 0;
     if (find) {
@@ -111,6 +195,9 @@ static void add_file(const char *full, const char *url, const struct stat *st) {
         if (sqlite3_exec(db, q, 0, 0, &e) != SQLITE_OK) say("%s", e), sqlite3_free(e), same = 0;
         sqlite3_free(q);
         if (sqlite3_changes(db) != 1) same = 0;
+        q = sqlite3_mprintf("insert into vamp_cover select * from old.vamp_cover where id = %d", id);
+        if (same) sqlite3_exec(db, q, 0, 0, 0); /* none in a library from before covers: read again next time it changes */
+        sqlite3_free(q);
     }
     if (!same) {
         AVFormatContext *f = 0;
@@ -160,6 +247,7 @@ static void add_file(const char *full, const char *url, const struct stat *st) {
         sqlite3_bind_int(ins, c++, rate);
         if (sqlite3_step(ins) != SQLITE_DONE) say("insert %s: %s", url, sqlite3_errmsg(db));
         sqlite3_reset(ins);
+        cover_of(id, f, full, url, *aa ? aa : artist, album);
         if (f) avformat_close_input(&f);
         ++read_n;
     }
@@ -202,6 +290,95 @@ static int exec_sql(sqlite3 *d, const char *sql) {
     return r == SQLITE_OK ? 0 : -1;
 }
 
+/* ---- playlists (docs/libd.md#playlists) ----
+ * Each M3U in the card's /mnt/mmc/_explaylist_data/ (.m3u or .m3u8, name order, the first PLAYLISTS) into library.db's
+ * playlist table in stock's shape: a header row, id and cd_num its number from 1 and name and filename the file's name
+ * less its extension; then its songs from id 101 on, in the file's order, each songtable's row with cd_num the
+ * playlist's. An entry is a path on the card (/mnt/mmc/...) or one relative to the folder ('..' allowed), '\' read as '/'; one that is
+ * no song in songtable is left out. */
+#define PLAYLISTS 100
+
+static void tidy(char *u) { /* "." and "x/.." segments and doubled slashes out of an absolute path, in place */
+    char *seg[64], *o = u;
+    int n = 0;
+    for (char *t = strtok(u + 1, "/"); t; t = strtok(0, "/"))
+        if (!strcmp(t, "..")) n -= n > 0;
+        else if (strcmp(t, ".") && n < 64) seg[n++] = t;
+    char out[1200];
+    size_t k = 0;
+    for (int i = 0; i < n && k < sizeof out - 1; ++i) k += (size_t)snprintf(out + k, sizeof out - k, "/%s", seg[i]);
+    snprintf(o, 1200, "%s", k ? out : "/");
+}
+
+static int m3u(const char *name) {
+    const char *dot = strrchr(name, '.');
+    return name[0] != '.' && dot && (!strcasecmp(dot, ".m3u") || !strcasecmp(dot, ".m3u8"));
+}
+
+static void playlists(void) {
+    struct dirent **e;
+    int n = scandir(path("/mnt/mmc/_explaylist_data"), &e, 0, alphasort), lists = 0, next = 101;
+    sqlite3_stmt *head = 0, *song = 0;
+    sqlite3_prepare_v2(db, "insert into playlist(id, filename, fileurl, album, songer, style, name, composer, albumsonger,"
+                           " year, track, cd_num, time, time_end, time_create, Initial, bitdepth, samprate)"
+                           " values (?1, ?2, '', '', '', '', ?2, '', '', 0, 0, ?1, 0, 0, 0, 0, 0, 0)", -1, &head, 0);
+    sqlite3_prepare_v2(db, "insert into playlist select ?1, filename, fileurl, album, songer, style, name, composer, albumsonger,"
+                           " year, track, ?2, time, time_end, time_create, Initial, bitdepth, samprate from songtable"
+                           " where fileurl = ?3 limit 1", -1, &song, 0);
+    for (int i = 0; i < n; ++i) {
+        const char *d = e[i]->d_name;
+        if (m3u(d) && lists < PLAYLISTS && head && song) {
+            char p[600], line[1100], url[1200], name[300];
+            snprintf(p, sizeof p, "%s/%s", path("/mnt/mmc/_explaylist_data"), d);
+            FILE *f = fopen(p, "r");
+            if (f) {
+                int no = ++lists, kept = 0, left = 0;
+                snprintf(name, sizeof name, "%.*s", (int)(strrchr(d, '.') - d), d);
+                sqlite3_bind_int(head, 1, no), sqlite3_bind_text(head, 2, name, -1, SQLITE_TRANSIENT);
+                sqlite3_step(head), sqlite3_reset(head);
+                for (int first = 1; fgets(line, sizeof line, f); first = 0) {
+                    char *l = line;
+                    if (first && !strncmp(l, "\xef\xbb\xbf", 3)) l += 3; /* a UTF-8 BOM */
+                    l[strcspn(l, "\r\n")] = 0;
+                    if (!*l || *l == '#') continue;
+                    for (char *c = l; *c; ++c)
+                        if (*c == '\\') *c = '/';
+                    if (*l == '/') snprintf(url, sizeof url, "%s", l);
+                    else snprintf(url, sizeof url, "/mnt/mmc/_explaylist_data/%s", l);
+                    tidy(url);
+                    sqlite3_bind_int(song, 1, next), sqlite3_bind_int(song, 2, no);
+                    sqlite3_bind_text(song, 3, url, -1, SQLITE_TRANSIENT);
+                    sqlite3_step(song), sqlite3_reset(song);
+                    if (sqlite3_changes(db) == 1) ++next, ++kept;
+                    else ++left;
+                }
+                fclose(f);
+                say("playlist %s: %d songs%s", name, kept, left ? ", some not in the library left out" : "");
+            }
+        }
+        free(e[i]);
+    }
+    if (n >= 0) free(e);
+    sqlite3_finalize(head), sqlite3_finalize(song);
+}
+
+/* the playlists folder's files, to tell a change by */
+static void playlist_stamp(char *out, size_t room) {
+    struct dirent **e;
+    int n = scandir(path("/mnt/mmc/_explaylist_data"), &e, 0, alphasort);
+    size_t used = 0;
+    out[0] = 0;
+    for (int i = 0; i < n; ++i) {
+        struct stat st;
+        char p[600];
+        snprintf(p, sizeof p, "%s/%s", path("/mnt/mmc/_explaylist_data"), e[i]->d_name);
+        if (m3u(e[i]->d_name) && !stat(p, &st) && used < room)
+            used += (size_t)snprintf(out + used, room - used, "%s:%lld:%lld;", e[i]->d_name, (long long)st.st_size, (long long)st.st_mtime);
+        free(e[i]);
+    }
+    if (n >= 0) free(e);
+}
+
 /* The library from the card (walk) or, without walk, an empty one. */
 static int scan_card(int walk_card) {
     char final[600], tmp[620];
@@ -228,8 +405,9 @@ static int scan_card(int walk_card) {
                            " track, cd_num, time, time_create, Initial, bitdepth, samprate) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                        -1, &ins, 0);
     sqlite3_prepare_v2(db, "insert or replace into vamp_files values (?,?,?,?)", -1, &ins_file, 0);
-    if (walk_card) walk("/mnt/mmc", 0);
-    sqlite3_finalize(ins), sqlite3_finalize(ins_file);
+    sqlite3_prepare_v2(db, "insert or replace into vamp_cover values (?,?)", -1, &ins_cover, 0);
+    if (walk_card) walk("/mnt/mmc", 0), playlists();
+    sqlite3_finalize(ins), sqlite3_finalize(ins_file), sqlite3_finalize(ins_cover);
     if (find) sqlite3_finalize(find), find = 0;
     int ok = !exec_sql(db, "commit");
     sqlite3_close(db);
@@ -351,6 +529,30 @@ static int apps(char ids[CAT_APPS][64], char *stamp, size_t room) {
     return k;
 }
 
+/* Duplicates (docs/libd.md#duplicates): a server song that is already a card song is left out of servertable, so the
+ * Library lists the card's file once, and serverdup names the card file each was (the payload's cat_match, its tags
+ * layer): the same title, album and track, the same artist or album artist (case aside), and lengths within 2 s, both
+ * known. Matched again at each catalogue write, which follows each card scan too. */
+static void dups(sqlite3 *d) {
+    struct stat st;
+    exec_sql(d, "create table serverdup(id integer primary key, fileurl)");
+    if (stat(path("/mnt/data/vamp/library.db"), &st)) return;
+    char *q = sqlite3_mprintf("attach %Q as card", path("/mnt/data/vamp/library.db"));
+    int bad = exec_sql(d, q);
+    sqlite3_free(q);
+    if (bad) return;
+    exec_sql(d, "begin;insert or ignore into serverdup select s.id, c.fileurl from servertable s join card.songtable c"
+                " on c.name = s.name collate nocase and c.album = s.album collate nocase and c.track = s.track"
+                " and (c.songer = s.songer collate nocase or (c.albumsonger <> '' and c.albumsonger = s.albumsonger collate nocase))"
+                " and c.time > 0 and s.time > 0 and abs(c.time - s.time) <= 2 where s.name <> '';"
+                "delete from servertable where id in (select id from serverdup);commit");
+    sqlite3_stmt *c;
+    if (sqlite3_prepare_v2(d, "select count(*) from serverdup", -1, &c, 0) == SQLITE_OK) {
+        if (sqlite3_step(c) == SQLITE_ROW && sqlite3_column_int(c, 0)) say("%d server songs are card songs: left out", sqlite3_column_int(c, 0));
+        sqlite3_finalize(c);
+    }
+}
+
 static int scan_catalogue(void) {
     char ids[CAT_APPS][64], stamp[1024], final[600], tmp[620];
     int n = apps(ids, stamp, sizeof stamp);
@@ -370,6 +572,7 @@ static int scan_catalogue(void) {
     for (int i = 0; i < n; ++i) import_app(d, st, ids[i], CAT_ID_BASE + (unsigned)i * CAT_APP_SPAN);
     sqlite3_finalize(st);
     int ok = !exec_sql(d, "commit");
+    if (ok) dups(d); /* after the commit: an attach cannot be made inside a transaction */
     sqlite3_close(d);
     if (!ok || rename(tmp, final)) return -1;
     return 0;
@@ -404,19 +607,20 @@ int main(int argc, char **argv) {
     signal(SIGHUP, on_hup);
     signal(SIGTERM, on_term);
     signal(SIGINT, on_term);
-    char card[600] = "", seen_card[600] = "-", cat[1024], seen_cat[1024] = "-", ids[CAT_APPS][64];
+    char card[600] = "", seen_card[600] = "-", cat[1024], seen_cat[1024] = "-", ids[CAT_APPS][64], pls[2048], seen_pls[2048] = "-";
     struct stat st;
     if (!once && stat(path("/mnt/data/vamp/library.db"), &st) && !scan_card(0)) run_after(); /* none yet: an empty one */
     while (!stopping) {
         card_stamp(card, sizeof card);
         apps(ids, cat, sizeof cat);
+        playlist_stamp(pls, sizeof pls);
         int mounted = once || *card;
-        int wrote = 0;
-        if (mounted && (again || strcmp(card, seen_card))) {
-            wrote |= !scan_card(1);
-            snprintf(seen_card, sizeof seen_card, "%s", card);
+        int wrote = 0, card_wrote = 0;
+        if (mounted && (again || strcmp(card, seen_card) || strcmp(pls, seen_pls))) {
+            wrote |= card_wrote = !scan_card(1);
+            snprintf(seen_card, sizeof seen_card, "%s", card), snprintf(seen_pls, sizeof seen_pls, "%s", pls);
         }
-        if (mounted && (again || strcmp(cat, seen_cat))) {
+        if (mounted && (again || card_wrote || strcmp(cat, seen_cat))) { /* a card scan: its duplicates matched again */
             wrote |= !scan_catalogue();
             snprintf(seen_cat, sizeof seen_cat, "%s", cat);
         }

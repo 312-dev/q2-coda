@@ -149,5 +149,81 @@ def test_as_a_service_an_empty_library_first_then_the_card_once_mounted(binary, 
         p.wait(10)
 
 
+
+
+# ---- covers, playlists, duplicates (docs/libd.md) ----
+
+def picture(path, colour):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'color=c={colour}:s=32x32', '-frames:v', '1', str(path)], check=True)
+
+
+def test_covers_from_the_file_s_own_picture_else_its_folder_s(binary, card):
+    m = card/'mnt/mmc'
+    pic = card/'art.jpg'
+    picture(pic, 'red')
+    plain = m/'Music/Cleo/c.mp3'
+    song(plain, title='Gamma', artist='Cleo', album='Third')
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(plain), '-i', str(pic), '-map', '0', '-map', '1', '-c', 'copy',
+                    '-disposition:v', 'attached_pic', '-metadata', 'title=Gamma', '-metadata', 'artist=Cleo', '-metadata', 'album=Third',
+                    str(m/'Music/Cleo/own.mp3')], check=True)
+    plain.unlink()
+    picture(m/'Music/Ann/First/cover.jpg', 'blue')
+    scan(binary, card)
+    got = dict(rows(card, 'select s.fileurl, c.file from songtable s left join vamp_cover c on c.id = s.id'))
+    own, folder = got['/mnt/mmc/Music/Cleo/own.mp3'], got['/mnt/mmc/Music/Ann/First/01 Alpha.flac']
+    assert own and (card/own.lstrip('/')).read_bytes() == pic.read_bytes(), "the file's own picture, byte for byte"
+    assert folder and (card/folder.lstrip('/')).read_bytes() == (m/'Music/Ann/First/cover.jpg').read_bytes(), "its folder's cover.jpg"
+    assert got['/mnt/mmc/Music/Bob/b.mp3'] is None and got['/mnt/mmc/loose.wav'] is None, 'none without a picture'
+    scan(binary, card)  # unchanged files are not read again: their covers kept
+    assert dict(rows(card, 'select s.fileurl, c.file from songtable s left join vamp_cover c on c.id = s.id')) == got
+
+
+def test_playlists_from_the_card_s_m3u_files(binary, card):
+    d = card/'mnt/mmc/_explaylist_data'
+    d.mkdir(parents=True)
+    (d/'Mix.m3u').write_bytes('﻿#EXTM3U\n#EXTINF:1,Beta\n/mnt/mmc/Music/Bob/b.mp3\r\n../loose.wav\n'
+                              '..\\Music\\Ann\\First\\01 Alpha.flac\n/mnt/mmc/gone.flac\n\n'.encode())
+    (d/'A list.m3u8').write_text('/mnt/mmc/loose.wav\n')
+    (d/'notes.txt').write_text('/mnt/mmc/loose.wav\n')
+    log = scan(binary, card)
+    got = rows(card, 'select id, name, fileurl, cd_num from playlist order by id')
+    assert got == [(1, 'A list', '', 1), (2, 'Mix', '', 2),
+                   (101, 'loose', '/mnt/mmc/loose.wav', 1),
+                   (102, 'Beta', '/mnt/mmc/Music/Bob/b.mp3', 2), (103, 'loose', '/mnt/mmc/loose.wav', 2),
+                   (104, 'Alpha', '/mnt/mmc/Music/Ann/First/01 Alpha.flac', 2)]
+    assert 'playlist Mix: 3 songs, some not in the library left out' in log
+
+
+def test_a_server_song_that_is_a_card_song_is_listed_once(binary, card):
+    same = 's\tsidA\tAlpha\tAnn\tAnn\tFirst\talbA\t2001\t1\t1\t1\tRock\tflac'
+    other_take = 's\tsidB\tBeta\tBob\t\tSecond\talbB\t0\t0\t7\t60\tPop\tmp3'  # Bob's Beta, 59 s longer: not the card's
+    catalogue(card, 'subsonic', [same, other_take, S2])
+    log = scan(binary, card)
+    db = sqlite3.connect(card/'mnt/mmc/.vamp/catalogue.db')
+    assert [r[0] for r in db.execute('select name from servertable order by id')] == ['Beta', 'Other']
+    assert db.execute('select id, fileurl from serverdup').fetchall() == [(0x40000000, '/mnt/mmc/Music/Ann/First/01 Alpha.flac')]
+    assert '1 server songs are card songs: left out' in log
+
+
+def test_as_a_service_a_new_playlist_is_read_within_its_look(binary, card):
+    (card/'proc').mkdir()
+    (card/'proc/mounts').write_text('/dev/mmcblk4p1 /mnt/mmc vfat rw 0 0\n')
+    p = subprocess.Popen([str(binary), '--root', str(card)], stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(3)
+        d = card/'mnt/mmc/_explaylist_data'
+        d.mkdir()
+        (d/'Late.m3u').write_text('/mnt/mmc/loose.wav\n')
+        end, got = time.monotonic() + 15, []
+        while time.monotonic() < end and not got:
+            time.sleep(0.5)
+            got = rows(card, 'select name from playlist where id <= 100')
+        assert got == [('Late',)]
+    finally:
+        p.terminate()
+        p.wait(5)
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', '-p', 'no:cacheprovider']))

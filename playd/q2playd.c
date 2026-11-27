@@ -14,6 +14,7 @@
  * says it changed (/tmp/q2player.push, docs/internals.md#player-status-push) and once a second while a song is
  * loaded, never while nothing is. --root prefixes every path, for test/playd.py. */
 #define _GNU_SOURCE
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -78,6 +79,7 @@ static struct {
     int errors;                  /* songs in a row that did not open */
     int expect_cut;              /* a set-nexturl or mcl-stop was sent: its answer is no song's end */
     char title[256], artist[256], album[256], file[1024];
+    char row_url[1024];          /* a played-as-paths song's library row's fileurl, "" with none */
     char **paths;                /* a server list's answer: the app's m3u, played as paths in place of ids (np of them) */
     int np;
     unsigned seq;                /* moves with every change of what is written */
@@ -117,6 +119,53 @@ static int song_lookup(int id) {
     return ok;
 }
 
+/* ---- the cover (docs/playd.md#the-cover) ----
+ * The song's cover is copied to /tmp/externpic.jpg, where stock's cover thread leaves it and q2ui reads it (written
+ * beside and renamed); none, and the file is removed. A card song's is q2libd's (library.db's vamp_cover), a server
+ * song's its app's covers/<album id>.jpg (docs/server-library.md#covers); a song of an app's m3u, its row's: the
+ * card song of that path, or the server row of a Stream Cache copy's sid. */
+static void cover_lookup(int id, const char *file, char *out, size_t room) {
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    const char *pre = "/mnt/mmc/.", *cat;
+    out[0] = 0;
+    if (!*file) return;
+    if ((id >= 0 && (unsigned)id >= CAT_ID_BASE) || (id < 0 && strstr(file, "/cat/") && !strncmp(file, pre, strlen(pre)))) {
+        /* a server row: /mnt/mmc/.<app>/cat/<album id>/<sid>.<suffix> */
+        const char *alb, *end;
+        if (!strncmp(file, pre, strlen(pre)) && (cat = strstr(file, "/cat/")) && (end = strchr(alb = cat + 5, '/')))
+            snprintf(out, room, "%.*s/covers/%.*s.jpg", (int)(cat - file), file, (int)(end - alb), alb);
+        return;
+    }
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
+        sqlite3_prepare_v2(db, id >= 0 ? "select file from vamp_cover where id = ?1"
+                                       : "select c.file from songtable s join vamp_cover c on c.id = s.id where s.fileurl = ?2",
+                           -1, &st, 0) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, id), sqlite3_bind_text(st, 2, file, -1, SQLITE_STATIC);
+        if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0)) snprintf(out, room, "%s", (const char *)sqlite3_column_text(st, 0));
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+}
+
+static void set_cover(int id, const char *file) {
+    char from[700], tmp[400];
+    cover_lookup(id, file, from, sizeof from);
+    FILE *in = *from ? fopen(path(from), "rb") : 0;
+    snprintf(tmp, sizeof tmp, "%s.q2playd", path("/tmp/externpic.jpg"));
+    FILE *out = in ? fopen(tmp, "wb") : 0;
+    char b[16384];
+    size_t n;
+    int ok = out != 0;
+    while (ok && (n = fread(b, 1, sizeof b, in)) > 0) ok = fwrite(b, 1, n, out) == n;
+    if (in) fclose(in);
+    if (out) {
+        int bad = fclose(out) || !ok || rename(tmp, path("/tmp/externpic.jpg"));
+        if (bad) unlink(tmp), ok = 0;
+    }
+    if (!ok) unlink(path("/tmp/externpic.jpg"));
+}
+
 /* ---- the player's socket ---- */
 
 static int listen_fd = -1, player = -1, push_fd = -1, cmdq_fd = -1, api_fd = -1;
@@ -148,9 +197,52 @@ static void send_song(const char *cmd, const char *file) {
 }
 
 /* The song at q.order[q.at] to the player: set-songurl when nothing plays, set-nexturl to cut the one that does. */
-static int path_lookup(int at) { /* a played-as-paths list's song: the path, its name as the title */
+/* A Stream Cache copy's app and sid: /mnt/mmc/.<app>/stream/.../<title> [<sid>].<suffix> (patch/stream_path.h); 0 for
+ * any other path. */
+static int stream_sid(const char *p, char *app, size_t an, char *sid, size_t sn) {
+    const char *pre = "/mnt/mmc/.", *a = p + strlen(pre), *s, *o, *c;
+    if (strncmp(p, pre, strlen(pre)) || !(s = strchr(a, '/')) || strncmp(s, "/stream/", 8)) return 0;
+    if (!(o = strrchr(p, '[')) || !(c = strchr(o, ']')) || c == o + 1 || strchr(o, '/')) return 0;
+    for (const char *k = o + 1; k < c; ++k)
+        if (!isalnum((unsigned char)*k) && *k != '-' && *k != '_') return 0;
+    snprintf(app, an, "%.*s", (int)(s - a), a), snprintf(sid, sn, "%.*s", (int)(c - o - 1), o + 1);
+    return 1;
+}
+
+/* the row of a song played as a path, by its fileurl (q.paths' songs: the app's m3u): 1 with it in q */
+static int row_of(const char *db_file, const char *sql, const char *arg) {
+    sqlite3 *db;
+    sqlite3_stmt *st;
+    int ok = 0;
+    if (sqlite3_open_v2(db_file, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK && sqlite3_prepare_v2(db, sql, -1, &st, 0) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, arg, -1, SQLITE_STATIC);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            for (int i = 0; i < 3; ++i) {
+                const char *t = (const char *)sqlite3_column_text(st, i);
+                snprintf(i == 0 ? q.title : i == 1 ? q.artist : q.album, sizeof q.title, "%s", t ? t : "");
+            }
+            const char *u = (const char *)sqlite3_column_text(st, 3);
+            snprintf(q.row_url, sizeof q.row_url, "%s", u ? u : "");
+            ok = 1;
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
+/* A played-as-paths song: its card row's title, artist and album; a Stream Cache copy's its server row's; else the
+ * file's name as the title. */
+static int path_lookup(int at) {
     const char *p = q.paths[at], *base = strrchr(p, '/');
+    char app[64], sid[128], like[300];
     snprintf(q.file, sizeof q.file, "%s", p);
+    q.row_url[0] = 0;
+    if (row_of(db_path, "select name, songer, album, fileurl from songtable where fileurl = ?1", p)) return 1;
+    if (stream_sid(p, app, sizeof app, sid, sizeof sid)) {
+        snprintf(like, sizeof like, "/mnt/mmc/.%s/cat/%%/%s.%%", app, sid);
+        if (row_of(cat_path, "select name, songer, album, fileurl from servertable where fileurl like ?1", like)) return 1;
+    }
     snprintf(q.title, sizeof q.title, "%s", base ? base + 1 : p);
     q.artist[0] = q.album[0] = 0;
     return 1;
@@ -162,6 +254,7 @@ static int start_at(int at) {
         if (q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]])) {
             int cut = q.loaded;
             send_song(cut ? "set-nexturl" : "set-songurl", q.file);
+            set_cover(q.paths ? -1 : q.ids[q.order[at]], q.paths ? q.row_url : q.file);
             q.expect_cut = cut;
             q.loaded = 1, q.state = PLAYING, q.pos_ms = 0, q.len_s = 0;
             ++q.seq;

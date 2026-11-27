@@ -372,6 +372,41 @@ def test_q2play1_free_text_is_percent_encoded_and_cannot_forge_a_field(run):
     assert [l for l in text if l.startswith('state=')] == ['state=1'] and [l for l in text if l.startswith('id=')] == ['id=6']
 
 
+
+# ---- the cover (docs/playd.md#the-cover) ----
+
+def test_the_playing_song_s_cover_is_q2ui_s_and_none_removes_it(run):
+    root, pl = run
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    db.execute('create table vamp_cover(id integer primary key, file text)')
+    db.execute("insert into vamp_cover values (1, '/mnt/mmc/.vamp/covers/0000abcd.jpg')")
+    db.commit()
+    (root/'mnt/mmc/.vamp/covers').mkdir(parents=True)
+    (root/'mnt/mmc/.vamp/covers/0000abcd.jpg').write_bytes(b'\xff\xd8 a cover')
+    play_list(root, [1, 2], 0)
+    pl.pump(0.6)
+    assert (root/'tmp/externpic.jpg').read_bytes() == b'\xff\xd8 a cover'
+    pl.say('player-status', 'exit')
+    pl.pump(0.6)
+    assert pl.songs()[-1][1] == '/mnt/mmc/Music/b.mp3' and not (root/'tmp/externpic.jpg').exists(), 'song 2 has none'
+
+
+def test_a_stream_cache_copy_shows_its_server_row_and_cover(run):
+    root, pl = run
+    sock = catalogue(root)
+    (root/'mnt/mmc/.navi/covers').mkdir(parents=True)
+    (root/'mnt/mmc/.navi/covers/al1.jpg').write_bytes(b'\xff\xd8 album one')
+    play_list(root, [SERVER + 1], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    (root/'tmp/navi.m3u').write_text('/mnt/mmc/.navi/stream/acct/hi/a/Cloud One [s1].flac\n')
+    (root/'tmp/q2-navi.play').write_text('1 /tmp/navi.m3u\n')
+    pl.pump(1.0)
+    n = now(root, 0.3)
+    assert (n['title'], n['artist'], n['album']) == ('Cloud One', 'Sky', 'Up')
+    assert (root/'tmp/externpic.jpg').read_bytes() == b'\xff\xd8 album one'
+    sock.close()
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', '-p', 'no:cacheprovider']))
 
@@ -387,8 +422,8 @@ def catalogue(root, listening=True):
     db = sqlite3.connect(root/'mnt/mmc/.vamp/catalogue.db')
     db.execute('create table servertable(id integer primary key, fileurl, name, songer, album, track)')
     db.executemany('insert into servertable values (?, ?, ?, ?, ?, 0)', [
-        (SERVER + 1, '/mnt/mmc/.navi/cat/ar1/al1/s1.flac', 'Cloud One', 'Sky', 'Up'),
-        (SERVER + 2, '/mnt/mmc/.navi/cat/ar1/al1/s2.flac', 'Cloud Two', 'Sky', 'Up')])
+        (SERVER + 1, '/mnt/mmc/.navi/cat/al1/s1.flac', 'Cloud One', 'Sky', 'Up'),
+        (SERVER + 2, '/mnt/mmc/.navi/cat/al1/s2.flac', 'Cloud Two', 'Sky', 'Up')])
     db.commit()
     db.close()
     if listening:
@@ -410,8 +445,8 @@ def test_a_list_with_server_songs_is_handed_to_their_app_and_its_m3u_played(run)
     play_list(root, [1, SERVER + 1, 2, SERVER + 2], 1)
     cp = root/'tmp/q2-navi.catplay'
     assert wait_for(cp), 'the catplay is written for navi'
-    assert cp.read_text().splitlines() == ['1 1', '/mnt/mmc/Music/a.flac', '/mnt/mmc/.navi/cat/ar1/al1/s1.flac',
-                                           '/mnt/mmc/Music/b.mp3', '/mnt/mmc/.navi/cat/ar1/al1/s2.flac']
+    assert cp.read_text().splitlines() == ['1 1', '/mnt/mmc/Music/a.flac', '/mnt/mmc/.navi/cat/al1/s1.flac',
+                                           '/mnt/mmc/Music/b.mp3', '/mnt/mmc/.navi/cat/al1/s2.flac']
     pl.pump(0.5)
     assert pl.songs() == [], 'nothing plays before the app answers'
     (root/'tmp/navi.m3u').write_text('#EXTM3U\n/mnt/mmc/.navi/cache/s1.flac\n/mnt/mmc/Music/b.mp3\n')
