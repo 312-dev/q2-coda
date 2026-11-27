@@ -142,9 +142,15 @@ static void h_shown(void *st) {
     (void)st;
     ui_mark_all();
 }
+/* The selection kept by its row among Home's own (the Playing row -1: the first), so a start that finds a song
+ * playing, and so the Playing row first, comes back on the same row */
 static int h_where(void *st, char *name, size_t room) {
+    struct home_st *s = st;
     snprintf(name, room, "home");
-    return list_selected(((struct home_st *)st)->list);
+    return list_selected(s->list) - (s->state != 0);
 }
-static void h_select(void *st, int sel) { list_select(((struct home_st *)st)->list, sel, 0); }
+static void h_select(void *st, int sel) {
+    struct home_st *s = st;
+    list_select(s->list, sel + (s->state != 0), 0);
+}
 const ui_page page_home = { "home", h_open, h_event, h_step, h_draw, h_close, h_shown, h_where, h_select };

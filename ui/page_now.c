@@ -9,7 +9,9 @@
  * radio's); Centre steps the ringed one, shuffle on or off, repeat Off, All, One (down the command
  * queue, "mode SHUFFLE REPEAT", as Car Remote sets them), or flips the heart's like ("like ID",
  * patch/ratings.c rate_now_like; the heart drawn is the like, not the stars); STAGE_US without a key, or Return, ends
- * either. Play and pause are the Play/Pause key's, which stays demo's. While the volume changes, by
+ * either. Centre held NP_HOLD_US (short of More's hold) with no scrub, or pressed again within DOUBLE_US
+ * of the release that started a scrub with the wheel still, ends the cycle unseeked and turns the screen
+ * off, as demo's does ("screenoff" down demo's pipe). Play and pause are the Play/Pause key's, which stays demo's. While the volume changes, by
  * the wheel here or the side buttons, its level takes the bar's place for VOLUME_SHOW_US, white on
  * the same track, and the times stand aside (demo shows its own volume window then, which q2ui's
  * page is over). The cover is a card of layers (docs/ui-rewrite.md#cards): it lifts as the page
@@ -69,6 +71,10 @@ enum { STAGE_REST, STAGE_SHUFFLE, STAGE_REPEAT, STAGE_HEART };
 #define ROW_LEFT 53
 #define ROW_RIGHT 322
 #define PILL_US 200000u
+/* Centre held this long, short of the hold (KEY_HOLD_MS, More), or pressed again this soon after the release that
+ * started a scrub, turns the screen off (patch/nav/now_playing.c NP_HOLD_MS, patch/offsets.inc DOUBLE_CLICK_MS) */
+#define NP_HOLD_US 400000u
+#define DOUBLE_US 250000u
 #define MODE_BOX 22 /* a mode's glyph's box (tools/art.py MODE_PX), the row's spacing's unit */
 
 struct now_st {
@@ -88,6 +94,10 @@ struct now_st {
      * last seek sent */
     int scrub, scrub_to, scrub_moved, scrub_id, stage;
     uint64_t key_at, seek_at;
+    /* Centre's press for the screen's turn off (np_centre): when it went down, and the release that started a scrub,
+     * whose next press soon (the wheel not turned between) is a double */
+    uint64_t down_at, dc_at;
+    int dc_armed;
     unsigned run, last_tick_ms;
     int run_dir;
     /* the radio's pill: on as last seen, and when it turned */
@@ -195,14 +205,29 @@ static void centre(struct now_st *s) {
 }
 static void n_event(void *st, const input_t *e) {
     struct now_st *s = st;
+    if (e->type == IN_TICK) s->dc_armed = 0; /* the wheel turned between: no double (np_key) */
     if (e->type == IN_KEY_UP && e->value == KEY_UI_RETURN) {
         if (s->scrub || s->stage != STAGE_REST) { /* np_cancel: the cycle ends, the page stays */
             scrub_end(s);
             stage_set(s, STAGE_REST);
         } else
             ui_pop();
+    } else if (e->type == IN_KEY_DOWN && e->value == KEY_UI_CENTRE) {
+        s->down_at = ui_time();
     } else if (e->type == IN_KEY_UP && e->value == KEY_UI_CENTRE) {
-        centre(s);
+        uint64_t now = ui_time();
+        int held = s->down_at && now - s->down_at >= NP_HOLD_US, dbl = s->dc_armed && now - s->dc_at < DOUBLE_US;
+        s->down_at = 0, s->dc_armed = 0;
+        if ((held && !s->scrub) || (dbl && s->scrub)) {
+            /* np_cancel, unseeked (a double's wheel never turned), then np_single: the screen off, as demo's */
+            s->scrub = 0, s->scrub_moved = 0;
+            stage_set(s, STAGE_REST);
+            player_line("screenoff", 0);
+        } else {
+            int was = s->scrub;
+            centre(s);
+            if (s->scrub && !was) s->dc_at = now, s->dc_armed = 1; /* a second press soon is a double */
+        }
         ui_click(1);
     } else if (e->type == IN_TICK && s->stage != STAGE_REST && !s->scrub) {
         int to = stop_next(s->stage, e->value > 0 ? 1 : -1);

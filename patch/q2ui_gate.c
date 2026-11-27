@@ -80,6 +80,7 @@ static struct {
     char took, back;   /* demo ended it for a window of its own; start it again on Home */
     char booted;       /* it has been started once: the boot animation is over */
     char opening;      /* a page q2ui asked for is on its way up: Home on top does not yet mean it was left */
+    char then_now;     /* that page was left for demo's Now Playing (a Search result played): q2ui opens its own */
     unsigned started_at; /* time_now_ms when q2ui was last started */
     unsigned asked_at; /* time_now_ms when it was asked for */
     unsigned told_at, told; /* the status's last look (time_now_ms), and the hash of what was written */
@@ -189,15 +190,17 @@ static void start(void) {
     int pid = fork();
     if (!pid) {
         child_oom_first();
-        /* the write end stays open across the exec, in q2ui alone */
+        /* the write end stays open across the exec, in q2ui alone; "--then now" opens q2ui's Now Playing over its
+         * pages when demo's is what the window it had left for ended on */
+        const char *then = qu.then_now ? "--then" : (char *)0;
         if (qu.piped && !fcntl(qu.ctl[1], CTL_SETFD, 0))
-            execl(Q2UI_BIN, Q2UI_BIN, "--ctl", fd, (char *)0);
+            execl(Q2UI_BIN, Q2UI_BIN, "--ctl", fd, then, "now", (char *)0);
         else
-            execl(Q2UI_BIN, Q2UI_BIN, (char *)0);
+            execl(Q2UI_BIN, Q2UI_BIN, then, "now", (char *)0);
         child_exit(127);
     }
     qu.pid = pid > 0 ? pid : 0;
-    qu.took = 0;
+    qu.took = 0, qu.then_now = 0; /* once: a later start is on q2ui's own pages */
     qu.started_at = (unsigned)time_now_ms();
     said("started, pid", qu.pid);
     if (!qu.pid) widget_invalidate_force(window_manager(), 0);
@@ -257,12 +260,14 @@ static void unescape(const char *s, char *out) {
  * and keys q2ui reads itself, at most one of each a pass (the buzzer is busy for a click's length
  * anyway), or its Wi-Fi page's "scan" or "join NAME" (wifi_flows.c), or its Bluetooth page's
  * "btscan", "btlink MAC" or "btforget MAC" (bt_ui.c), or "wake", a question of its notice socket's
- * lighting the dark screen as a press would (awake_screen; ui/notice.c); another verb, a MAC that is not one, or a line
+ * lighting the dark screen as a press would (awake_screen; ui/notice.c), or "screenoff", its Now Playing's
+ * short Centre hold or double press turning the lit screen off as demo's does (np_screen_off); another verb, a MAC that is not one, or a line
  * too long, is dropped. Read every pass while it runs and after it
  * ends, so a setting sent just before leaving for a page of demo's is not lost; at most CTL_READS
  * reads a pass, so a q2ui that writes without end cannot hold demo's loop (the rest waits in the pipe). */
 int q2ui_cc_set(const char *name, int on); /* control_center.c */
 void q2ui_cc_poll(void);
+void np_screen_off(void);  /* nav/now_playing.c */
 extern int clicker_kind;    /* clicker.c: navigation.h CLICK_KIND_*, 0 the wheel's */
 #define CLICK_BUTTON 2      /* CLICK_KIND_BUTTON */
 static void ctl(void) {
@@ -293,7 +298,10 @@ static void ctl(void) {
                 said(bt_q2ui_link(word2) ? "btlink refused," : "btlink", 0);
             else if (__isoc99_sscanf(qu.line + from, "btforget %17s", word2) == 1 && bt_mac_ok(word2))
                 said(bt_q2ui_forget(word2) ? "btforget refused," : "btforget", 0);
-            else if (!tk_strcmp(qu.line + from, "wake")) {
+            else if (!tk_strcmp(qu.line + from, "screenoff")) {
+                said("screenoff, lit", g_backlight_status);
+                np_screen_off();
+            } else if (!tk_strcmp(qu.line + from, "wake")) {
                 said("wake, dark", !g_backlight_status);
                 if (!g_backlight_status) awake_screen();
             }
@@ -321,6 +329,8 @@ void q2ui_poll(void) {
         }
         if (!on_home()) return;
         qu.back = 0, qu.pid = Q2UI_DUE; /* the window demo had the screen for has closed */
+        void *top = window_manager_get_top_window(window_manager());
+        qu.then_now = top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page");
     }
     if (qu.pid == Q2UI_DUE) {
         start();
