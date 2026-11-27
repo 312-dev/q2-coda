@@ -1,4 +1,11 @@
 #!/bin/sh
+# runsv's word on how q2ui ended ($1 its status, -1 for a signal). Every end is started again in place, never left
+# dark (the owner's hot reload, ui-rewrite.md): 0 (Return on the first page: demo's on today's Vamp, here nothing's),
+# 3 (a page of demo's asked for, which Vamp OS has not) and 4 (kill -HUP's restart, when q2ui could not exec itself)
+# at once; anything else, a crash, after 2 s, so a q2ui that cannot start does not spin.
 . /usr/libexec/vamp/log
-step "q2ui: ended, status $1"
-[ "$1" = 0 ] || sleep 10
+step "q2ui: ended, status $1, signal ${2:-0}"
+case "$1" in
+0 | 3 | 4) ;;
+*) sleep 2 ;;
+esac

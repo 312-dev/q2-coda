@@ -1,6 +1,7 @@
 #!/bin/sh
-# q2ui, the screen and the keys (ui/ on feat/render-engine). Its library is /mnt/data/database.db, stock's
-# (q2libd, the image's own index, is not built yet: docs/vamp-os.md, M6); without one it ends at once.
+# q2ui, the screen and the keys (ui/ on feat/render-engine). Its library is /mnt/data/database.db; without one it
+# ends at once. kill -HUP restarts it in place (the same process, its options read again, its pages kept); any end is
+# started again by runsv (finish), while q2playd plays on.
 . /usr/libexec/vamp/log
 if [ ! -e /dev/fb0 ]; then
     step "q2ui: no /dev/fb0"

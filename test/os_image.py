@@ -27,7 +27,7 @@ power key turning the screen off and on, and its hold starting init's shutdown.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd).
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end).
 """
 import argparse
 import hashlib
@@ -212,7 +212,7 @@ def wav(path, seconds=1, rate=44100):
                      + b'data' + st.pack('<I', len(frames)) + frames)
 
 
-def play_check(fs, console, deadline):
+def play_check(fs, console, deadline, log):
     """(q2player connected, the song came back) through q2playd's Q2PLAY/1 socket in the booted image: a play of
     song 1 (/mnt/mmc/song1.wav), and q2playd's word that q2player played it out or could not (no sound card here)."""
     connected = False
@@ -231,14 +231,66 @@ def play_check(fs, console, deadline):
         replies = [f.readline().strip(), f.readline().strip()]
         s.close()
     except OSError as e:
-        return connected, False, repr(e)
-    end = time.monotonic() + 30
+        return connected, False, repr(e), (({}, {}, False))
+    reload = hot_reload_check(fs, log)
+    end = time.monotonic() + 40
     back = False
     while time.monotonic() < end and not back:
-        back = re.search(rb'q2playd: song 1 (ended|did not play)', console.read_bytes()) is not None
+        back = re.search(rb'q2playd: song 1 ended', console.read_bytes()) is not None
         time.sleep(0.5)
-    return connected, replies == ['Q2PLAY/1 ok', 'ok'] and back, replies
+    return connected, replies == ['Q2PLAY/1 ok', 'ok'] and back, replies, reload
 
+
+def q2play_now(fs):
+    """q2playd's now line over Q2PLAY/1, as {field: value}"""
+    import urllib.parse
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(5)
+    s.connect(str(fs/'run/vamp/play.sock'))
+    f = s.makefile('rw')
+    f.write('Q2PLAY/1\nnow\n')
+    f.flush()
+    f.readline()
+    line = f.readline().split()
+    s.close()
+    return {k: urllib.parse.unquote(v) for k, v in (w.split('=', 1) for w in line[1:])}
+
+
+def q2play(fs, *lines):
+    """Q2PLAY/1 lines sent to q2playd in the booted image; the answer to each"""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(5)
+    s.connect(str(fs/'run/vamp/play.sock'))
+    f = s.makefile('rw')
+    f.write('Q2PLAY/1\n' + ''.join(l + '\n' for l in lines))
+    f.flush()
+    f.readline()
+    out = [f.readline().strip() for _ in lines]
+    s.close()
+    return out
+
+
+def hot_reload_check(fs, log):
+    """q2ui ended from outside (SIGTERM to its process) while a song is paused: runsv starts it again within 5 s, and
+    q2playd keeps the song and q2player through it (still paused, the player still connected: no "went away"); then
+    resumed, the song plays out. alsa-lib's null card takes audio as fast as it comes, so the song is paused at once
+    for there to be a song across the restart at all. (before, after, restarted)"""
+    import signal
+    q2play(fs, 'pause')
+    before = q2play_now(fs)
+    pids = [int(p.name) for p in pathlib.Path('/proc').iterdir() if p.name.isdigit()
+            and b'/usr/bin/q2ui' in (p/'cmdline').read_bytes() if (p/'cmdline').exists()]
+    starts = log.read_bytes().count(b'q2ui: start')
+    for pid in pids:
+        os.kill(pid, signal.SIGTERM)
+    end, restarted = time.monotonic() + 5, False
+    while time.monotonic() < end and not restarted:
+        restarted = log.read_bytes().count(b'q2ui: start') > starts
+        time.sleep(0.2)
+    time.sleep(1)
+    after = q2play_now(fs)
+    q2play(fs, 'resume')
+    return before, after, bool(pids) and restarted
 
 def sysd_checks(fs, power_key, log):
     """q2sysd in the booted image (docs/sysd.md): the battery's file from the CW2015's, a press of the power key on a
@@ -332,6 +384,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (fs/'etc/init.d/rcS').write_text(rcs)
     if perturb == 'adb-open':  # Wi-Fi adbd with no key check: an open port
         (fs/'etc/sv/adb-wifi/run').write_text('#!/bin/sh\nexec /usr/bin/adbd --tcp 5555\n')
+    if perturb == 'ui-slow':  # q2ui's finish waits 10 s whatever the end, as before hot reload
+        (fs/'etc/sv/q2ui/finish').write_text('#!/bin/sh\nsleep 10\n')
     if perturb == 'sysd-off':  # no q2sysd
         (fs/'etc/sv/q2sysd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'playd-off':  # no q2playd
@@ -362,7 +416,9 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
                    [(f'Song {i}', 'Artist', i, 'Album', i, f'/mnt/mmc/song{i}.wav') for i in range(1, 21)])
     db.commit()
     db.close()
-    wav(fs/'mnt/mmc/song1.wav')
+    wav(fs/'mnt/mmc/song1.wav', seconds=60)
+    # a sound card that takes anything (alsa-lib's null plugin): the emulator has none, and a song should play out
+    (fs/'etc/asound.conf').write_text('pcm.!default { type null }\n')
     for rel, text in (('sys/class/backlight/lcd/bl_power', '0'), ('sys/class/backlight/lcd/brightness', '200'),
                       ('sys/class/backlight/lcd/max_brightness', '255'), ('sys/devices/i2c-0/0-0062/cw2015_capacity', '64'),
                       ('sys/devices/i2c-0/0-0062/cw2015_voltage', '3800'), ('sys/hynitron_debug/hyngescontrol', '0')):
@@ -388,7 +444,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             time.sleep(0.5)
             drew = any(fb.read_bytes())
         if proc.poll() is None:
-            played = play_check(fs, work/'console.log', deadline)
+            played = play_check(fs, work/'console.log', deadline, emu/'record')
         if adb and not card and proc.poll() is None:
             adb_checks(fs)
         if not card and proc.poll() is None:
@@ -401,8 +457,15 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         console.close()
     check(drew, 'q2ui drew into the framebuffer')
     check(bool(played) and played[0], 'q2player connected to q2playd' + ('' if played else ': not reached'))
-    check(bool(played) and played[1], 'a song asked for over Q2PLAY/1 reaches q2player through q2playd, and its end comes back'
+    check(bool(played) and played[1], 'a song asked for over Q2PLAY/1 plays out through q2playd and q2player (alsa-lib\'s null card)'
           + ('' if played and played[1] else f': {played}'))
+    if played and len(played) > 3:
+        before, after, restarted = played[3]
+        check(restarted, 'hot reload: q2ui ended from outside is started again within 5 s')
+        check(before.get('state') == '2' and after.get('state') == '2' and before.get('id') == after.get('id') == '1'
+              and b'q2playd: the player went away' not in (work/'console.log').read_bytes(),
+              f'hot reload: q2playd keeps the song and q2player across q2ui\'s restart (state {before.get("state")} then '
+              f'{after.get("state")}), and it plays out after')
     lines = (emu/'record').read_text().splitlines()
     events = [(l.split(None, 1)[1][2:], 'cmd') if l.split(None, 1)[1].startswith('$ ') else (l.split(None, 1)[1], 'log')
               for l in lines if len(l.split(None, 1)) == 2]
@@ -458,7 +521,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     a = ap.parse_args()
     manifest, _ = vamp_os.read_manifest()
