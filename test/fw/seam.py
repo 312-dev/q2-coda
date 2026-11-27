@@ -21,7 +21,7 @@ import subprocess
 import time
 import urllib.parse
 
-from conftest import O, claim, high_halves, libc
+from conftest import O, claim, high_halves, libc, low_map
 
 ADDR = '10.77.0.1'  # the fake server's, on the namespace's own loopback: an RFC 1918 address the app takes http:// to
 PORT = 4533
@@ -41,12 +41,11 @@ def now_ms():
 class Records:
     """Stock's song records (stSongInfo) by path, each made once. On the Q2 REC_NAME and REC_PATH are 4-byte
     pointers a word apart; here P() reads 8, so REC_NAME's high half is REC_PATH's low half (test_addon.Songs):
-    the names live under 4 GB (high half 0) and each path at a multiple of 4 GB (low half 0), at high halves from
-    conftest.high_halves, taken 256 at a time as the paths come."""
+    the names live under 2 GB (high half 0, conftest.low_map) and each path at a multiple of 4 GB (low half 0),
+    at high halves from conftest.high_halves, taken 256 at a time as the paths come."""
     def __init__(self):
         self.maps, self.by_path, self.keep, self.used, self.highs = [], {}, [], 0, iter(())
-        self.names = libc.mmap(0, 1 << 22, 3, 0x62, -1, 0)  # MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT
-        assert self.names and self.names < 1 << 32
+        self.names = low_map(1 << 22)
         self.maps.append((self.names, 1 << 22))
 
     def high(self):

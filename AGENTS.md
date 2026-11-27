@@ -57,7 +57,7 @@ Work planned but not built: [docs/backlog.md](docs/backlog.md) (the ordered list
 
 Security scan (code, secrets, dependencies, firmware): `python3 tools/scan.py`, see [docs/building.md](docs/building.md#security-scan).
 
-Prerequisites, all in [docs/building.md](docs/building.md#requirements): clang, lld, llvm-objcopy, squashfs-tools 4.6 or later, ImageMagick, `pip install -r requirements.txt -r test/unit/requirements.txt`, and for a build the stock ZIP `Q2 Firmware V1.36.zip`, SHA-256 `4e298cab6c12d86cfc55565645f7e3ae11d3fb44677a93ca13991e7184ecec4e` (`ZIP_SHA` in `tools/build.py`).
+Prerequisites, all in [docs/building.md](docs/building.md#requirements): clang, lld, llvm-objcopy, squashfs-tools 4.6 or later, ImageMagick, `pip install -r requirements.txt -r test/unit/requirements.txt`, and for a build the stock ZIP `Q2 Firmware V1.36.zip`, SHA-256 `4e298cab6c12d86cfc55565645f7e3ae11d3fb44677a93ca13991e7184ecec4e` (`ZIP_SHA` in `tools/build.py`). On the MacBook Pro every command below runs through `tools/mac/q2env` ([building: Building on macOS](docs/building.md#building-on-macos)).
 
 ```sh
 # Tests that need no stock ZIP and no build. Run these first.

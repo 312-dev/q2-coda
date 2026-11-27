@@ -16,6 +16,7 @@
 - The test dependencies: `pip install -r requirements.txt`
 - For the rebuilt third-party libraries ([third-party.md](third-party.md)): network access on the first build, which fetches the Codescape MIPS toolchain (2.3 GB) and the pinned sources into `~/.cache/q2-thirdparty`, and about an hour to compile them once; bwrap and qemu-mipsel for `test/thirdparty.py`
 - Only to change `remote/iroh-sidecar` (`q2-iroh`, which a build otherwise takes pinned from the cache): Rust nightly-2026-11-18 with `rust-src` ([remote: Building it](remote.md#building-it)). On GRAYTHINKPAD it is installed in `~/.cache/q2-rust` (`rustup` and `cargo` there; `~/.cache/q2-rust/wrap/cargo` runs `cargo +nightly` on that nightly). The pinned binary is reproduced byte for byte only with that toolchain and its target folder: `RUSTUP_HOME=~/.cache/q2-rust/rustup CARGO_HOME=~/.cache/q2-rust/cargo PATH=~/.cache/q2-rust/wrap:$PATH CARGO_TARGET_DIR=~/.cache/q2-rust/target python3 tools/iroh.py` (a later nightly, or another target folder, makes a different binary of the same crate). The crate's unit tests run on the host the same way with `cargo +nightly test --offline --release --manifest-path remote/iroh-sidecar/Cargo.toml` and `CARGO_TARGET_DIR=~/.cache/q2-rust/target-host`.
+- On an Apple Silicon Mac, all of the above in a Linux container: [Building on macOS](#building-on-macos)
 - The original stock ZIP. Its SHA-256 is:
 
 ```text
@@ -100,6 +101,54 @@ All three kernel-module experiments were on by default from 1.5.0 to 1.6.1 and w
 `--dev --mcu-idle-sleep` is off in release builds. It adds an interruptible MCU sleep with an explicit wake handshake. See [MCU sleep](mcu-sleep.md).
 
 Every build installs the player, `q2player` ([player-plan.md](player-plan.md)), as `/usr/bin/hciplayer`, where stock's player was, so demo starts and stops it by that name. It builds `q2player` with `tools/player.py` (FFmpeg on first use, some minutes; the toolchain and mbedTLS that `tools/thirdparty.py` keeps in `~/.cache/q2-thirdparty`) against the image's own `libasound.so.2`, and records `q2player_sha256` in the manifest. The root filesystem holds 75,497,472 bytes (`ROOTFS_ROOM`: mtd2 less a bad-block spare, [hardware](hardware.md#flash-layout)): past that the build stops and says by how much.
+
+## Building on macOS
+
+On an Apple Silicon Mac every build and test runs in a Linux container: `tools/mac/q2env CMD` runs CMD there, in the current directory (no CMD: a shell). It is `linux/amd64` under Rosetta, not arm64, because the Codescape MIPS toolchain [third-party.md](third-party.md) builds with is an x86-64 Linux program. The image (`tools/mac/Dockerfile`) is Ubuntu 24.04 with the [Requirements](#requirements) at GRAYTHINKPAD's versions (clang and lld 18.1.3, squashfs-tools 4.6.1, ImageMagick 6.9.12, qemu-user 8.2.2, bwrap 0.9.0, Go 1.22.2, ccache 4.9.1) and a venv of `requirements.txt`, `test/unit/requirements.txt`, pytest-xdist and mypy made from the PIE Python 3.12.16 that `actions/setup-python` installs ([Firmware tests](#firmware-tests) refuse a non-PIE one). `q2env` builds it on first use, and again when the Dockerfile, `tools/mac/pidof` or the pinned requirements change (the tag is their hash).
+
+```sh
+tools/mac/q2env python3 tools/ci/rebuild.py --dev                    # B is its last line
+tools/mac/q2env python3 tools/ci/affected.py --run "$B"              # or --all
+```
+
+- **The same paths inside and out.** The Mac's home is mounted at its own path and is `HOME`, and the command runs as the Mac's user, so a worktree, `~/.cache/q2-builds/...` or `~/q2-stock/Q2 Firmware V1.36.zip` (`rebuild.py`'s default ZIP) is the same file in either shell.
+- **`~/.cache/q2-thirdparty` is also at GRAYTHINKPAD's path**, `/home/gray/.cache/q2-thirdparty`, and `Q2_THIRDPARTY_CACHE` names it: `tools/thirdparty.py`'s cache keys and its output's compiler paths include the cache's path (`REPRODUCIBLE`), so only there does the Mac reuse the laptop's built components (`out/`, copied over) and build the same bytes.
+- **The toolchain is in a Docker volume**, `q2-toolchain`, mounted over that cache's `toolchain/`. The Mac's home is case-insensitive APFS, and the toolchain's sysroots hold 136 pairs of paths that differ only in case (`xt_MARK.h` and `xt_mark.h`). `q2env` unpacks `dl/mti-linux-2020.06-01.tar.gz` into it once, as `toolchain()` does, with its `.sha256` stamp. No source archive, built component or stock file has such a pair.
+- **User namespaces.** bwrap (`test/adb.py`, `test/thirdparty.py`, the emulator) and `unshare -Urmn` ([Seam test](#seam-test)) need them: `q2env` turns off Docker's seccomp and AppArmor profiles, and the Colima VM, Ubuntu 24.04, must have `kernel.apparmor_restrict_unprivileged_userns=0` (below).
+- **`pidof`.** Under Rosetta `/proc/PID/exe` is Rosetta for every process, so procps' `pidof` finds nothing; the image's `/usr/local/bin/pidof` (`tools/mac/pidof`) matches `argv[0]` as busybox's does. Without it `patch/q2car.sh` never signals the player and `test/iap_probe.py` fails.
+- **`/tmp` is a tmpfs of 2 GB** (`q2env`): on the container's own `/tmp`, overlayfs on ext4, a 32-bit program's `readdir` stops at once with `EOVERFLOW`, because `-m32` programs (`test/coverflow.py`'s) run under the VM's qemu-i386, not Rosetta, and the kernel hands a 64-bit process ext4's 64-bit directory offsets. Core dumps are off (`--ulimit core=0`), as under `q2-heavy`.
+- **No `q2-heavy`**: the gate runs suites bare when `~/.local/bin/q2-heavy` is missing, as it is on the Mac (no systemd in the container). The gate's memory rule still holds, against the VM's 8 GB: with its 4 GB floor, `fw` (3 GB) starts only alone, so `--all` runs mostly one or two suites at a time.
+- **`--dev` build numbers** count in the git directory's `build-number`, and the Mac's clone counts on its own ([Versioning](#versioning)): a Mac test build can carry a tag a laptop one had.
+
+Colima runs the VM (`~/.colima/default/colima.yaml`): `vmType: vz`, `rosetta: true`, `mountType: virtiofs` with the home mounted writable, 6 CPUs, 8 GB (the Mac's memory is shared with an Ollama model of about 9.4 GB, so not more), 80 GB of disk, and a system provision step that sets the sysctl above at every start:
+
+```yaml
+provision:
+  - mode: system
+    script: echo kernel.apparmor_restrict_unprivileged_userns=0 > /etc/sysctl.d/60-q2-userns.conf && sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+```
+
+Measured on the MacBook Pro on 2026-11-26, against GRAYTHINKPAD's figures in [orchestration](orchestration.md):
+
+| Step | Mac | GRAYTHINKPAD |
+| ---- | --- | ------------ |
+| `rebuild.py --dev`, first (q2player's FFmpeg, empty ccache and font cache) | 484 s | |
+| `rebuild.py --dev --force` | 126 s | 36 to 56 s |
+| `test/patch.py`, beside other suites | 865 s | 4:39 alone |
+| `test/unit`, alone | 626 s | about 280 s |
+| `test/playback.py`, beside other suites | 371 s | about 80 s |
+| `test/build.py --build` | 305 s | about 20 s |
+| `test/player/run.py`, alone | 647 s | about 270 s |
+| `test/iap_probe.py` | about 620 s | 9:02 |
+| `test/peq.py`, `test/coverflow.py`, `test/stock_sites.py` | 31, 36, 23 s | about 20, 20, 12 s |
+
+What does not pass there, each for a cause shown on the Mac:
+
+- **`test/subsonic_seam.py`: Rosetta has no `pidfd_open`.** Each scenario's app is started by `unshare --pid --fork` (`test/fw/seam.py` `App`), which stops with `unshare: pidfd_open failed: Function not implemented`, so all 12 fail waiting for the app. (Memory under 2 GB, which stock's 32-bit pointer fields need and Rosetta's ignored `MAP_32BIT` does not give, comes from `test/fw/conftest.py`'s `low_map`.)
+- **`test/player/run.py`'s `test_car_feed_reader_sleeps_while_no_source_writes`: strace sees no system calls under Rosetta** (`strace -f /bin/true` records only the exit), so the image leaves strace out and the test times out waiting for the player.
+- **`tools/ci/test_ci.py`'s `test_smoke_and_q2live_find_the_sandbox_of_a_copy_reached_through_a_symlink`: Rosetta replaces a custom `argv[0]`** with the program's path (`exec -a NAME sleep` shows as `/usr/bin/sleep`), and the test's stand-in for qemu is named that way.
+- **`tools/ci/test_orch.py` needs `systemd-run`**, which the container has not (it tests `q2-heavy`'s scopes).
+- **Not run: `test/coda_rc_e2e.py` and the [smoke test](#smoke-test)**, which lease a pooled emulator made from `~/q2-emu-server`; the Mac has only `~/q2-emu`.
 
 ## Tests
 
