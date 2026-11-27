@@ -235,14 +235,22 @@ def main():
     device_socket_constants()
     with tempfile.TemporaryDirectory(prefix='q2-hotspot-') as tmp:
         hotspot_script(pathlib.Path(tmp))
-    with tempfile.TemporaryDirectory(prefix='q2-guest-') as tmp:
-        d = pathlib.Path(tmp)
-        rig = Rig.__new__(Rig)
-        try:
-            rig.__init__(d)
-            run(rig, d)
-        finally:
-            rig.close()
+    # each bluealsa the helper may meet (docs/bluealsa.md#the-callers): stock's 4.0.0, and Vamp's 5.0.0, which has no
+    # GetPCMs, PCMAdded or PCMRemoved and calls the rate Rate
+    for daemon in ('stock', 'own'):
+        print(f'== bluealsa as {"stock\'s 4.0.0" if daemon == "stock" else "Vamp\'s 5.0.0"}')
+        os.environ['Q2_FAKE_BLUEALSA'] = daemon
+        with tempfile.TemporaryDirectory(prefix='q2-guest-') as tmp:
+            d = pathlib.Path(tmp)
+            rig = Rig.__new__(Rig)
+            try:
+                rig.__init__(d)
+                run(rig, d)
+                asked = rig.log.read_text()
+                check('the helper lists PCMs with the object manager and never GetPCMs',
+                      'BLUEALSA GetManagedObjects' in asked and 'BLUEALSA GetPCMs' not in asked)
+            finally:
+                rig.close()
 
 
 def run(rig, d):

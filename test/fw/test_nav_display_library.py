@@ -8,7 +8,7 @@ import struct
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, high_halves, low_map, stock_prop_str, stock_start_with
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, callback_code, claim, code_at, high_halves, low_map, stock_prop_str, stock_start_with
 
 W_PARENT, EVT_CLICK, EVENT_TYPE, EVENT_KEY, EVENT_X = O['W_PARENT'], O['EVT_CLICK'], O['EVENT_TYPE'], O['EVENT_KEY'], O['EVENT_X']
 STOP = 11
@@ -1717,16 +1717,18 @@ def stand_in():
     def place(address, data):
         claim(address)
         saved.append((address, C.string_at(address, len(data))))
-        C.memmove(address, data, len(data))
+        code_at(address, data)
     yield place
     for address, data in reversed(saved):
-        C.memmove(address, data, len(data))
+        code_at(address, data)
 
 
 def logger(log, result=0):
-    """x86-64: its first two arguments into log[0] and log[1], then result."""
-    return (b'\x48\xb8' + struct.pack('<Q', C.addressof(log)) + bytes.fromhex('488938 48897008') +
-            b'\xb8' + struct.pack('<i', result) + b'\xc3')
+    """Stand-in code: its first two arguments into log[0] and log[1], then result."""
+    def call(a, b, _):
+        log[0], log[1] = a, b
+        return result & 0xffffffff
+    return callback_code(call)
 
 
 @pytest.fixture
@@ -2044,9 +2046,10 @@ class SettingsList:
                          self.g['V_SET_ROW'] if item_height is None else item_height)
         self.view = ui.add('scroll_view', self.list, (0, 0, 375, 290), view)
         self.seen = (C.c_int * 1)(-1)
-        code = (b'\xa1' + struct.pack('<Q', self.list.addr + O['ROW_HEIGHT']) + b'\xa3' + struct.pack('<Q', C.addressof(self.seen)) +
-                b'\xb8' + struct.pack('<i', 6) + b'\xc3')  # mov eax, [item_height]; mov [seen], eax; mov eax, 6; ret
-        stand_in(LIST_LAYOUT, code)
+        def layouter(*_):  # notes the item_height it sees, answers 6
+            self.seen[0] = C.c_int.from_address(self.list.addr + O['ROW_HEIGHT']).value
+            return 6
+        stand_in(LIST_LAYOUT, callback_code(layouter))
         self.run = fw.fn('ipod_list_layout', C.c_int, C.c_void_p, C.c_void_p)
 
     def row(self, *children, button=(SET_X, 0, SET_W, STOCK_BODY), h=STOCK_ROW, kind='button'):

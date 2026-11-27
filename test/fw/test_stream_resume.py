@@ -13,7 +13,7 @@ import re
 import pytest
 
 import host
-from conftest import O, claim, mcl  # noqa: F401
+from conftest import O, claim, code_at, mcl, ret_code  # noqa: F401
 from test_addon import LIBRARY, REC_PATH, S_DONE, Sm, Stream, ap, record_field, songs  # noqa: F401
 
 MOUNTS = b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'
@@ -34,10 +34,10 @@ def free_rec():
     at = int(re.findall(r'toolsFreeStSongInfo \(\(void \(\*\)\(void \*\)\)(0x[0-9a-f]+)u\)',
                         (host.ROOT/'patch/addon.c').read_text())[0], 16)
     claim(at)
-    saved = C.string_at(at, 1)
-    C.memmove(at, b'\xc3', 1)
+    saved = C.string_at(at, len(ret_code()))
+    code_at(at, ret_code())
     yield
-    C.memmove(at, saved, 1)
+    code_at(at, saved)
 
 
 def pending(fw):

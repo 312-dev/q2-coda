@@ -4,7 +4,7 @@ and the A2DP write MTU clamp through each codec's encoder thread.
 
 Usage: python test/bluealsa.py BUILD_DIRECTORY (requires the existing Unicorn).
 """
-import pathlib, struct, subprocess, sys
+import pathlib, platform, struct, subprocess, sys
 from unicorn import UC_HOOK_CODE
 from unicorn.mips_const import *
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
@@ -472,11 +472,17 @@ def check_mtu(stock, raw, aptx, ldac):
     assert [len(p) for p in encode(raw, aptx, APTX_HD, BT_MTU_MAX)] == [12 + 110 * 6] * 3, '110 aptX HD frames'
     assert [len(p) for p in encode(raw, aptx, APTX, BT_MTU_MAX)] == [168 * 4] * 3, '168 aptX frames, no RTP'
     assert [len(p) for p in encode(stock, aptx, APTX, 1021)] == [255 * 4] * 3
-    for mtu in (1021, BT_MTU_MAX):
-        packets = encode(raw, aptx, SBC, mtu)
-        count, length = sbc_frames(packets[0])
-        assert count == (mtu - 13) // length and [len(p) for p in packets] == [13 + count * length] * 3, 'SBC fills'
-    assert sbc_frames(packets[0]) == (9, 71) and len(packets[0]) == 652, 'SBC at bitpool 29: 9 frames, not 14'
+    if platform.machine() == 'aarch64':
+        # Unicorn 2.1.4 (and its dev branch) on an arm64 host leaves s1 and s4 0 after the loads at 0x406274/0x406278
+        # in this SBC run, stock's binary as well, and the encoder jumps to 0; x86-64's Unicorn runs it right
+        # (docs/building.md#building-on-macos). The MTU itself is checked above, by Acquire, for every codec.
+        print('SBC packets at the MTU: not run on arm64 (Unicorn mis-runs the SBC encoder there)')
+    else:
+        for mtu in (1021, BT_MTU_MAX):
+            packets = encode(raw, aptx, SBC, mtu)
+            count, length = sbc_frames(packets[0])
+            assert count == (mtu - 13) // length and [len(p) for p in packets] == [13 + count * length] * 3, 'SBC fills'
+        assert sbc_frames(packets[0]) == (9, 71) and len(packets[0]) == 652, 'SBC at bitpool 29: 9 frames, not 14'
     # AAC: a frame longer than the packet's room is split across packets (RFC 3016), marked on its last.
     frames = [900, 400, BT_MTU_MAX - 12, BT_MTU_MAX - 11]
     packets = encode(raw, aptx, AAC, BT_MTU_MAX, aac=frames, packets=6)
@@ -530,7 +536,8 @@ def check(directory):
     print('SBC bitpool: the encoder follows BT_SBC_POOL from the next frame, never above its own; stock ignores it.')
     print("AAC peak: the encoder sets fdk-aac's peak (VBR) or bitrate (CBR) from BT_AAC_RATE before the next frame, "
           'only below its own; stock ignores it.')
-    print(f'A2DP write MTU: {BT_MTU_MAX} (one 2-DH5) for SBC, AAC, aptX and aptX HD, each packet filled; LDAC keeps its own; stock keeps 1021.')
+    filled = 'AAC and aptX' if platform.machine() == 'aarch64' else 'SBC, AAC and aptX'  # check_mtu: SBC's not run on arm64
+    print(f'A2DP write MTU: {BT_MTU_MAX} (one 2-DH5) for SBC, AAC, aptX and aptX HD, {filled} packets filled; LDAC keeps its own; stock keeps 1021.')
     print('Bluetooth DROP: delayed encoder signal preserves new PCM, flushes all old PCM and resets pacing; stock reproduces the fault.')
 
 
