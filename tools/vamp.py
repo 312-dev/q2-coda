@@ -22,6 +22,7 @@ TARGET (or VAMP_TARGET) is a name `find` lists, HOST or HOST:PORT; without eithe
 remembered. The key is adb's own, ~/.android/adbkey (made on first use), so a computer Google's adb
 already trusts is trusted here too."""
 import base64
+import ctypes
 import getpass
 import hashlib
 import json
@@ -295,8 +296,8 @@ class Stream:
 
 class Connection:
     """A connected, authorized adb session: CNXN, then AUTH with key, then streams."""
-    def __init__(self, transport, key, banner=b'host::vamp\0', auth_wait=AUTH_WAIT_S):
-        self.t, self.key = transport, key
+    def __init__(self, transport, key, banner=b'host::vamp\0', auth_wait=AUTH_WAIT_S, on_offer=None):
+        self.t, self.key, self.on_offer = transport, key, on_offer
         self.max = MAXDATA
         self.streams = {}
         self.next_id = 1
@@ -352,6 +353,8 @@ class Connection:
                     offered = True
                     self.send(AUTH, AUTH_RSAPUBLICKEY, 0, self.key.public_line().encode() + b'\0')
                     deadline = time.monotonic() + auth_wait
+                    if self.on_offer:
+                        self.on_offer()
 
     def pump(self, timeout):
         """Read one message and hand it to its stream."""
@@ -485,6 +488,203 @@ class Connection:
                 got += n
         finally:
             self._sync_quit(s)
+
+
+# ---- USB: the ADB interface (class ff, subclass 42, protocol 01) through libusb 1.0 ----
+
+ADB_CLASS = (0xff, 0x42, 0x01)
+LIBUSB_ERROR_TIMEOUT = -7
+LIBUSB_ERROR_ACCESS = -3
+LIBUSB_ERROR_BUSY = -6
+LIBUSB_LIBS = ('/opt/homebrew/lib/libusb-1.0.dylib', '/usr/local/lib/libusb-1.0.dylib', 'libusb-1.0.so.0')
+
+
+class EndpointDesc(ctypes.Structure):
+    _fields_ = [('bLength', ctypes.c_uint8), ('bDescriptorType', ctypes.c_uint8), ('bEndpointAddress', ctypes.c_uint8),
+                ('bmAttributes', ctypes.c_uint8), ('wMaxPacketSize', ctypes.c_uint16), ('bInterval', ctypes.c_uint8),
+                ('bRefresh', ctypes.c_uint8), ('bSynchAddress', ctypes.c_uint8), ('extra', ctypes.c_void_p),
+                ('extra_length', ctypes.c_int)]
+
+
+class InterfaceDesc(ctypes.Structure):
+    _fields_ = [('bLength', ctypes.c_uint8), ('bDescriptorType', ctypes.c_uint8), ('bInterfaceNumber', ctypes.c_uint8),
+                ('bAlternateSetting', ctypes.c_uint8), ('bNumEndpoints', ctypes.c_uint8),
+                ('bInterfaceClass', ctypes.c_uint8), ('bInterfaceSubClass', ctypes.c_uint8),
+                ('bInterfaceProtocol', ctypes.c_uint8), ('iInterface', ctypes.c_uint8),
+                ('endpoint', ctypes.POINTER(EndpointDesc)), ('extra', ctypes.c_void_p), ('extra_length', ctypes.c_int)]
+
+
+class Interface(ctypes.Structure):
+    _fields_ = [('altsetting', ctypes.POINTER(InterfaceDesc)), ('num_altsetting', ctypes.c_int)]
+
+
+class ConfigDesc(ctypes.Structure):
+    _fields_ = [('bLength', ctypes.c_uint8), ('bDescriptorType', ctypes.c_uint8), ('wTotalLength', ctypes.c_uint16),
+                ('bNumInterfaces', ctypes.c_uint8), ('bConfigurationValue', ctypes.c_uint8),
+                ('iConfiguration', ctypes.c_uint8), ('bmAttributes', ctypes.c_uint8), ('MaxPower', ctypes.c_uint8),
+                ('interface', ctypes.POINTER(Interface)), ('extra', ctypes.c_void_p), ('extra_length', ctypes.c_int)]
+
+
+class DeviceDesc(ctypes.Structure):
+    _fields_ = [('bLength', ctypes.c_uint8), ('bDescriptorType', ctypes.c_uint8), ('bcdUSB', ctypes.c_uint16),
+                ('bDeviceClass', ctypes.c_uint8), ('bDeviceSubClass', ctypes.c_uint8), ('bDeviceProtocol', ctypes.c_uint8),
+                ('bMaxPacketSize0', ctypes.c_uint8), ('idVendor', ctypes.c_uint16), ('idProduct', ctypes.c_uint16),
+                ('bcdDevice', ctypes.c_uint16), ('iManufacturer', ctypes.c_uint8), ('iProduct', ctypes.c_uint8),
+                ('iSerialNumber', ctypes.c_uint8), ('bNumConfigurations', ctypes.c_uint8)]
+
+
+def adb_interfaces(cfg):
+    """(interface number, bulk IN address, bulk OUT address) of each ADB interface in a configuration."""
+    out = []
+    for i in range(cfg.bNumInterfaces):
+        itf = cfg.interface[i]
+        for a in range(itf.num_altsetting):
+            d = itf.altsetting[a]
+            if (d.bInterfaceClass, d.bInterfaceSubClass, d.bInterfaceProtocol) != ADB_CLASS:
+                continue
+            bulk = [d.endpoint[e].bEndpointAddress for e in range(d.bNumEndpoints) if d.endpoint[e].bmAttributes & 3 == 2]
+            ins, outs = [x for x in bulk if x & 0x80], [x for x in bulk if not x & 0x80]
+            if ins and outs:
+                out.append((d.bInterfaceNumber, ins[0], outs[0]))
+    return out
+
+
+def load_libusb():  # pragma: no mutate block
+    """libusb 1.0, its functions typed: Homebrew's on macOS, the system's on Linux."""
+    import ctypes.util
+    for name in (ctypes.util.find_library('usb-1.0'), *LIBUSB_LIBS):
+        if not name:
+            continue
+        try:
+            lib = ctypes.CDLL(name)
+            break
+        except OSError:
+            pass
+    else:
+        raise ConnectionError('no libusb 1.0 (brew install libusb, or apt install libusb-1.0-0)')
+    P, I, U8 = ctypes.c_void_p, ctypes.c_int, ctypes.c_uint8
+    for fn, res, args in (('libusb_init', I, [ctypes.POINTER(P)]),
+                          ('libusb_get_device_list', ctypes.c_ssize_t, [P, ctypes.POINTER(ctypes.POINTER(P))]),
+                          ('libusb_free_device_list', None, [ctypes.POINTER(P), I]),
+                          ('libusb_get_device_descriptor', I, [P, ctypes.POINTER(DeviceDesc)]),
+                          ('libusb_get_active_config_descriptor', I, [P, ctypes.POINTER(ctypes.POINTER(ConfigDesc))]),
+                          ('libusb_free_config_descriptor', None, [ctypes.POINTER(ConfigDesc)]),
+                          ('libusb_open', I, [P, ctypes.POINTER(P)]), ('libusb_close', None, [P]),
+                          ('libusb_get_string_descriptor_ascii', I, [P, U8, ctypes.c_char_p, I]),
+                          ('libusb_claim_interface', I, [P, I]), ('libusb_release_interface', I, [P, I]),
+                          ('libusb_set_auto_detach_kernel_driver', I, [P, I]),
+                          ('libusb_bulk_transfer', I, [P, ctypes.c_ubyte, ctypes.c_char_p, I, ctypes.POINTER(I), ctypes.c_uint])):
+        f = getattr(lib, fn)
+        f.restype, f.argtypes = res, args
+    return lib
+
+
+class UsbEndpoints:
+    """A claimed ADB interface's two bulk endpoints: write(data) and read(n, timeout) through libusb."""
+    def __init__(self, lib, handle, iface, ep_in, ep_out):
+        self.lib, self.h, self.iface, self.ep_in, self.ep_out = lib, handle, iface, ep_in, ep_out
+
+    def _bulk(self, ep, buf, n, timeout):
+        done = ctypes.c_int(0)
+        r = self.lib.libusb_bulk_transfer(self.h, ep, buf, n, ctypes.byref(done), max(1, int(timeout * 1000)))
+        if r == LIBUSB_ERROR_TIMEOUT and not done.value:
+            raise socket.timeout
+        if r and r != LIBUSB_ERROR_TIMEOUT:
+            raise ConnectionError(f'USB transfer failed (libusb error {r}): the Q2 was unplugged, or left USB Debugging')
+        return done.value
+
+    def write(self, data, timeout=TIMEOUT):
+        sent = 0
+        while sent < len(data):
+            sent += self._bulk(self.ep_out, data[sent:], len(data) - sent, timeout)
+
+    def read(self, n, timeout):
+        buf = ctypes.create_string_buffer(n)
+        got = self._bulk(self.ep_in, buf, n, timeout)
+        return buf.raw[:got]
+
+    def close(self):
+        self.lib.libusb_release_interface(self.h, self.iface)
+        self.lib.libusb_close(self.h)
+
+
+class UsbTransport:
+    """adb over a USB ADB interface's endpoints: each message's header and its data as separate transfers, as
+    adb sends them and FunctionFS's adbd reads them (usb_linux_client.c reads 24 bytes, then the data), and each
+    read exactly as long as what adbd writes: 4.2.2 sends no zero-length packet after a transfer of a whole
+    number of packets, so asking for more could wait for ever."""
+    def __init__(self, endpoints, where='usb'):
+        self.ep, self.where, self.buf = endpoints, where, bytearray()
+
+    def send(self, data):
+        self.ep.write(data[:24])
+        if len(data) > 24:
+            self.ep.write(data[24:])
+
+    def recv(self, n, timeout):
+        while len(self.buf) < n:
+            part = self.ep.read(n - len(self.buf), timeout)
+            if not part:
+                raise socket.timeout
+            self.buf += part
+        out = bytes(self.buf[:n])
+        del self.buf[:n]
+        return out
+
+    def close(self):
+        self.ep.close()
+
+
+def usb_devices(lib=None):
+    """[(serial, open)] for each ADB interface on this computer's USB: open() claims it and gives its
+    UsbTransport. A device that cannot be opened (another adb holds it, or no permission) is left out."""
+    lib = lib or load_libusb()
+    ctx = ctypes.c_void_p()
+    if lib.libusb_init(ctypes.byref(ctx)):
+        raise ConnectionError('libusb would not start')
+    devs = ctypes.POINTER(ctypes.c_void_p)()
+    n = lib.libusb_get_device_list(ctx, ctypes.byref(devs))
+    found = []
+    try:
+        for i in range(max(n, 0)):
+            dev = devs[i]
+            cfg = ctypes.POINTER(ConfigDesc)()
+            if lib.libusb_get_active_config_descriptor(dev, ctypes.byref(cfg)):
+                continue
+            try:
+                ifaces = adb_interfaces(cfg.contents)
+            finally:
+                lib.libusb_free_config_descriptor(cfg)
+            if not ifaces:
+                continue
+            desc = DeviceDesc()
+            lib.libusb_get_device_descriptor(dev, ctypes.byref(desc))
+            h = ctypes.c_void_p()
+            if lib.libusb_open(dev, ctypes.byref(h)):
+                continue
+            serial = ctypes.create_string_buffer(256)
+            got = lib.libusb_get_string_descriptor_ascii(h, desc.iSerialNumber, serial, 256) if desc.iSerialNumber else 0
+            lib.libusb_close(h)
+            found.append((serial.value[:max(got, 0)].decode(errors='replace') or f'{desc.idVendor:04x}:{desc.idProduct:04x}',
+                          _opener(lib, dev, *ifaces[0])))
+    finally:
+        if n >= 0:
+            lib.libusb_free_device_list(devs, 0)  # 0: each device keeps the list's reference, for found's openers
+    return found
+
+
+def _opener(lib, dev, iface, ep_in, ep_out):
+    def open_():
+        h = ctypes.c_void_p()
+        if lib.libusb_open(dev, ctypes.byref(h)):
+            raise ConnectionError('the Q2 on USB could not be opened (another adb server holds it? `adb kill-server`)')
+        lib.libusb_set_auto_detach_kernel_driver(h, 1)
+        r = lib.libusb_claim_interface(h, iface)
+        if r:
+            lib.libusb_close(h)
+            raise ConnectionError(f'the Q2\'s ADB interface is busy (libusb error {r}): another adb holds it? `adb kill-server`')
+        return UsbTransport(UsbEndpoints(lib, h, iface, ep_in, ep_out))
+    return open_
 
 
 # ---- finding the Q2: mDNS (RFC 6762), the records patch/adb_mdns.c answers ----
@@ -638,7 +838,10 @@ def instances(records):
 # ---- the Q2 to use ----
 
 def parse_target(spec):
-    """HOST, HOST:PORT or [V6]:PORT as (host, port); None for a name to look up with mDNS."""
+    """HOST, HOST:PORT or [V6]:PORT as (host, port), usb or usb:SERIAL as ('usb', SERIAL or ''); None for a name
+    to look up with mDNS."""
+    if spec == 'usb' or spec.startswith('usb:'):
+        return 'usb', spec[4:]
     m = re.fullmatch(r'\[([0-9a-fA-F:]+)\](?::(\d+))?|([0-9.]+|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)(?::(\d+))?', spec)
     if not m:
         return None
@@ -662,7 +865,7 @@ def resolve(spec=None, wait=2.0):
     """The target as {name, ip, port, id}: spec (a name, an id or an address), else the one `connect` saved."""
     if spec:
         if addr := parse_target(spec):
-            return {'name': spec, 'ip': addr[0], 'port': addr[1], 'id': ''}
+            return {'name': spec, 'ip': addr[0], 'port': addr[1], 'id': ''}  # usb: port is the serial
         found = [q for q in browse(wait) if spec.lower() in (q['name'].lower(), q['id'].lower())]
         if not found:
             raise ConnectionError(f'no Q2 named {spec!r} answers mDNS here (`vamp find` lists those that do)')
@@ -685,6 +888,10 @@ class Device:
         if self.conn:
             return self.conn
         self.key = self.key or load_key()
+        if self.target['ip'] == 'usb':
+            self.conn = Connection(self.usb_transport(), self.key, auth_wait=AUTH_WAIT_S, on_offer=lambda: print(
+                'vamp: the Q2 asks "Allow this computer?": leave Always allow on and press Allow', file=sys.stderr))
+            return self.conn
         try:
             self.conn = Connection(TcpTransport(self.target['ip'], self.target['port']), self.key)
         except (ConnectionError, TimeoutError) as first:
@@ -700,6 +907,17 @@ class Device:
                 save(self.target)
             self.conn = Connection(TcpTransport(self.target['ip'], self.target['port']), self.key)
         return self.conn
+
+    def usb_transport(self, devices=None):
+        """The Q2 on USB: the one ADB interface there is, or the one with the target's serial."""
+        found = (devices or usb_devices)()
+        want = self.target['port']
+        match = [o for s, o in found if not want or s == want]
+        if len(match) != 1:
+            names = ', '.join(s for s, _ in found) or 'none'
+            raise ConnectionError(f'{len(match)} ADB devices on USB match{" " + repr(want) if want else ""} ({names}): '
+                                  'plug the Q2 in and pick USB Debugging, or name one as usb:SERIAL')
+        return match[0]()
 
     def _retry(self, first, tries=RETRIES, gap=RETRY_S):
         """The same address a few times more (Wi-Fi coming back after sleep), then first's error."""
@@ -763,6 +981,20 @@ class Device:
 RC = re.compile(rb'\n\0vamprc=(\d+)\n\Z')
 
 
+def over_wifi(dev):
+    """The Q2 connected over USB as a Wi-Fi target ({name, ip, port, id}), when it has a Wi-Fi address now: what
+    `vamp -t usb connect` remembers, so the first pairing over the cable leaves Wi-Fi ready. None without one."""
+    out = dev.exec_out('ifconfig wlan0 2>/dev/null; echo vamp-id; od -An -tx1 -N8 /mnt/data/coda-rc/id 2>/dev/null', 30)
+    wlan, _, ident = out.decode(errors='replace').partition('vamp-id')
+    m = re.search(r'inet (?:addr:)?(\d+\.\d+\.\d+\.\d+)', wlan)
+    if not m:
+        print('vamp: the Q2 has no Wi-Fi address now: remembered over USB', file=sys.stderr)
+        return None
+    ident = ''.join(ident.split())  # Car Remote's device id, as q2adb-mdns's TXT gives it, so mDNS finds it again
+    print(f'vamp: over Wi-Fi the Q2 is {m.group(1)}:{PORT}: remembered, so the cable can come out')
+    return {'name': m.group(1), 'ip': m.group(1), 'port': PORT, 'id': ident if re.fullmatch('[0-9a-f]{16}', ident) else ''}
+
+
 def run_streamed(dev, command, out):
     """command under sh in its own process group, its output to out as it comes; its exit status. Ctrl-C
     kills the group (q2remote.run's way: the group's pid in a file)."""
@@ -813,14 +1045,15 @@ def interactive(dev):  # pragma: no mutate block
                 os.write(1, bytes(s.inbox))
                 s.inbox.clear()
                 continue
-            ready = select.select([sys.stdin, conn.t], [], [], 1)[0]
-            if sys.stdin in ready:
+            if select.select([sys.stdin], [], [], .02)[0]:
                 data = os.read(0, 4096)
                 if not data:
                     break
                 s.write(data)
-            if conn.t in ready or conn.t.buf:
-                conn.pump(TIMEOUT)
+            try:  # a USB transport has no descriptor to wait on, so both are looked at in turn
+                conn.pump(.02)
+            except TimeoutError:
+                pass
     finally:
         if tty:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved_mode)
@@ -977,6 +1210,14 @@ def main(argv=None):  # pragma: no mutate block
         found = browse(float(a[1]) if a else 2.0)
         for q in found:
             print(f'{q["name"]}\t{q["ip"]}:{q["port"]}\tid={q["id"] or "-"}')
+        try:
+            on_usb = usb_devices()
+        except ConnectionError as e:  # no libusb: say so, and list what mDNS found
+            on_usb = []
+            print(f'vamp: USB not looked at: {e}', file=sys.stderr)
+        for serial, _ in on_usb:
+            print(f'usb:{serial}\tUSB')
+        found += on_usb
         if not found:
             print('vamp: no Q2 answered (Wi-Fi on, a --dev build, a trusted key on it: docs/adb.md#adb-over-wi-fi)',
                   file=sys.stderr)
@@ -993,6 +1234,8 @@ def main(argv=None):  # pragma: no mutate block
             target = found[0]
         dev = Device(target)
         tag = dev.exec_out('q2update version 2>/dev/null', 30).split()
+        if dev.target['ip'] == 'usb':
+            dev.target = over_wifi(dev) or dev.target
         save(dev.target)
         print(f'connected to {dev.target["name"]} at {dev.target["ip"]}:{dev.target["port"]}'
               + (f', running {tag[2].decode()}' if len(tag) > 2 else ''))

@@ -18,7 +18,7 @@ q2adb-wifi (patch/adb_wifi.sh) under the host's sh with stand-ins for adbd and q
 q2adb-mdns too, found by vamp's browse. Needs bwrap and a
 qemu-mipsel (qemu-user) for adbd; unsquashfs with BUILD.
 """
-import base64, hashlib, os, pathlib, secrets, shutil, struct, subprocess, sys, tempfile, threading, time
+import base64, hashlib, io, os, pathlib, secrets, shutil, struct, subprocess, sys, tempfile, threading, time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
@@ -807,6 +807,80 @@ def ui_push_checks(qemu, adbd):
                and b'q2ui.vamp' not in files, (err, files))
 
 
+class FifoEndpoints:
+    """The stand-in FunctionFS's two FIFOs as vamp.UsbTransport's endpoints: write to adbd's bulk OUT (ep1), read
+    its bulk IN (ep2), each read at most n bytes, as a bulk transfer of n would give."""
+    def __init__(self, link):
+        self.link = link
+
+    def write(self, data, timeout=30):
+        os.write(self.link.out, data)
+
+    def read(self, n, timeout):
+        import socket
+        try:
+            return self.link.read(1, timeout) + self._more(n - 1)
+        except TimeoutError:
+            raise socket.timeout from None
+
+    def _more(self, n):
+        try:
+            return os.read(self.link.inp, n) if n else b''
+        except BlockingIOError:
+            return b''
+
+    def close(self):
+        pass
+
+
+def usb_checks(qemu, adbd):
+    """vamp's USB transport against the USB adbd over the stand-in FunctionFS: the first key paired through
+    the Allow this computer? question (this test answers as the Q2's UI does for Always allow), used at once,
+    then let in by the Wi-Fi adbd with no question."""
+    import vamp
+    print('vamp over USB...')
+    key = vamp.Key.generate()
+    with tempfile.TemporaryDirectory(prefix='q2-adb-usb-') as d:
+        work = pathlib.Path(d)
+        card, data = work/'card', work/'data'
+        for p in (card, data, work/'tmp/files'):
+            p.mkdir(parents=True)
+        dev = Adbd(qemu, adbd, work, card, data)
+        asked = []
+        try:
+            q = ui(work)
+
+            def answer():
+                line = q.recv(4096)
+                asked.append(line)
+                (data/'adb_keys').write_text(line[2:].decode() + '\n')  # what Always allow does
+                q.sendall(b'OK')
+            threading.Thread(target=answer, daemon=True).start()
+            offered = []
+            conn = vamp.Connection(vamp.UsbTransport(FifoEndpoints(dev.link)), key, auth_wait=15,
+                                   on_offer=lambda: offered.append(1))
+            expect('USB, an unknown key: vamp offers it and the Q2 is asked (PK and the key\'s line)', offered == [1] and
+                   asked[:1] == [b'PK' + key.public_line().encode()], asked)
+            expect('Allow: in over USB at once (CNXN device::)', conn.device.startswith('device'), conn.device)
+            expect('exec: over USB, a reply longer than one message', conn.exec_out('head -c 9000 /dev/zero | tr "\\0" u')
+                   == b'u' * 9000)
+            body = secrets.token_bytes(70000)
+            conn.push([body], '/tmp/files/usb.bin')
+            got = io.BytesIO()
+            conn.pull('/tmp/files/usb.bin', got)
+            expect('push and pull over USB, byte for byte', got.getvalue() == body)
+            expect('Always allow kept the key in /mnt/data/adb_keys', key.public_line() in (data/'adb_keys').read_text())
+        finally:
+            dev.stop()
+        port = free_port()
+        tcp = TcpAdbd(qemu, adbd, work, card, data, port)
+        try:
+            c = vamp.Connection(vamp.TcpTransport('127.0.0.1', port), key, auth_wait=2)
+            expect('the key paired over USB gets in over Wi-Fi, nothing asked', c.device.startswith('device'))
+        finally:
+            tcp.stop()
+
+
 def main(argv):
     args = list(argv)
     qemu = shutil.which('qemu-mipsel')
@@ -837,6 +911,7 @@ def main(argv):
         adbd_checks([qemu, '-L', str(libs)], adbd)
         tcp_checks([qemu, '-L', str(libs)], adbd)
         ui_push_checks([qemu, '-L', str(libs)], adbd)
+        usb_checks([qemu, '-L', str(libs)], adbd)
         if args:
             mdns_checks([qemu, '-L', str(libs)], build)
     print(f'{len(failures)} failed' if failures else 'all passed')

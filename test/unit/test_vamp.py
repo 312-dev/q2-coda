@@ -873,3 +873,240 @@ def test_connect_takes_t_and_falls_back_to_the_last_q2(adbd, monkeypatch, capsys
     assert vamp.main(['-t', f'127.0.0.1:{adbd.port}', 'connect']) == 0
     assert vamp.saved()['ip'] == '127.0.0.1' and 'running V0JZi' in capsys.readouterr().out
     assert vamp.main(['connect']) == 0  # no name, no -t: the one it remembered, mDNS not asked
+
+
+# ---- USB ----
+
+import ctypes  # noqa: E402
+
+
+def config(ifaces):
+    """A libusb_config_descriptor holding ifaces: [(number, (class, sub, proto), [(address, attributes)])]."""
+    keep = []
+    arr = (vamp.Interface * len(ifaces))()
+    for i, (num, cls, eps) in enumerate(ifaces):
+        e = (vamp.EndpointDesc * max(len(eps), 1))()
+        for j, (addr, attr) in enumerate(eps):
+            e[j].bEndpointAddress, e[j].bmAttributes = addr, attr
+        d = (vamp.InterfaceDesc * 1)()
+        d[0].bInterfaceNumber, d[0].bNumEndpoints = num, len(eps)
+        d[0].bInterfaceClass, d[0].bInterfaceSubClass, d[0].bInterfaceProtocol = cls
+        d[0].endpoint = ctypes.cast(e, ctypes.POINTER(vamp.EndpointDesc))
+        arr[i].altsetting, arr[i].num_altsetting = ctypes.cast(d, ctypes.POINTER(vamp.InterfaceDesc)), 1
+        keep += [e, d]
+    c = vamp.ConfigDesc()
+    c.bNumInterfaces, c.interface = len(ifaces), ctypes.cast(arr, ctypes.POINTER(vamp.Interface))
+    c._keep = keep + [arr]
+    return c
+
+
+ADB_IFACE = (1, (0xff, 0x42, 0x01), [(0x81, 2), (0x02, 2)])
+
+
+def put_pointer(arg, address):
+    """What libusb does with an out-parameter pointer: the pointer arg refers to now holds address."""
+    ctypes.c_void_p.from_address(ctypes.addressof(arg._obj)).value = address
+
+
+class FakeLibusb:
+    """libusb 1.0's calls as usb_devices and UsbEndpoints make them, for devices given as dicts (config, serial,
+    open, claim); a claimed device's bulk transfers go to the fake adbd, and each OUT transfer's size is kept."""
+    def __init__(self, adbd, devices, init=0):
+        self.adbd, self.devs, self.init, self.out_sizes, self.closed = adbd, devices, init, [], []
+        self.arr = (ctypes.c_void_p * (len(devices) + 1))(*range(1, len(devices) + 1))
+
+    def libusb_init(self, ctx):
+        return self.init
+
+    def libusb_get_device_list(self, ctx, devs):
+        put_pointer(devs, ctypes.addressof(self.arr))
+        return len(self.devs)
+
+    def libusb_free_device_list(self, devs, unref):
+        pass
+
+    def dev(self, d):
+        return self.devs[(d.value if hasattr(d, 'value') else d) - 1]
+
+    def libusb_get_active_config_descriptor(self, d, cfg):
+        dev = self.dev(d)
+        if dev.get('config') is None:
+            return -5
+        put_pointer(cfg, ctypes.addressof(dev['config']))
+        return 0
+
+    def libusb_free_config_descriptor(self, cfg):
+        pass
+
+    def libusb_get_device_descriptor(self, d, desc):
+        desc._obj.iSerialNumber = 3 if self.dev(d).get('serial') else 0
+        desc._obj.idVendor, desc._obj.idProduct = 0x1d6b, 0x0105
+
+    def libusb_open(self, d, h):
+        dev = self.dev(d)
+        if not dev.get('open', True):
+            return -3
+        put_pointer(h, 100 + self.devs.index(dev))
+        return 0
+
+    def handle(self, h):
+        return self.devs[(h.value if hasattr(h, 'value') else h) - 100]
+
+    def libusb_close(self, h):
+        self.closed.append(h)
+
+    def libusb_get_string_descriptor_ascii(self, h, idx, buf, n):
+        s = self.handle(h)['serial']
+        ctypes.memmove(buf, s, len(s))
+        return len(s)
+
+    def libusb_set_auto_detach_kernel_driver(self, h, on):
+        return 0
+
+    def libusb_claim_interface(self, h, iface):
+        dev = self.handle(h)
+        if not dev.get('claim', True):
+            return vamp.LIBUSB_ERROR_BUSY
+        dev['sock'] = self.adbd.connect(('127.0.0.1', self.adbd.port))
+        return 0
+
+    def libusb_release_interface(self, h, iface):
+        self.handle(h)['sock'].close()
+
+    def libusb_bulk_transfer(self, h, ep, buf, n, done, timeout_ms):
+        dev = self.handle(h)
+        if dev.get('fail'):
+            return -4
+        s = dev['sock']
+        if not ep & 0x80:
+            data = bytes(buf[:n])[:dev.get('short', n)]
+            self.out_sizes.append(len(data))
+            s.sendall(data)
+            done._obj.value = len(data)
+            return 0
+        s.settimeout(timeout_ms / 1000)
+        got = b''
+        try:
+            while len(got) < n:
+                part = s.recv(n - len(got))
+                if not part:
+                    break
+                got += part
+        except socket.timeout:
+            done._obj.value = len(got)
+            return vamp.LIBUSB_ERROR_TIMEOUT
+        ctypes.memmove(buf, got, len(got))
+        done._obj.value = len(got)
+        return 0
+
+
+def test_adb_interfaces_picks_ff_42_01_with_bulk_in_and_out():
+    c = config([(0, (8, 6, 0x50), [(0x81, 2), (0x02, 2)]),        # a drive
+                (2, (0xff, 0x42, 0x01), [(0x83, 3), (0x04, 2)]),  # ADB, but its IN is interrupt
+                ADB_IFACE])
+    assert vamp.adb_interfaces(c) == [(1, 0x81, 0x02)]
+
+
+def test_usb_lists_adb_devices_and_connects_through_one(adbd, dev, capsys, monkeypatch):
+    lib = FakeLibusb(adbd, [{'config': None}, {'config': config([(0, (8, 6, 0x50), [])])},
+                            {'config': config([ADB_IFACE]), 'open': False},
+                            {'config': config([ADB_IFACE]), 'serial': b'Q2CODA'},
+                            {'config': config([ADB_IFACE])}])
+    found = vamp.usb_devices(lib)
+    assert [s for s, _ in found] == ['Q2CODA', '1d6b:0105']  # a device that cannot be opened is left out
+    adbd.handler = lambda cmd: b'x' * 9000
+    d = vamp.Device({'name': 'usb:Q2CODA', 'ip': 'usb', 'port': 'Q2CODA', 'id': ''}, KEY)
+    real = vamp.Device.usb_transport
+    monkeypatch.setattr(vamp.Device, 'usb_transport', lambda self: real(self, lambda: found))
+    assert d.exec_out('big') == b'x' * 9000
+    sizes = lib.out_sizes
+    assert sizes[0] == 24 and all(s <= 4096 for s in sizes)  # the CNXN's header alone, then its data
+    assert sizes[:2] == [24, len(b'host::vamp\0')]
+    d.drop()
+
+
+def test_usb_picks_by_serial_and_says_what_it_found():
+    d = vamp.Device({'name': 'usb', 'ip': 'usb', 'port': '', 'id': ''}, KEY)
+    with pytest.raises(ConnectionError, match=r'0 ADB devices on USB match \(none\)'):
+        d.usb_transport(lambda: [])
+    two = [('A', lambda: 'a'), ('B', lambda: 'b')]
+    with pytest.raises(ConnectionError, match='2 ADB devices .*A, B'):
+        d.usb_transport(lambda: two)
+    d.target['port'] = 'B'
+    assert d.usb_transport(lambda: two) == 'b'
+
+
+def test_usb_open_and_transfer_failures(adbd):
+    lib = FakeLibusb(adbd, [{'config': config([ADB_IFACE]), 'serial': b'S', 'claim': False}])
+    (_, opener), = vamp.usb_devices(lib)
+    with pytest.raises(ConnectionError, match='busy'):
+        opener()
+    lib.devs[0]['claim'] = True
+    lib.devs[0]['open'] = False
+    with pytest.raises(ConnectionError, match='could not be opened'):
+        opener()
+    lib.devs[0]['open'] = True
+    t = opener()
+    with pytest.raises(socket.timeout):
+        t.recv(24, .1)  # the fake adbd says nothing until it hears a CNXN
+    lib.devs[0]['short'] = 10
+    t.ep.write(cnxn())  # a transfer cut short is finished with another: 33 bytes as 10, 10, 10, 3
+    assert lib.out_sizes[-4:] == [10, 10, 10, 3]
+    lib.devs[0]['fail'] = True
+    with pytest.raises(ConnectionError, match='unplugged'):
+        t.send(b'a' * 30)
+    t.ep.read = lambda n, timeout: b''
+    with pytest.raises(socket.timeout):
+        t.recv(4, 1)
+    lib.devs[0]['fail'] = False
+    t.close()
+    with pytest.raises(ConnectionError, match='libusb would not start'):
+        vamp.usb_devices(FakeLibusb(adbd, [], init=-1))
+    class Broken(FakeLibusb):
+        def libusb_get_device_list(self, ctx, devs):
+            return -1  # LIBUSB_ERROR_IO: nothing listed, nothing to free
+
+        def libusb_free_device_list(self, devs, unref):
+            pytest.fail('freed a list libusb never gave')
+    assert vamp.usb_devices(Broken(adbd, [])) == []
+
+
+def test_first_pairing_over_usb_says_to_press_allow(adbd, capsys, monkeypatch):
+    adbd.trusted = []  # an unknown key: offered, and the fake (like a TCP adbd) never answers
+    monkeypatch.setattr(vamp, 'AUTH_WAIT_S', .2)
+    monkeypatch.setattr(vamp.Device, 'usb_transport', lambda self: vamp.TcpTransport('127.0.0.1', adbd.port))
+    with pytest.raises(vamp.Unauthorized):
+        vamp.Device({'name': 'usb', 'ip': 'usb', 'port': '', 'id': ''}, OTHER).connection()
+    assert 'press Allow' in capsys.readouterr().err
+
+
+def test_connect_over_usb_remembers_the_wifi_address(adbd, dev, monkeypatch, capsys):
+    monkeypatch.setattr(vamp, 'STATE', adbd.root.parent / 'target.json')
+    def handler(cmd):
+        if cmd.startswith('ifconfig wlan0'):
+            return (b'wlan0  Link encap:Ethernet\n  inet addr:192.168.1.23  Bcast:192.168.1.255\nvamp-id\n'
+                    b' 1a 2b 3c 4d 5e 6f 70 81\n')
+        return b'1 version V0JZi -\n'
+    adbd.handler = handler
+    assert vamp.over_wifi(dev) == {'name': '192.168.1.23', 'ip': '192.168.1.23', 'port': 5555, 'id': '1a2b3c4d5e6f7081'}
+    adbd.handler = lambda cmd: b'wlan0 no address\nvamp-id\n' if cmd.startswith('ifconfig') else b''
+    assert vamp.over_wifi(dev) is None and 'no Wi-Fi address' in capsys.readouterr().err
+    adbd.handler = handler
+    monkeypatch.setattr(vamp, 'load_key', lambda: KEY)
+    monkeypatch.setattr(vamp.Device, 'usb_transport', lambda self: vamp.TcpTransport('127.0.0.1', adbd.port))
+    assert vamp.main(['-t', 'usb', 'connect']) == 0
+    assert vamp.saved()['ip'] == '192.168.1.23' and vamp.saved()['id'] == '1a2b3c4d5e6f7081'
+    adbd.handler = lambda cmd: b'' if cmd.startswith('ifconfig') else b'1 version V0JZi -\n'
+    assert vamp.main(['-t', 'usb:Q2CODA', 'connect']) == 0
+    assert vamp.saved()['ip'] == 'usb' and vamp.saved()['port'] == 'Q2CODA'
+
+
+def test_find_lists_usb_and_says_when_it_cannot_look(monkeypatch, capsys):
+    monkeypatch.setattr(vamp, 'browse', lambda wait=2.0: [])
+    monkeypatch.setattr(vamp, 'usb_devices', lambda: [('Q2CODA', None)])
+    assert vamp.main(['find']) == 0 and 'usb:Q2CODA' in capsys.readouterr().out
+
+    def no_libusb():
+        raise ConnectionError('no libusb 1.0')
+    monkeypatch.setattr(vamp, 'usb_devices', no_libusb)
+    assert vamp.main(['find']) == 1 and 'USB not looked at: no libusb' in capsys.readouterr().err
