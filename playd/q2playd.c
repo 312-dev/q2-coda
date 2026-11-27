@@ -38,13 +38,13 @@
 #define POLL_MS 1000     /* the player asked for its status this often while a song is loaded, besides its pushes */
 #define ERRORS_MAX 20    /* songs in a row that do not open before the queue stops */
 
-static char root[256], db_path[300];
+static char root[256], db_path[300], cat_path[300];
 static int dac = -1, dac_missing;
 static const char *now_path_rel = "/tmp/coda-rc.now", *list_rel = "/tmp/coda-rc.list", *cmdq_rel = "/tmp/coda-rc.cmdq",
                   *sock_rel = "/tmp/sock_play", *push_rel = "/tmp/q2player.push", *api_rel = "/run/vamp/play.sock";
 
 static char *path(const char *rel) { /* rel under --root, in one of four buffers (no two calls in an expression need more) */
-    static char b[4][320];
+    static char b[4][640];
     static int i;
     i = (i + 1) & 3;
     snprintf(b[i], sizeof b[i], "%s%s", root, rel);
@@ -78,6 +78,8 @@ static struct {
     int errors;                  /* songs in a row that did not open */
     int expect_cut;              /* a set-nexturl or mcl-stop was sent: its answer is no song's end */
     char title[256], artist[256], album[256], file[1024];
+    char **paths;                /* a server list's answer: the app's m3u, played as paths in place of ids (np of them) */
+    int np;
     unsigned seq;                /* moves with every change of what is written */
 } q = {.volume = 24};
 
@@ -86,17 +88,21 @@ static unsigned now_written_seq = ~0u;
 
 /* ---- the library: stock's songtable (docs/internals.md#library) ---- */
 
+#define CAT_ID_BASE 0x40000000 /* server rows' ids (q2libd, patch/catalogue.c) */
+
 static int song_lookup(int id) {
     sqlite3 *db;
     sqlite3_stmt *st;
-    int ok = 0;
+    int ok = 0, server = (unsigned)id >= CAT_ID_BASE;
     q.title[0] = q.artist[0] = q.album[0] = q.file[0] = 0;
-    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) {
-        logf_("cannot read %s", db_path);
+    if (sqlite3_open_v2(server ? cat_path : db_path, &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) {
+        logf_("cannot read %s", server ? cat_path : db_path);
         sqlite3_close(db);
         return 0;
     }
-    if (sqlite3_prepare_v2(db, "select fileurl, name, songer, album from songtable where id = ?", -1, &st, 0) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, server ? "select fileurl, name, songer, album from servertable where id = ?"
+                                      : "select fileurl, name, songer, album from songtable where id = ?",
+                           -1, &st, 0) == SQLITE_OK) {
         sqlite3_bind_int(st, 1, id);
         if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0)) {
             snprintf(q.file, sizeof q.file, "%s", (const char *)sqlite3_column_text(st, 0));
@@ -142,10 +148,18 @@ static void send_song(const char *cmd, const char *file) {
 }
 
 /* The song at q.order[q.at] to the player: set-songurl when nothing plays, set-nexturl to cut the one that does. */
+static int path_lookup(int at) { /* a played-as-paths list's song: the path, its name as the title */
+    const char *p = q.paths[at], *base = strrchr(p, '/');
+    snprintf(q.file, sizeof q.file, "%s", p);
+    snprintf(q.title, sizeof q.title, "%s", base ? base + 1 : p);
+    q.artist[0] = q.album[0] = 0;
+    return 1;
+}
+
 static int start_at(int at) {
     while (at >= 0 && at < q.n) {
         q.at = at;
-        if (song_lookup(q.ids[q.order[at]])) {
+        if (q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]])) {
             int cut = q.loaded;
             send_song(cut ? "set-nexturl" : "set-songurl", q.file);
             q.expect_cut = cut;
@@ -171,7 +185,7 @@ static void stop(void) {
 
 /* A song ended on its own (played out, or did not open): the next, or the queue's end. */
 static void ended(int error) {
-    logf_("song %d %s", q.n ? q.ids[q.order[q.at]] : 0, error ? "did not play" : "ended");
+    logf_("song %d %s", q.n && !q.paths ? q.ids[q.order[q.at]] : 0, error ? "did not play" : "ended");
     q.loaded = 0;
     q.errors = error ? q.errors + 1 : 0;
     if (q.errors < ERRORS_MAX && q.at + 1 < q.n && !start_at(q.at + 1)) return;
@@ -308,6 +322,107 @@ static void volume_save(void) {
 
 /* ---- commands: the same verbs from the FIFO and from Q2PLAY/1 ---- */
 
+/* ---- server songs: the catplay hand-off to their app (docs/server-library.md, docs/playd.md#server-songs) ----
+ * A list with server rows is handed to the app whose catalogue they are: /tmp/q2-<id>.catplay, "<seq> <start>" (the
+ * chosen song's place in the list) and a path a line in play order (a server row's fileurl, a card file's path), written whole, while the app listens
+ * (/tmp/q2-<id>.browse.sock). Its answer is /tmp/q2-<id>.play, "<seq> <m3u>": the m3u's card paths (Stream Cache copies
+ * for server songs) from the row at <start> on, played in place of the list. No answer within CATPLAY_WAIT_MS, or the app not listening: the list
+ * is played from its card rows alone. */
+#define CATPLAY_WAIT_MS 4000
+static struct { int on, at; char app[64], before[600]; unsigned seq; unsigned long long until; } cp;
+
+static void free_paths(void) {
+    for (int i = 0; i < q.np; ++i) free(q.paths[i]);
+    free(q.paths), q.paths = 0, q.np = 0;
+}
+
+static void read_small(const char *p, char *out, size_t room) {
+    FILE *f = fopen(p, "r");
+    size_t n = f ? fread(out, 1, room - 1, f) : 0;
+    if (f) fclose(f);
+    out[n] = 0;
+}
+
+/* the card rows of the queue alone, from the first at or after the one asked for (at) */
+static int play_offline(int at) {
+    int n = 0, start = -1;
+    for (int i = 0; i < q.n; ++i)
+        if ((unsigned)q.ids[q.order[i]] < CAT_ID_BASE) {
+            if (i >= at && start < 0) start = n;
+            q.order[n++] = q.order[i];
+        }
+    q.n = n;
+    logf_("server songs left out: %d card songs to play", n);
+    return n && start >= 0 ? start_at(start) : -1;
+}
+
+/* the app of a server row's path, /mnt/mmc/.<id>/cat/... */
+static int app_of(const char *fileurl, char *app, size_t room) {
+    const char *pre = "/mnt/mmc/.", *p;
+    if (strncmp(fileurl, pre, strlen(pre)) || !(p = strstr(fileurl + strlen(pre), "/cat/"))) return -1;
+    snprintf(app, room, "%.*s", (int)(p - fileurl - strlen(pre)), fileurl + strlen(pre));
+    return 0;
+}
+
+/* 1: handed to the app (an answer awaited); 0: nothing of the list is a server's */
+static int catplay(int at) {
+    char app[64] = "", sock[300], tmp[300], dst[300];
+    int server = 0;
+    for (int i = 0; i < q.n && !server; ++i)
+        if ((unsigned)q.ids[q.order[i]] >= CAT_ID_BASE && song_lookup(q.ids[q.order[i]]) && !app_of(q.file, app, sizeof app)) server = 1;
+    if (!server) return 0;
+    snprintf(sock, sizeof sock, "/tmp/q2-%s.browse.sock", app);
+    if (access(path(sock), F_OK)) {
+        logf_("%s is not running: the list's server songs cannot stream", app);
+        return play_offline(at), 1;
+    }
+    snprintf(tmp, sizeof tmp, "/tmp/q2-%s.catplay.q2playd", app), snprintf(dst, sizeof dst, "/tmp/q2-%s.catplay", app);
+    snprintf(sock, sizeof sock, "/tmp/q2-%s.play", app);
+    read_small(path(sock), cp.before, sizeof cp.before);
+    FILE *f = fopen(path(tmp), "w");
+    if (!f) return play_offline(at), 1;
+    fprintf(f, "%u %d\n", ++cp.seq, at);
+    for (int i = 0; i < q.n; ++i) fprintf(f, "%s\n", song_lookup(q.ids[q.order[i]]) ? q.file : "");
+    if (fclose(f) || rename(path(tmp), path(dst))) return play_offline(at), 1;
+    snprintf(cp.app, sizeof cp.app, "%s", app);
+    cp.on = 1, cp.at = at, cp.until = now_ms() + CATPLAY_WAIT_MS;
+    logf_("list handed to %s (catplay %u)", app, cp.seq);
+    return 1;
+}
+
+/* while a catplay waits: its answer taken, or its time out */
+static void catplay_poll(void) {
+    char p[300], now[600];
+    if (!cp.on) return;
+    snprintf(p, sizeof p, "/tmp/q2-%s.play", cp.app);
+    read_small(path(p), now, sizeof now);
+    unsigned seq = 0;
+    char m3u[512] = "";
+    if (strcmp(now, cp.before) && sscanf(now, "%u %511[^\n]", &seq, m3u) == 2 && seq == cp.seq) {
+        cp.on = 0;
+        FILE *f = fopen(path(m3u), "r");
+        char line[1100];
+        free_paths();
+        while (f && fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (!*line || *line == '#') continue;
+            char **g = realloc(q.paths, (size_t)(q.np + 1) * sizeof *g);
+            if (!g) break;
+            q.paths = g, q.paths[q.np++] = strdup(line);
+        }
+        if (f) fclose(f);
+        logf_("%s answered catplay %u with %d songs", cp.app, seq, q.np);
+        q.n = q.np;
+        if (!q.np || start_at(0)) free_paths(), q.state = STOPPED, ++q.seq;
+        return;
+    }
+    if (now_ms() >= cp.until) {
+        cp.on = 0;
+        logf_("%s did not answer catplay %u", cp.app, cp.seq);
+        play_offline(cp.at);
+    }
+}
+
 static unsigned rnd = 0x9e3779b9u;
 static unsigned next_rand(void) { return rnd = rnd * 1664525u + 1013904223u; }
 
@@ -327,6 +442,8 @@ static int play_ids(const int *ids, int n, int at, int shuffle) {
         }
         at = 0;
     }
+    free_paths(), cp.on = 0;
+    if (catplay(at)) return 0;
     return start_at(at);
 }
 
@@ -433,7 +550,7 @@ static void field(char *out, size_t room, const char *in, int encode) {
 
 static void now_text(char *out, size_t room, const char *sep, int encode) {
     char t[800], a[800], b[800];
-    int id = q.n ? q.ids[q.order[q.at]] : 0;
+    int id = q.n && !q.paths ? q.ids[q.order[q.at]] : 0;
     field(t, sizeof t, q.title, encode), field(a, sizeof a, q.artist, encode), field(b, sizeof b, q.album, encode);
     snprintf(out, room, "title=%s%sartist=%s%salbum=%s%sstate=%d%spos=%d%slen=%d%svolume=%d%sid=%d", t, sep, a, sep, b, sep,
              q.state, sep, q.pos_ms, sep, q.len_s, sep, q.volume, sep, id);
@@ -548,9 +665,11 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--root") && i + 1 < argc) snprintf(root, sizeof root, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--db") && i + 1 < argc) snprintf(db_path, sizeof db_path, "%s", argv[++i]);
-        else return fprintf(stderr, "usage: q2playd [--root DIR] [--db FILE]\n"), 2;
+        else if (!strcmp(argv[i], "--catalogue") && i + 1 < argc) snprintf(cat_path, sizeof cat_path, "%s", argv[++i]);
+        else return fprintf(stderr, "usage: q2playd [--root DIR] [--db FILE] [--catalogue FILE]\n"), 2;
     }
     if (!*db_path) snprintf(db_path, sizeof db_path, "%s/mnt/data/database.db", root);
+    if (!*cat_path) snprintf(cat_path, sizeof cat_path, "%s/mnt/mmc/.vamp/catalogue.db", root);
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);
     signal(SIGINT, on_term);
@@ -587,7 +706,9 @@ int main(int argc, char **argv) {
             int w = (int)(volume_dirty_at + VOLUME_SAVE_MS > t ? volume_dirty_at + VOLUME_SAVE_MS - t : 0);
             if (wait < 0 || w < wait) wait = w;
         }
+        if (cp.on && (wait < 0 || wait > 200)) wait = 200;
         if (poll(p, (nfds_t)n, wait) < 0 && errno != EINTR) break;
+        catplay_poll();
         if (p[0].revents & POLLIN) {
             player = accept4(listen_fd, 0, 0, SOCK_CLOEXEC);
             if (player >= 0) logf_("the player connected");

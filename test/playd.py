@@ -374,3 +374,82 @@ def test_q2play1_free_text_is_percent_encoded_and_cannot_forge_a_field(run):
 
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', '-p', 'no:cacheprovider']))
+
+
+# ---- server songs: the catplay hand-off (docs/playd.md#server-songs) ----
+
+SERVER = 0x40000000
+
+
+def catalogue(root, listening=True):
+    """the card's catalogue.db with two of navi's server rows; navi's browse socket there while it listens"""
+    (root/'mnt/mmc/.vamp').mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(root/'mnt/mmc/.vamp/catalogue.db')
+    db.execute('create table servertable(id integer primary key, fileurl, name, songer, album, track)')
+    db.executemany('insert into servertable values (?, ?, ?, ?, ?, 0)', [
+        (SERVER + 1, '/mnt/mmc/.navi/cat/ar1/al1/s1.flac', 'Cloud One', 'Sky', 'Up'),
+        (SERVER + 2, '/mnt/mmc/.navi/cat/ar1/al1/s2.flac', 'Cloud Two', 'Sky', 'Up')])
+    db.commit()
+    db.close()
+    if listening:
+        s = socket.socket(socket.AF_UNIX)
+        s.bind(str(root/'tmp/q2-navi.browse.sock'))
+        return s
+
+
+def wait_for(p, secs=3.0):
+    end = time.time() + secs
+    while time.time() < end and not p.exists():
+        time.sleep(0.05)
+    return p.exists()
+
+
+def test_a_list_with_server_songs_is_handed_to_their_app_and_its_m3u_played(run):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [1, SERVER + 1, 2, SERVER + 2], 1)
+    cp = root/'tmp/q2-navi.catplay'
+    assert wait_for(cp), 'the catplay is written for navi'
+    assert cp.read_text().splitlines() == ['1 1', '/mnt/mmc/Music/a.flac', '/mnt/mmc/.navi/cat/ar1/al1/s1.flac',
+                                           '/mnt/mmc/Music/b.mp3', '/mnt/mmc/.navi/cat/ar1/al1/s2.flac']
+    pl.pump(0.5)
+    assert pl.songs() == [], 'nothing plays before the app answers'
+    (root/'tmp/navi.m3u').write_text('#EXTM3U\n/mnt/mmc/.navi/cache/s1.flac\n/mnt/mmc/Music/b.mp3\n')
+    (root/'tmp/q2-navi.play').write_text('1 /tmp/navi.m3u\n')
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/.navi/cache/s1.flac')]
+    pl.say('player-status', 'exit')
+    pl.pump(1.0)
+    assert pl.songs()[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3'), "the m3u's next song follows"
+    sock.close()
+
+
+def test_a_catplay_unanswered_plays_the_card_songs_alone(run):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [1, SERVER + 1, 2], 1)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    pl.pump(5.0)
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/b.mp3')], 'after 4 s, the card song at or after the one chosen'
+    sock.close()
+
+
+def test_a_list_whose_app_is_not_running_plays_its_card_songs_at_once(run):
+    root, pl = run
+    catalogue(root, listening=False)
+    play_list(root, [SERVER + 1, 3], 0)
+    pl.pump(1.0)
+    assert not (root/'tmp/q2-navi.catplay').exists()
+    assert pl.songs() == [('set-songurl', '/mnt/mmc/Music/c%0x7dd.flac')]
+
+
+def test_an_answer_to_an_older_catplay_is_not_taken(run):
+    root, pl = run
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    (root/'tmp/navi.m3u').write_text('/mnt/mmc/.navi/cache/old.flac\n')
+    (root/'tmp/q2-navi.play').write_text('7 /tmp/navi.m3u\n')
+    pl.pump(1.0)
+    assert pl.songs() == []
+    sock.close()
