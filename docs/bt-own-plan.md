@@ -13,6 +13,9 @@ suspect at a time, and adds the launcher's own rows. Results go back into those 
 - The owner's headsets: at least one that offers AAC and one that offers LDAC (any of aptX and aptX HD too), a
   car or a headset that shows the track, the phone with the Car Remote app, and a phone that can play to the Q2
   (the receiver page, Guest Play). Note each device by a letter in the results, never by its name or address.
+- Stock's `hcidump`, which every build leaves out (`DEBUG_TOOLS`, [building](building.md)), pushed for the
+  captures: `tools/mac/q2env unsquashfs -cat "$B/stock.squashfs" usr/bin/hcidump > /tmp/hcidump`, then
+  `adb push /tmp/hcidump /tmp/ && adb shell chmod 755 /tmp/hcidump` (it links the rootfs's own `libbluetooth`).
 - The unified log ([internals](internals.md#unified-log)): `adb pull /mnt/mmc/.q2muse/logs/q2-log.0` after each
   step, and the `q2-bt` log beside it. The launcher's lines are source `bt`, words `bluez:` or `bluealsa:`.
 
@@ -40,7 +43,7 @@ starts again from the key, whatever fell back.
 | # | Step | Pass |
 | --- | --- | --- |
 | 1.1 | Set `BLUEZ=1`, Bluetooth off and on | the log has `bluez: Vamp's /usr/lib/vamp-bluez/bluetoothd, pid N` and `bluez: org.bluez up after Ns` (note N s); `ps` shows `bluetoothd` the child of `bt-watch`; `pidof bluetoothd` prints one pid |
-| 1.2 | **Discoverable** (the failure of 2026-11-26, [bluez: Not discoverable](bluez.md#not-discoverable)): before step 1.1's Bluetooth on, start `hcidump -X -t > /tmp/hci.txt 2>&1 &` (stock's; the own build has no `btmon`), then Bluetooth on, then open Settings > Bluetooth so demo sets Discoverable. Stop it after 30 s and pull `/tmp/hci.txt`. Then `hciconfig hci0` | `UP RUNNING PSCAN ISCAN`, or, if `ISCAN` is missing: the command whose Command Complete carries a non-zero status just before the `Set Discoverable` failure, written into bluez.md with its status. Run it twice: Bluetooth from the page, and with Bluetooth already on when the key is set |
+| 1.2 | **Discoverable** (the failure of 2026-11-26, [bluez: Not discoverable](bluez.md#not-discoverable)): before step 1.1's Bluetooth on, start `/tmp/hcidump -X -t > /tmp/hci.txt 2>&1 &` (stock's, pushed above; the own build has no `btmon`), then Bluetooth on, then open Settings > Bluetooth so demo sets Discoverable. Stop it after 30 s and pull `/tmp/hci.txt`. Then `hciconfig hci0` | `UP RUNNING PSCAN ISCAN`, or, if `ISCAN` is missing: the command whose Command Complete carries a non-zero status just before the `Set Discoverable` failure, written into bluez.md with its status. Run it twice: Bluetooth from the page, and with Bluetooth already on when the key is set |
 | 1.3 | `hciconfig hci0 class` after Bluetooth on; then `btmgmt info` is not in the image, so `dbus-send --system --print-reply --dest=org.bluez /org/bluez/hci0 org.freedesktop.DBus.Properties.Get string:org.bluez.Adapter1 string:Class` | the class stock gives (`0x20041c`), so a phone lists the Q2 as audio |
 | 1.4 | **Pairing kept**: headset A (paired under stock) switched on | it connects with no pairing prompt; the Bluetooth page lists every paired device as before |
 | 1.5 | **A2DP per codec** with stock's bluealsa: AAC, then SBC, then LDAC and aptX HD where the headset has them, each chosen on the Quality page, a song a minute each | audio each time; the codec the Bluetooth page names is the one chosen (Shanling's codec priority is ported, [bluez: Shanling's changes](bluez.md#shanlings-changes)); `q2-bt` log `CODEC` lines |
@@ -49,7 +52,7 @@ starts again from the key, whatever fell back.
 | 1.8 | **Reconnect**: headset off and on, three times; out of range and back; the Q2 rebooted with the headset on (the key stays set) | it comes back each time; note how long from on to audio, against the same steps on stock |
 | 1.9 | **A new pairing** under ours from the Bluetooth page (headset B, after Forget on it) | the pairing card or none, as on stock; audio plays |
 | 1.10 | **The phone app's BLE link** (`[GATT] Server = false`, [bluez: The LE attribute channel](bluez.md#the-le-attribute-channel)): Car Remote on, the phone app connects over BLE | the app finds the Q2's service and controls playback; `/tmp/coda-rc.log` shows the connection; no pairing card |
-| 1.11 | **The BLE pairing prompt** ([bluez: The BLE pairing prompt](bluez.md#the-ble-pairing-prompt)), if it appears in 1.10 or on stock: `hcidump -X` running while the app connects | the first SMP packet and who sent it, written into bluez.md |
+| 1.11 | **The BLE pairing prompt** ([bluez: The BLE pairing prompt](bluez.md#the-ble-pairing-prompt)), if it appears in 1.10 or on stock: `/tmp/hcidump -X` running while the app connects | the first SMP packet and who sent it, written into bluez.md |
 | 1.12 | The receiver page: a phone plays to the Q2 | the receiver page opens with the phone's title |
 | 1.13 | **Memory and CPU**: as step 0.2, under ours | within a few hundred kB of stock's and no more CPU (the first run measured 5,120 kB against 7,136 kB) |
 | 1.14 | **Fallback by crashes**: while playing, `kill -SEGV $(pidof bluetoothd)` three times, each once the log says `up after` again | two `W bt bluez: Vamp's daemon ended (status 139), started again` lines, then `E bt bluez: Vamp's daemon ended 3 times in 120s ...; stock's for the rest of this boot`; `/tmp/q2-bt/bluez.fallback` exists; stock's runs (`ls -l /proc/$(pidof bluetoothd)/exe` is `/usr/lib/bluez-stock/bluetoothd`); headset A reconnects |

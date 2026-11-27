@@ -15,9 +15,10 @@ browsing, then cover art on q2-bip's PSM. The stock binary's helper, called the 
 
 Usage: python3 test/bluetoothd.py BUILD_DIRECTORY (needs unsquashfs, readelf and Unicorn).
 """
-import pathlib, struct, subprocess, sys
+import json, pathlib, struct, subprocess, sys
 from unicorn.mips_const import *
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
+from build import stock_program  # noqa: E402
 from build import (BLUETOOTHD, BLUETOOTHD_SHA, BT_COVER_PSM, BT_META, BT_META_GOT, BT_META_SLOT, BT_PLAY_FILE, BT_PLAY_SLOT,
                    BT_SDP_GOT, BT_SDP_JUMP,
                    BT_SDP_WORDS, fileoff, load_elf, segments, sha, word)
@@ -267,9 +268,10 @@ def check_sdp(stock, patched):
 
 def check(directory):
     directory = pathlib.Path(directory)
-    def extract(name):
-        return subprocess.check_output(['unsquashfs', '-cat', str(directory / name), BLUETOOTHD])
-    stock, patched = extract('stock.squashfs'), extract('rootfs.squashfs')
+    manifest = json.loads((directory / 'manifest.json').read_text())
+    def extract(name, path=BLUETOOTHD):
+        return subprocess.check_output(['unsquashfs', '-cat', str(directory / name), path])
+    stock, patched = extract('stock.squashfs'), extract('rootfs.squashfs', stock_program(BLUETOOTHD, manifest))
     assert sha(stock) == BLUETOOTHD_SHA
     site, pdu_word, handler = BT_META_SLOT
     # Only the table word, the program header that maps the appended code and the SDP record's sites differ.

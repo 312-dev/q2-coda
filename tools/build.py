@@ -536,6 +536,16 @@ STOCK_BLUEZ_DIR, STOCK_BLUEALSA_DIR = 'usr/lib/bluez-stock', 'usr/lib/bluealsa-s
 BLUEALSA_APLAY = 'usr/bin/bluealsa-aplay'
 # ... and which ALSA plugins `bluealsa` loads: the links in /tmp the launcher points at stock's pair or ours
 BT_PLUGINS_CONF = 'usr/share/alsa/alsa.conf.d/25-vamp-bluealsa.conf'
+
+
+def stock_program(path, manifest):
+    """Where the build that wrote manifest keeps stock's program at path (bluetoothd, bluealsa, bluealsa-aplay,
+    patched or not): moved aside where the launcher stands at path, else at path."""
+    if path == BLUETOOTHD and 'own_bluez' in manifest:
+        return f'{STOCK_BLUEZ_DIR}/bluetoothd'
+    if path in (BLUEALSA, BLUEALSA_APLAY) and 'own_bluealsa' in manifest:
+        return f'{STOCK_BLUEALSA_DIR}/{path.rsplit("/", 1)[1]}'
+    return path
 # --dev only (docs/adb.md#installing-an-update-over-adb, patch/q2update.sh): Software Update's card path from a
 # computer, through demo's q2update_poll (patch/sw_update.c)
 Q2UPDATE = 'usr/bin/q2update'

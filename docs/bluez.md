@@ -439,7 +439,7 @@ What phase 2 has done that only a Q2 can confirm, in the order to try it:
 2. **Not discoverable**: the `btmon` capture of [Not discoverable](#not-discoverable), with the failing command and its status written here.
 3. **Shanling's `hciconfig` calls around ours** (`class`, `sspmode`, `auth`): the class `hciconfig hci0 class` reads after each, and the Q2 still discoverable once the capture's cause is fixed.
 
-`test/bluez_own.py`'s Class checks fail for both daemons when it is run with STOCKFS on the MacBook (the controller is sent `01 04`, not `04 1c`, under both); they did before this change too (measured with the harness at `4fa14209`), and this page's earlier figure of 49 passing was measured with a BUILD. Not traced; inferred to be the harness's or the STOCKFS copy's rather than either daemon's, since both send the same bytes.
+`test/bluez_own.py`'s Class checks fail for both daemons when it is run on the MacBook, with STOCKFS and (2026-11-27, `feat/bt-own`'s affected run) with a BUILD alike (the controller is sent `01 04`, not `04 1c`, under both); they did before this change too (measured with the harness at `4fa14209`), and this page's earlier figure of 49 passing was measured with a BUILD. Not traced; inferred to be the harness's or the STOCKFS copy's rather than either daemon's, since both send the same bytes.
 
 ## Risks
 
