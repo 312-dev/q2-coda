@@ -143,6 +143,7 @@ def run(binary, shim, tmp_path, config):
     env = dict(os.environ, LD_PRELOAD=str(shim), Q2_IOCTL_LOG=str(tmp_path/'dac.log'))
     p = subprocess.Popen([str(binary), '--root', str(tmp_path)], stderr=subprocess.PIPE, env=env)
     player = Player(tmp_path)
+    wait_for(tmp_path/'tmp/coda-rc.cmdq', 5)  # made after the player's socket, which Player waited for
     yield tmp_path, player
     p.terminate()
     assert p.wait(5) == 0, 'q2playd ends on SIGTERM'
@@ -854,6 +855,27 @@ def test_a_speaker_takes_the_volume_and_the_earphones_get_theirs_back(run):
     tap.set('state', 0)
     time.sleep(0.8)
     assert now(root, 0)['volume'] == '37' and dac(root)[-1] == (37, 37) and tap.get('volume') == -1
+
+
+def test_a_speaker_over_bluetooth_keeps_the_headset_s_level_and_leaves_the_dac(run):
+    """AirPlay's speaker while the output is Bluetooth: the headset's level is BT_VOLUME's, kept and given back, and
+    neither VOLUME (the DAC's) nor the DAC itself is touched"""
+    root, pl = run
+    fifo(root, 'output bluetooth')
+    pl.pump()
+    fifo(root, 'volume 20')
+    pl.pump()
+    before = dac(root)
+    tap = Tap(root, state=2)
+    time.sleep(1.5)
+    assert tap.get('volume') == 35
+    tap.set('state', 0)
+    time.sleep(0.8)
+    pl.pump()
+    cfg = (root/'mnt/data/config.ini').read_text()
+    assert now(root, 0)['volume'] == '20' and dac(root) == before, (now(root, 0)['volume'], dac(root), before)
+    assert 'BT_VOLUME=20' in cfg and 'VOLUME=37' in cfg.replace('BT_VOLUME', ''), cfg
+    assert pl.got[-1] == ('mcl-setvol', str(100 << 8 | 100)), "the headset's level, the player at unity"
 
 
 def test_the_speaker_s_own_level_is_taken_and_a_stale_beat_lets_go(run):

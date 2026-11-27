@@ -1066,15 +1066,15 @@ static int air_speaker(void) {
 static void air_swap(int on) {
     if (on) {
         air_vol.local = q.volume, air_vol.limit = max_volume;
-        ini_set("PLAYSET", "VOLUME", q.volume);
+        ini_set("PLAYSET", way ? "BT_VOLUME" : "VOLUME", q.volume); /* the output's own level (volume_save) */
         air_vol.on = 1, max_volume = 100;
         q.volume = air_speaker();
     } else {
         ini_set("Q2POD", "AIRVOL", q.volume);
         air_vol.on = 0, max_volume = air_vol.limit;
         q.volume = air_vol.local > max_volume ? max_volume : air_vol.local;
-        dac_volume();
-        ini_set("PLAYSET", "VOLUME", q.volume);
+        volume_apply();
+        ini_set("PLAYSET", way ? "BT_VOLUME" : "VOLUME", q.volume);
     }
     volume_dirty_at = 0, ++q.seq;
 }
