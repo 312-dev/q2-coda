@@ -50,6 +50,7 @@
  * machine's speed, for tests and recordings (docs/ui-rewrite.md#scripts); --trace writes a line
  * a frame of the list's motion (or the top page's own, ui_page.trace) while it runs, and --clock fixes the status row's clock so two
  * runs give the same picture. */
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -561,6 +562,12 @@ static void restart(void) {
 
 int main(int argc, char **argv) {
     char regular[256], medium[256], fallback[256];
+    /* SIGHUP held from the first instruction: one that comes while the fonts, the library, the panel and input open
+     * (Vamp OS's q2libd sends `sv hup` after its first library write) waits, and the loop's wait lets it in once its
+     * handler is set (ui.c ui_run), where it starts q2ui again in place. Let in now, its default action ends q2ui. */
+    sigset_t hup;
+    sigemptyset(&hup), sigaddset(&hup, SIGHUP);
+    sigprocmask(SIG_BLOCK, &hup, 0);
     started_with = argv, ui_restart = restart;
     uint64_t t0 = mono_us();
     parse_file("/mnt/data/q2ui.args");

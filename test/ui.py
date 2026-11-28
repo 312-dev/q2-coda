@@ -2379,6 +2379,24 @@ def panel(binary, work):
     return good
 
 
+def early_hup(binary, work):
+    """A SIGHUP that comes while q2ui is still starting (q2libd's `sv hup` after its first library write, in Vamp OS) is
+    held until the loop runs and then starts it again in place: it neither ends the program nor is lost."""
+    d = folder(work, 20)
+    proc = subprocess.Popen(base_args(binary, d) + ['--page', 'home'])
+    time.sleep(0.005)  # long before the loop: fonts, the library, the panel and input are still opening
+    proc.send_signal(signal.SIGHUP)
+    try:
+        code = proc.wait(timeout=2.5)
+    except subprocess.TimeoutExpired:
+        code = None
+    alive = code is None and (d/'stats.json').exists()
+    if code is None:
+        proc.kill()
+        proc.wait(timeout=5)
+    return check('a SIGHUP in the first milliseconds is held until q2ui runs, and does not end it', alive, f'exit {code}')
+
+
 def reload(binary, work):
     """kill -HUP: q2ui starts itself again in place, the same process, on the pages it had open, with demo's settings
     pipe (--ctl) still open: it has no other way back."""
@@ -3182,6 +3200,7 @@ def main():
             good &= live_stats(binary, work)
             good &= routes(binary, work)
             good &= reload(binary, work)
+            good &= early_hup(binary, work)
             good &= swap(binary, work)
         if not only or 'panel' in only:
             good &= panel(binary, work)

@@ -402,7 +402,7 @@ void ui_unwatch(int fd) {
  * old one was, take effect with no restart of the Q2 and without demo's gate seeing anything end.
  * If that cannot be done it ends with UI_EXIT_RELOAD, on which a gate that knows the code starts
  * it again (patch/q2ui_gate.c). The signal is held back everywhere but in the loop's wait
- * (ppoll), so it always ends a wait and is seen at once: let in anywhere else, one that came
+ * (ppoll), from main's first line (main.c) on, so one sent while q2ui starts waits for the loop; it always ends a wait and is seen at once: let in anywhere else, one that came
  * between the loop's look at it and its next wait was seen only when that wait ended, at rest up
  * to a minute later. */
 void (*ui_restart)(void);
