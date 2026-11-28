@@ -268,7 +268,8 @@ Every file in `patch/` and `tools/`, and `test/` by group: what it is for, where
 | `card.c`            | A card of layers at different depths                                                    | [Cards](ui-rewrite.md#cards)                    |
 | `status.c`, `theme.c` | The status row; the theme's tokens                                                    | [Themes](ui-rewrite.md#themes-light-mode-night-shift) |
 | `lib.c`             | The library's songs from `database.db` and the server catalogue, and their lengths      | [The library](ui-rewrite.md#the-library)        |
-| `player.c`          | Play and transport, sent down demo's command queue while demo owns the player           | [Cutover](ui-rewrite.md#cutover)                |
+| `player.c`          | Play and transport: on Q2PLAY/1 for the words it serves on Vamp OS, else down the command queue (demo's, or q2playd's) | [Cutover](ui-rewrite.md#cutover)                |
+| `api.c`             | Vamp OS's services spoken to directly (Vamp API 1): Q2PLAY/1's verbs and what plays     | [Cutover](ui-rewrite.md#cutover)                |
 | `page_songs.c`      | Library > Songs                                                                         | [Parity](ui-rewrite.md#parity)                  |
 | `page_menu.c`       | The menu sheet over a page (a song's hold menu's): its recession, material, header and rows | [Parity](ui-rewrite.md#parity)                |
 | `page_edit.c`       | A list's own order and choice of rows (demo's order files) and Edit Library, its editor | [Parity](ui-rewrite.md#parity)                |

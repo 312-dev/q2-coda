@@ -345,6 +345,7 @@ long status_time(void);           /* the time the clock reads */
 /* where the battery, Wi-Fi's state and its signal are read (a test's are its own files) */
 extern const char *status_power, *status_wifi, *status_wireless, *status_told;
 void status_told_changed(void); /* demo's file of the states only it knows changed (now.c's watch) */
+const char *status_told_text(void); /* those states' text, the file's or on Vamp OS the services' */
 int status_told_value(const char *key, char *out, size_t room); /* demo's word on key; 0 when it said nothing */
 int status_wifi_bars(void); /* the link as the row draws it: 0 not joined, 1 to 3 its fan's lit parts, 4 joined with no internet */
 
@@ -525,6 +526,19 @@ extern const char *art_dir;
 extern int art_sync; /* read in place, not by the worker: a script's, so its pictures repeat */
 unsigned now_cover_seq(void);
 extern const char *now_file, *now_cover_file;
+
+/* ---- api.c: Vamp API 1's services, on Vamp OS (--api auto|demo) ---- */
+extern const char *api_dir, *api_choice; /* the services' folder (/run/vamp); auto, demo or vamp */
+extern int api_vamp;                     /* 1: the services are spoken to, 0: demo's pipe and files */
+void api_open(void);
+int api_field(const char *line, const char *key, char *out, size_t room); /* key=VALUE, percent-decoded; 0 absent */
+int api_play_has(const char *word);                   /* Q2PLAY/1's caps name the word */
+int api_play_send(const char *verb);                  /* a verb to Q2PLAY/1; 0 sent */
+int api_play_list(const char *head, const int *ids, int n); /* play or queue and its N id lines; 0 sent */
+int api_now_overlay(ui_now *n);                       /* Q2PLAY/1's now over the file's; 1 when it said one */
+int api_play_live(void);                              /* connected to Q2PLAY/1 */
+void api_wait(unsigned ms);                           /* a script's wait for every answer, up to ms */
+int api_told(char *out, size_t room); /* the status row's states from Q2SYS/1, Q2BT/1 and Q2NET/1 as /tmp/q2ui.status has them; 0 off Vamp OS */
 
 /* ---- player.c: the player, through demo while demo owns it ---- */
 int player_play(const int *ids, int n, int at, int shuffle); /* the list, starting at its song `at`; 0 sent */

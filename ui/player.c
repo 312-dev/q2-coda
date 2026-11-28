@@ -5,8 +5,8 @@
  * queue open while q2ui has the screen (patch/q2ui_gate.c). A setting of demo's (Control Center's
  * switches, Display's choices) goes instead down a pipe demo gives q2ui alone as it starts it, the fd's
  * number after --ctl, as "set NAME VALUE\n" (patch/q2ui_gate.c ctl): the queue, which the phone's
- * daemon writes too, takes no settings. When q2ui owns the player's socket itself, this file is what
- * changes. */
+ * daemon writes too, takes no settings. On Vamp OS (ui/api.c) a verb Q2PLAY/1's caps name goes to its socket
+ * instead, and the rest to the same FIFO and list file, which q2playd serves there as demo's shim does here. */
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,11 +18,13 @@
 
 #define PLAY_LIST "/tmp/coda-rc.list"
 #define PLAY_MAX 20000 /* songs one play may queue (coda_rc_shim.c CR_LIST_MAX) */
+#define API_PLAY_MAX 1000 /* and on Q2PLAY/1 (docs/platform/playback.md: play's N) */
 
 const char *player_queue = CRC_CMDQ, *player_list = PLAY_LIST;
 
 int player_send(const char *verb) {
     static unsigned seq;
+    if (!api_play_send(verb)) return 0; /* Vamp OS's Q2PLAY/1, for a word it serves (ui/api.c) */
     char line[CRC_CMDQ_LINE];
     if (!seq) seq = (unsigned)(mono_us() / 1000u) | 1; /* never a number an earlier q2ui used */
     int n = snprintf(line, sizeof line, "%u %s\n", ++seq & 0x3fffffff, verb);
@@ -81,6 +83,13 @@ int player_play(const int *ids, int n, int at, int shuffle) {
         if (from + PLAY_MAX > n) from = n - PLAY_MAX;
         ids += from, at -= from, n = PLAY_MAX;
     }
+    if (api_play_has("play")) { /* Q2PLAY/1 takes 1 to 1000 ids: the 1000 round the song chosen */
+        int from = at - API_PLAY_MAX / 2 < 0 ? 0 : at - API_PLAY_MAX / 2;
+        if (n > API_PLAY_MAX && from + API_PLAY_MAX > n) from = n - API_PLAY_MAX;
+        if (n > API_PLAY_MAX) ids += from, at -= from, n = API_PLAY_MAX;
+        snprintf(verb, sizeof verb, "play %d %d %d", at, shuffle, n);
+        return api_play_list(verb, ids, n);
+    }
     if (list_write(ids, n)) return -1;
     snprintf(verb, sizeof verb, "play %d %d %d", at, shuffle, n);
     return player_send(verb);
@@ -89,7 +98,8 @@ int player_play(const int *ids, int n, int at, int shuffle) {
 int player_enqueue(const int *ids, int n, int next) {
     char verb[32];
     if (n > PLAY_MAX) n = PLAY_MAX;
-    if (list_write(ids, n)) return -1;
     snprintf(verb, sizeof verb, "queue %s %d", next ? "next" : "last", n);
+    if (api_play_has("queue")) return api_play_list(verb, ids, n < API_PLAY_MAX ? n : API_PLAY_MAX);
+    if (list_write(ids, n)) return -1;
     return player_send(verb);
 }
