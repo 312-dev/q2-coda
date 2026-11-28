@@ -395,7 +395,7 @@ def test_q2play1_watchers_hear_each_change(run):
     play_list(root, [2], 0)
     pl.pump()
     line = a.line()
-    assert line.startswith('now title=Beta ') and ' state=1 ' in line and line.endswith(' id=2')
+    assert line.startswith('now title=Beta ') and ' state=1 ' in line and ' id=2 ' in line
 
 
 def fields(line):
@@ -1442,6 +1442,71 @@ def test_set_mode_saves_stock_s_keys_as_now_playing_s_two_controls_do(run):
     assert (c['IPOD.NPSHUFONE'], c['IPOD.NPREPOFF']) == ('0', '1'), c
     send(root, '90 mode 2 0', '91 mode -1 3')
     assert wait_for_value(lambda: acks(root)[:2], [(91, 1), (90, 1)]), acks(root)
+
+
+def test_q2play_queue_next_and_last_take_their_ids_on_the_socket(run):
+    """Q2PLAY/1's Play Next and Play Last: the FIFO's queue next|last with the N ids on the lines after it"""
+    root, pl = run
+    a = api(root)
+    a.say('play 0 0 3')
+    for i in (1, 2, 3):
+        a.say(str(i))
+    assert a.line() == 'ok'
+    pl.pump()
+    a.say('queue next 2')
+    a.say('5')
+    a.say('6')
+    assert a.line() == 'ok'
+    a.say('queue last 1')
+    a.say('2')
+    assert a.line() == 'ok'
+    assert wait_for_value(lambda: queue_file(root)[1], ['1', '5', '6', '2', '3', '2']), queue_file(root)
+    assert [s for _, s in pl.songs()] == ['/mnt/mmc/Music/a.flac'], 'the song playing goes on'
+    a.say('queue next 0')
+    assert a.line() == 'err queue next 0'
+    a.say('queue soon 1')
+    assert a.line() == 'err queue soon 1'
+    a.say('source http://192.0.2.1/a.flac')
+    assert a.line() == 'ok'
+    a.say('queue last 1')
+    a.say('3')
+    assert a.line() == 'err queue', 'a source keeps its own queue'
+
+
+def test_q2play_mode_is_the_fifo_s_and_now_ends_with_shuffle_and_repeat(run):
+    """Q2PLAY/1 mode SHUFFLE REPEAT as the FIFO's (-1 leaves either), and now's shuffle= and repeat= as the now file's"""
+    root, pl = run
+    a = api(root)
+    a.say('play 0 0 3')
+    for i in (1, 2, 3):
+        a.say(str(i))
+    assert a.line() == 'ok'
+    a.say('now')
+    assert a.line().endswith(' id=1 shuffle=0 repeat=0')
+    for verb, want in (('mode -1 2', ' shuffle=0 repeat=2'), ('mode 1 -1', ' shuffle=1 repeat=2'), ('mode -1 1', ' shuffle=1 repeat=1')):
+        a.say(verb)
+        assert a.line() == 'ok'
+        a.say('now')
+        line = a.line()
+        assert line.endswith(want), (verb, line)
+        n = now(root)
+        assert ' shuffle=%s repeat=%s' % (n['shuffle'], n['repeat']) == want, (verb, n)
+    assert ini(root).get('PLAYSET.PLAYMODE') == '1'
+    a.say('mode 2 0')
+    assert a.line() == 'err mode 2 0'
+
+
+def test_q2play_play_takes_as_many_ids_as_the_fifo(run):
+    """QUEUE_MAX, 20000: q2ui's PLAY_MAX, as the FIFO's list file"""
+    root, pl = run
+    a = api(root)
+    a.say('play 0 0 20001')
+    assert a.line() == 'err play'
+    a.say('play 19999 0 20000')
+    a.f.write(''.join(f'{1 + i % 3}\n' for i in range(20000)))
+    a.f.flush()
+    assert a.line() == 'ok'
+    assert wait_for_value(lambda: now(root).get('qlen'), '5000'), 'the queue past QUEUE_LISTED listed as its 5000'
 
 
 def test_shuffle_turned_on_keeps_the_song_playing_first_and_off_gives_the_order_back(run):

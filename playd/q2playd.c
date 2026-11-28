@@ -3038,18 +3038,15 @@ static int jump(int line, int id) {
 }
 
 /* q2ui's Play Next and Play Last (ui/player.c player_enqueue, the shim's "queue next|last N": library_pages.c
- * queue_apply), the FIFO's alone: the list file's N ids put after the song playing in the play order (next) or after
- * the last (last), the song playing left alone; with nothing queued, loaded as the queue and not started. A source's
- * URL and a server list's answer, which keep their own queue, refuse it, as stock's streams do. */
-static int enqueue(int next, int n) {
+ * queue_apply; Q2PLAY/1's queue): n ids put after the song playing in the play order (next) or after the last
+ * (last), the song playing left alone; with nothing queued, loaded as the queue and not started. A source's URL and a
+ * server list's answer, which keep their own queue, refuse it, as stock's streams do. */
+static int enqueue_ids(int next, const int *ids, int n) {
     if (src.on || q.paths || n <= 0) return -1;
     gapless_forget();
     if (n > QUEUE_MAX - q.n) n = QUEUE_MAX - q.n;
     if (n <= 0) return -1;
-    int got = read_list(pending_ids);
-    if (got < n) n = got;
-    if (n <= 0) return -1;
-    memcpy(q.ids + q.n, pending_ids, (size_t)n * sizeof *q.ids);
+    memcpy(q.ids + q.n, ids, (size_t)n * sizeof *q.ids);
     if (!q.n) { /* nothing queued: loaded, stopped at its first song */
         for (int i = 0; i < n; ++i) q.order[i] = i;
         q.n = n, q.at = 0, q.shuffle = 0, q.errors = 0, ++q.list, ++q.seq;
@@ -3060,6 +3057,14 @@ static int enqueue(int next, int n) {
     for (int i = 0; i < n; ++i) q.order[at + i] = q.n + i;
     q.n += n, ++q.seq;
     return 0;
+}
+
+/* the FIFO's: the list file's first n ids */
+static int enqueue(int next, int n) {
+    if (src.on || q.paths || n <= 0) return -1;
+    gapless_forget();
+    int got = read_list(pending_ids);
+    return enqueue_ids(next, pending_ids, got < n ? got : n);
 }
 
 static char cq[2048];
@@ -3116,8 +3121,11 @@ static void now_text(char *out, size_t room, const char *sep, int encode) {
     char t[800], a[800], b[800];
     int id = playing_id();
     field(t, sizeof t, q.title, encode), field(a, sizeof a, q.artist, encode), field(b, sizeof b, q.album, encode);
-    snprintf(out, room, "title=%s%sartist=%s%salbum=%s%sstate=%d%spos=%d%slen=%d%svolume=%d%sid=%d", t, sep, a, sep, b, sep,
-             q.state, sep, encode ? q.pos_ms / 1000 : q.pos_ms, sep, q.len_s, sep, q.volume, sep, id);
+    int k = snprintf(out, room, "title=%s%sartist=%s%salbum=%s%sstate=%d%spos=%d%slen=%d%svolume=%d%sid=%d", t, sep, a, sep, b,
+                     sep, q.state, sep, encode ? q.pos_ms / 1000 : q.pos_ms, sep, q.len_s, sep, q.volume, sep, id);
+    /* Q2PLAY/1's: the play mode as the now file has it after these (now_write) */
+    if (encode && k > 0 && (size_t)k < room)
+        snprintf(out + k, room - (size_t)k, " shuffle=%d repeat=%d", q.shuffle != 0 || pm_shuffle(), pm_repeat());
 }
 
 /* Car Remote's view of the queue (coda_rc_shim.c cr_queue, read by coda_rc_lib.c's GetQueue): /tmp/coda-rc.queue,
@@ -3228,7 +3236,8 @@ static void now_write(void) {
     if (fclose(f) == 0) rename(tmp, path(now_path_rel)); /* whole or not at all */
 }
 
-static struct client { int fd, hello, watch; char in[LINE]; size_t n; int want_ids, got_ids, a, b; } cl[CLIENTS];
+/* want_ids: the ids still to come after a play (queue 0) or a queue next (1) or last (2) */
+static struct client { int fd, hello, watch; char in[LINE]; size_t n; int want_ids, got_ids, a, b, queue; } cl[CLIENTS];
 #define SAY_MAX 2700 /* a line out: three encoded fields at most 3 x 255 x 3 bytes, and the rest */
 static void client_say(struct client *c, const char *fmt, ...);
 
@@ -3364,20 +3373,26 @@ static void client_line(struct client *c, char *line) {
         if (c->got_ids == c->want_ids) {
             char verb[48];
             snprintf(verb, sizeof verb, "play %d %d %d", c->a, c->b, c->want_ids);
-            int r = command(verb, pending_ids, c->want_ids);
+            int r = c->queue ? enqueue_ids(c->queue == 1, pending_ids, c->want_ids) : command(verb, pending_ids, c->want_ids);
             c->want_ids = 0;
-            client_say(c, r ? "err play" : "ok");
+            client_say(c, !r ? "ok" : c->queue ? "err queue" : "err play");
         }
         return;
     }
     int a, b, n;
+    char where[8];
     if (sscanf(line, "play %d %d %d", &a, &b, &n) == 3) {
         if (n <= 0 || n > QUEUE_MAX || a < 0 || a >= n) { client_say(c, "err play"); return; }
-        c->want_ids = n, c->got_ids = 0, c->a = a, c->b = b;
+        c->want_ids = n, c->got_ids = 0, c->a = a, c->b = b, c->queue = 0;
+        return;
+    }
+    if (sscanf(line, "queue %7s %d%n", where, &a, &n) == 2 && !line[n] && (!strcmp(where, "next") || !strcmp(where, "last")) &&
+        a > 0 && a <= QUEUE_MAX) {
+        c->want_ids = a, c->got_ids = 0, c->queue = where[0] == 'n' ? 1 : 2;
         return;
     }
     if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq");
+        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode");
     } else if (!strncmp(line, "source ", 7)) {
         client_say(c, source_take((int)(c - cl), line + 7) ? "err source" : "ok");
     } else if (!strcmp(line, "focus")) {
@@ -3405,6 +3420,8 @@ static void client_line(struct client *c, char *line) {
          * only while the queue's player owns the output, as clicker.c sends it only while the Library's does */
         if (player < 0 || src.on) client_say(c, "err click");
         else player_send("mcl-click", line + 6), client_say(c, "ok");
+    } else if (sscanf(line, "mode %d %d%n", &a, &b, &n) == 2 && !line[n]) { /* the FIFO's mode */
+        client_say(c, set_mode(a, b) ? "err %s" : "ok", line);
     } else if (!strcmp(line, "eq")) {
         int m = eq_mode();
         client_say(c, "eq on=%d mode=%s", m != EQ_OFF, m == EQ_PEQ ? "peq" : m == EQ_3 ? "3eq" : "off");

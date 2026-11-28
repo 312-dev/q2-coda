@@ -141,7 +141,7 @@ def main():
                   "the image's rcS took the card boot's path: data kept, modules not loaded again"
                   + ('' if 'data: already mounted' in boot else f" ({[l for l in boot.splitlines() if 'data:' in l or 'modules:' in l]})"))
             check(drew, "the image's q2ui drew into the framebuffer")
-            check(replies[:2] == ['Q2PLAY/1 ok', 'ok'] and len(replies) > 2 and ' state=1 ' in replies[2] and replies[2].endswith(' id=1'),
+            check(replies[:2] == ['Q2PLAY/1 ok', 'ok'] and len(replies) > 2 and ' state=1 ' in replies[2] and ' id=1 ' in replies[2],
                   f"a song played over the image's Q2PLAY/1 from the card's library ({replies})")
         finally:
             handoff.kill()

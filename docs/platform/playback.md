@@ -4,7 +4,9 @@
 
 | Command | Answer |
 | --- | --- |
-| `play AT SHUFFLE N`, then N lines of one song id each | `ok` once the N ids are read (`err play` for an N outside 1 to 1000 or an AT outside the list). A new queue from the song at AT; SHUFFLE 1 plays that one first and the rest in a random order, each once |
+| `play AT SHUFFLE N`, then N lines of one song id each | `ok` once the N ids are read (`err play` for an N outside 1 to 20000 or an AT outside the list). A new queue from the song at AT; SHUFFLE 1 plays that one first and the rest in a random order, each once |
+| `queue next N`, `queue last N`, then N lines of one song id each | `ok` once the N ids are read: Play Next puts them after the song playing, Play Last after the last; with nothing queued they are loaded as the queue, not started. `err queue` while a source or an app's list plays (they keep their own), or with none of the ids taken; `err queue next N` for an N outside 1 to 20000 |
+| `mode SHUFFLE REPEAT` | `ok`: shuffle 0 or 1, repeat 0 Off, 1 One, 2 All, -1 leaving either; saved as Now Playing's two controls save them ([q2playd: The play mode](../playd.md#the-play-mode)). `err mode S R` for another value |
 | `toggle`, `pause`, `resume` | `ok` |
 | `next`, `previous` | `ok`; `previous` more than 3 s into a song starts it again |
 | `seek S` | `ok`, to S seconds |
@@ -24,7 +26,7 @@
 | `click wheel`, `click button`, `click beep` | `ok`: the Clicker's click mixed into what the player plays ([q2playd: Key Tone](../playd.md#key-tone)); `err click` while a source holds the player or with no player |
 | `eq` | `eq on=O mode=M`: O 1 while an EQ plays; M `off`, `3eq` (the three-band EQ) or `peq` (the parametric EQ) |
 | `eq on`, `eq off` | `ok`: the EQ switch, Control Center's EQ circle ([q2playd: The EQ switch](../playd.md#the-eq-switch)). `on` plays the parametric EQ, or keeps an EQ already playing; `off` plays none. `err eq on` or `err eq off` when the state cannot be saved |
-| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq` |
+| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode` |
 
 ## Ratings
 
@@ -73,22 +75,22 @@ What plays is the queue's or one source's. A `source` takes the player for its c
 
 The holder is told, by a line between answers, when it loses the player for any reason but its own `focus release`: `focus lost why=W`, W `end` (the URL played out), `error` (it did not open, or the player went away), `stop` (a `stop` from anyone) or `taken` (a `play` from anyone, or another connection's `source`). On `end`, `error` and `focus release`, and when the holder's connection closes, the queue comes back **paused** where it was put aside (stopped, if it was), and `resume` plays it from there: it never starts again on its own. On `stop` it comes back stopped at its song; on `taken` by a `play` it is dropped, and by another connection's `source` it stays put aside for that one.
 
-**`now`** is `now` and these fields, in this order: `title`, `artist`, `album` (free text, percent-encoded), `state` (0 stopped, 1 playing, 2 paused), `pos` (seconds), `len` (seconds, 0 until the player knows), `volume`, `id` (the song's library id, 0 for a song played from an app's list of paths). Song ids are [the library's](library.md): a card song's from `songtable`, a server song's from `servertable` (ids from `0x40000000`), which plays through its app ([q2playd: Server songs](../playd.md#server-songs)).
+**`now`** is `now` and these fields, in this order: `title`, `artist`, `album` (free text, percent-encoded), `state` (0 stopped, 1 playing, 2 paused), `pos` (seconds), `len` (seconds, 0 until the player knows), `volume`, `id` (the song's library id, 0 for a song played from an app's list of paths), `shuffle` (1 while the queue plays shuffled), `repeat` (0 Off, 1 One, 2 All). A client reads the fields by name: more may follow. Song ids are [the library's](library.md): a card song's from `songtable`, a server song's from `servertable` (ids from `0x40000000`), which plays through its app ([q2playd: Server songs](../playd.md#server-songs)).
 
 ```conformance
 > Q2PLAY/1
 < Q2PLAY/1 ok
 > caps
-< caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq
+< caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode
 > now
-< ~ now title= artist= album= state=0 pos=0 len=0 volume=\d+ id=0
+< ~ now title= artist= album= state=0 pos=0 len=0 volume=\d+ id=0 shuffle=\d repeat=\d
 > play 1 0 3
 > 1
 > 2
 > 3
 < ok
 > now
-< ~ now title=Beta artist=Bob album=First state=1 pos=0 len=0 volume=\d+ id=2
+< ~ now title=Beta artist=Bob album=First state=1 pos=0 len=0 volume=\d+ id=2 shuffle=\d repeat=\d
 > pause
 < ok
 > toggle
@@ -98,6 +100,16 @@ The holder is told, by a line between answers, when it loses the player for any 
 > next
 < ok
 > previous
+< ok
+> queue next 1
+> 3
+< ok
+> queue last 1
+> 1
+< ok
+> mode -1 2
+< ok
+> mode -1 0
 < ok
 > seek 0
 < ok
@@ -124,7 +136,7 @@ The holder is told, by a line between answers, when it loses the player for any 
 > stop
 <* ~ now .*
 < ok
-< ~ now title=\S* artist=\S* album=\S* state=0 pos=\d+ len=\d+ volume=30 id=\d+
+< ~ now title=\S* artist=\S* album=\S* state=0 pos=\d+ len=\d+ volume=30 id=\d+ shuffle=\d repeat=\d
 > bogus
 < err bogus
 ```
@@ -146,7 +158,7 @@ A renderer plays a URL from a phone and gives the queue back (`=` in the URL enc
 > source http://192.168.1.20:8200/MediaItems/22.mp3?q%3D1 title=Delta artist=Dee album=Phone
 < ok
 > now
-< ~ now title=Delta artist=Dee album=Phone state=1 pos=0 len=0 volume=\d+ id=0
+< ~ now title=Delta artist=Dee album=Phone state=1 pos=0 len=0 volume=\d+ id=0 shuffle=\d repeat=\d
 > focus
 < focus source=1 held=1
 > next
@@ -156,7 +168,7 @@ A renderer plays a URL from a phone and gives the queue back (`=` in the URL enc
 > focus release
 < ok
 > now
-< ~ now title=Alpha artist=Ann album=First state=2 pos=0 len=0 volume=\d+ id=1
+< ~ now title=Alpha artist=Ann album=First state=2 pos=0 len=0 volume=\d+ id=1 shuffle=\d repeat=\d
 > focus release
 < err focus release
 ```
