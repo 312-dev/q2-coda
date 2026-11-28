@@ -3034,7 +3034,10 @@ def screen_dark(binary, work):
 def stats_rests(binary, work):
     """dropped counts refreshes a motion missed, not the rests between motions (a device read, 2026-11-28: 294 dropped
     against 180 frames, every motion frame one refresh after the last): ticks a rest apart, each glide played out,
-    report no drop and no gap over a refresh; over_budget leaves out the pan, which on the Q2 waits for the refresh."""
+    report no drop and no gap over a refresh. Home's ticks, and a page opened with Centre and closed with Return after a
+    rest, are the same: the motion that ends in a step that draws nothing, or in a wait at rest, has ended, and the next
+    one's first frame is no late frame (the device's 290 dropped were one such gap, 'more' of 4.9 s, its pre-drag rest).
+    A host run can be late now and then under load, so those two read the longest gap counted, under any rest's 0.8 s."""
     run = Run(binary, work, 400)
     try:
         run.rest()
@@ -3045,11 +3048,62 @@ def stats_rests(binary, work):
         s = run.rest()
         gaps = s.get('gap_hist_refreshes', {})
         moved = s['frames'] - base['frames']
-        return check('four ticks a rest apart: frames drawn, none dropped, no gap past one refresh, the rests not counted',
+        good = check('four ticks a rest apart: frames drawn, none dropped, no gap past one refresh, the rests not counted',
                      moved > 8 and s['dropped'] == base['dropped'] and gaps.get('more', 0) == base.get('gap_hist_refreshes', {}).get('more', 0),
                      f"{moved} frames, dropped {base['dropped']} -> {s['dropped']}, gaps {gaps}")
+        run.key(KEY_CENTRE)
+        run.rest()
+        run.key(KEY_RETURN)
+        s = run.rest()
+        good &= check('a page opened, a rest, the page closed: the rest is no gap of a motion',
+                      s['gap_max_us'] < 400000 and s['dropped'] - base['dropped'] < 30,
+                      f"longest gap {s['gap_max_us']} us (flags {s['gap_max_flags']}), dropped {base['dropped']} -> {s['dropped']}")
     finally:
         run.proc.kill(), run.proc.wait(timeout=5), os.close(run.queue)
+    run = Run(binary, work, 400, '--page', 'home')
+    try:
+        run.rest()
+        for _ in range(4):
+            run.ticks(1)
+            time.sleep(0.8)
+        s = run.rest()
+        good &= check("Home's ticks a rest apart: no rest counted as a gap",
+                      s['frames'] > 8 and s['gap_max_us'] < 400000 and s['dropped'] < 30,
+                      f"{s['frames']} frames, longest gap {s['gap_max_us']} us (flags {s['gap_max_flags']}), dropped {s['dropped']}")
+    finally:
+        run.proc.kill(), run.proc.wait(timeout=5), os.close(run.queue)
+    run = Run(binary, work, 400, '--pan-blocks')  # the pan waits for the refresh, as the Q2's FBIOPAN_DISPLAY
+    try:
+        run.rest()
+        run.ticks(30, 0.05)
+        s = run.rest()
+        good &= check('a pan that waits for the refresh is not work over budget',
+                      s['frames'] > 30 and s['pan_us_per_frame'] > 4000 and s['over_budget'] == 0,
+                      f"{s['frames']} frames, over_budget {s['over_budget']}, pan {s['pan_us_per_frame']} us a frame")
+    finally:
+        run.proc.kill(), run.proc.wait(timeout=5), os.close(run.queue)
+    return good
+
+
+def frame_log(binary, work):
+    """--frame-log keeps the last frames shown for a device read of judder (the scroll a frame drew, against the one
+    before) and the latency from the wheel's input to the first frame shown after it (docs/ui-rewrite.md#the-frame)."""
+    run = Run(binary, work, 400, '--frame-log', '256')
+    try:
+        run.rest()
+        run.ticks(12, 0.05)
+        s = run.rest()
+        dt, sc, fl = (s.get('frame_log_' + k, []) for k in ('dt_us', 'scroll16', 'flags'))
+        good = check('the frame log has a time, a scroll and flags for each frame shown, up to its length',
+                     0 < len(dt) == len(sc) == len(fl) <= 256 and len(dt) == min(s['frames'], 256), f'{len(dt)} {len(sc)} {len(fl)} of {s["frames"]}')
+        moved = [b - a for a, b in zip(sc, sc[1:]) if a is not None and b is not None and b != a]
+        good &= check("twelve ticks down 400 songs scroll the list on, frame by frame", len(moved) > 5 and all(m > 0 for m in moved), str(moved[:12]))
+        good &= check('each tick is timed to the first frame shown after it, inside a refresh or two on the host',
+                      s['latency_n'] >= 10 and 0 < s['latency_us_mean'] < 40000 and sum(s['latency_hist_ms'].values()) == s['latency_n'],
+                      f"{s['latency_n']} inputs, mean {s['latency_us_mean']} us, max {s['latency_us_max']}, {s['latency_hist_ms']}")
+    finally:
+        run.proc.kill(), run.proc.wait(timeout=5), os.close(run.queue)
+    return good
 
 
 def live_stats(binary, work):
@@ -3359,6 +3413,22 @@ def living(binary, work):
     good &= check("Blue's platter has no cells and draws nothing at rest", rows[k].count(BLUE) > len(rows[k]) // 2 and not darker
                   and pics['a'].rgb == pics['b'].rgb and not any(t['shown'] for t in trace[-55:]),
                   f"{darker[:3]} {pics['a'].rgb == pics['b'].rgb} {sum(t['shown'] for t in trace[-55:])}")
+    # live, on the clock: the cells keep q2ui drawing while the screen is lit, and it draws nothing once it is dark
+    run = Run(binary, work, 400, *on, at=lit_folder(work, 400))
+    try:
+        time.sleep(1.5)
+        f0 = run.stats()['frames']
+        time.sleep(1.0)
+        f1 = run.stats()['frames']
+        (run.dir/'backlight/panel/bl_power').write_text('1\n')
+        time.sleep(1.5)
+        f2 = run.stats()['frames']
+        time.sleep(1.0)
+        f3 = run.stats()['frames']
+        good &= check('the living row draws about 60 frames a second lit, and none in the dark', f1 - f0 >= 40 and f3 == f2,
+                      f'{f1 - f0} frames in a lit second, {f3 - f2} in a dark one')
+    finally:
+        run.proc.kill(), run.proc.wait(timeout=5), os.close(run.queue)
     return good
 
 
@@ -3385,6 +3455,7 @@ def main():
             good &= live(binary, work)
             good &= live_stats(binary, work)
             good &= stats_rests(binary, work)
+            good &= frame_log(binary, work)
             good &= routes(binary, work)
             good &= reload(binary, work)
             good &= early_hup(binary, work)
@@ -3428,6 +3499,8 @@ def main():
             good &= api_play(binary, work) & api_status(binary, work)
         if 'rests' in only:  # the stats across rests alone ('live' runs it too)
             good &= stats_rests(binary, work)
+        if 'framelog' in only:  # --frame-log alone ('live' runs it too)
+            good &= frame_log(binary, work)
         if 'danger' in only:  # the danger card alone ('pages' runs it too)
             good &= danger_card(binary, work, ('--page', 'home'))
         if not only or 'dark' in only:

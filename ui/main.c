@@ -4,7 +4,8 @@
  *          [--limit N] [--motion 0|1] [--living 0|1] [--living-fps N] [--reduce-motion] [--light]
  *          [--panel-bits 8|6|5|565]
  *          [--panel-mode 24|keep] [--panel-mem FILE]
- *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
+ *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--pan-blocks]
+ *          [--frame-log N] [--fb-flush 0|1|2] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--ctl FD] [--playlist FILE]
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
  *          [--wireless FILE] [--told FILE] [--networks FILE]
@@ -45,6 +46,11 @@
  * --then now opens Now Playing over the pages come back to: the gate's, when the page of demo's
  * that q2ui left for ended on demo's Now Playing (a Search result played; patch/q2ui_gate.c).
  *
+ * --frame-log N keeps the last N frames shown in the stats (frame_log_*: each one's time since the one before, its
+ * list's scroll and q2ui.h's FRAME_* flags) and reads the panel's shown page back before each turn (fb_overlaps);
+ * --fb-flush 1 msyncs the page turned onto before its pan, 2 writes the CPU's data cache back over it (MIPS).
+ * --pan-blocks makes a panel file's pan wait for the refresh, as the Q2's FBIOPAN_DISPLAY does (a host
+ * test of the stats; a real panel's pan is its own).
  * --bench draws and turns frames without the panel's wait and writes their CPU time to the stats
  * file. --script runs a file of input on a clock of its own, a frame every 1/60 s whatever the
  * machine's speed, for tests and recordings (docs/ui-rewrite.md#scripts); --trace writes a line
@@ -183,6 +189,14 @@ static void parse(int argc, char **argv) {
             ui_light = config_light_forced = 1;
         else if (!strcmp(a, "--bench"))
             opt.bench = 1;
+        else if (!strcmp(a, "--pan-blocks"))
+            fb_pan_blocks = 1;
+        else if (!strcmp(a, "--frame-log")) {
+            unsigned n = (unsigned)atoi(v);
+            ++i;
+            if (n && n <= 4096 && (ui_frame_log = calloc(n, sizeof *ui_frame_log))) ui_frame_log_n = n, fb_check_page = 1;
+        } else if (!strcmp(a, "--fb-flush"))
+            fb_flush = atoi(v), ++i;
     }
 }
 /* /mnt/data/q2ui.args: the same options, kept for the process's life */
@@ -221,22 +235,40 @@ static void write_stats(void) {
             " \"work_hist_ms\": {\"lt1\": %u, \"lt2\": %u, \"lt4\": %u, \"lt8\": %u, \"lt12\": %u, "
             "\"lt16_7\": %u, \"lt33\": %u, \"more\": %u},\n"
             " \"pan_us_per_frame\": %.1f, \"pan_us_max\": %llu, \"vsync_wait_us_per_frame\": %.1f, "
-            "\"gap_hist_refreshes\": {\"r1\": %u, \"r2\": %u, \"r3\": %u, \"r4_6\": %u, \"more\": %u},\n"
+            "\"gap_hist_refreshes\": {\"r1\": %u, \"r2\": %u, \"r3\": %u, \"r4_6\": %u, \"more\": %u}, \"gaps_paused\": %u, \"gap_max_us\": %llu, \"gap_max_flags\": %u,\n"
+            " \"latency_hist_ms\": {\"lt17\": %u, \"lt33\": %u, \"lt50\": %u, \"lt67\": %u, \"lt100\": %u, \"more\": %u}, "
+            "\"latency_n\": %u, \"latency_us_mean\": %.0f, \"latency_us_max\": %llu, \"fb_checks\": %u, \"fb_overlaps\": %u,\n"
             " \"glyphs\": %u, \"glyph_bytes\": %u, \"glyphs_made\": %u, \"glyph_evictions\": %u, "
             "\"motion\": %d, \"panel_bits\": %d, \"page\": %d,\n"
             " \"now_seq\": %u, \"now_watched\": %d, \"playing\": %d, \"paused\": %d, \"cover\": %d, \"top\": \"%s\",\n"
-            " \"api_vamp\": %d, \"api_play\": %d, \"hearts\": %d, \"liked\": %d, \"title\": \"%s\",\n %s%s%s}\n",
+            " \"api_vamp\": %d, \"api_play\": %d, \"hearts\": %d, \"liked\": %d, \"title\": \"%s\",\n %s%s%s",
             lib_songs(), open_ms, first_ms, s->frames, s->ticks, (double)s->draw_ns / frames / 1e3,
             (double)s->show_ns / frames / 1e3, (double)s->draw_max_ns / 1e3, (unsigned)(s->px / frames),
             (double)s->work_us / frames, (unsigned long long)s->work_max_us, s->over_budget, s->cpu_over, s->dropped,
             s->late, s->streak_max, fb_refresh_us(), s->deferred, s->hist[0], s->hist[1], s->hist[2], s->hist[3],
             s->hist[4], s->hist[5], s->hist[6], s->hist[7], (double)s->pan_us / frames, (unsigned long long)s->pan_max_us,
-            (double)s->wait_us / frames, s->gap_hist[0], s->gap_hist[1], s->gap_hist[2], s->gap_hist[3], s->gap_hist[4],
+            (double)s->wait_us / frames, s->gap_hist[0], s->gap_hist[1], s->gap_hist[2], s->gap_hist[3], s->gap_hist[4], s->gaps_paused,
+            (unsigned long long)s->gap_max_us, s->gap_max_flags,
+            s->lat_hist[0], s->lat_hist[1], s->lat_hist[2], s->lat_hist[3], s->lat_hist[4], s->lat_hist[5], s->lat_n,
+            s->lat_n ? (double)s->lat_us / s->lat_n : 0.0, (unsigned long long)s->lat_max_us, s->fb_checks, s->fb_overlaps,
             text_stats.glyphs, text_stats.bytes,
             text_stats.made, text_stats.evictions, list_motion, fb_bits, fb_page(), now_seq(), now_watched(),
             now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(), api_vamp, api_play_live(),
             now_get()->hearts, now_get()->liked, title, notices,
             *bench_json ? ",\n \"bench\": " : "", bench_json);
+    /* the frame log, oldest first: three lists of the same length (q2ui.h struct ui_frame_rec) */
+    for (int k = 0; k < 3 && ui_frame_log_n; ++k) {
+        fprintf(f, ",\n \"frame_log_%s\": [", k == 0 ? "dt_us" : k == 1 ? "scroll16" : "flags");
+        for (unsigned i = 0, o = 0; i < ui_frame_log_n; ++i) {
+            const struct ui_frame_rec *r = &ui_frame_log[(ui_frame_log_at + i) % ui_frame_log_n];
+            if (!r->dt_us && !r->flags && !r->scroll16) continue; /* a slot not yet filled */
+            if (k == 0) fprintf(f, "%s%u", o++ ? "," : "", r->dt_us);
+            else if (k == 1) fprintf(f, r->scroll16 == INT32_MIN ? "%snull" : "%s%d", o++ ? "," : "", r->scroll16);
+            else fprintf(f, "%s%u", o++ ? "," : "", r->flags);
+        }
+        fputc(']', f);
+    }
+    fputs("}\n", f);
     if (fclose(f) || rename(tmp, opt.stats)) remove(tmp);
 }
 
@@ -612,6 +644,7 @@ int main(int argc, char **argv) {
     }
     input_open(opt.input);
     input_flush(); /* nothing pressed before it had the screen is its to act on (a FIFO standing in for a device keeps such) */
+    ui_clock_read(); /* the pages open at the time it is (a list's living row runs from its opening, ui/list.c live) */
     first_page();
     state_restore();
     then_open();

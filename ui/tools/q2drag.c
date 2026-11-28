@@ -7,10 +7,13 @@
  *   q2drag touch DEVICE X0 Y0 X1 Y1 STEPS PERIOD_US a finger on the screen from (X0, Y0) to (X1, Y1), upright
  *                                                   coordinates as ui/input.c reads them (ABS_X 319 - y, ABS_Y x),
  *                                                   ABS_PRESSURE alone as a Q2's panel says a finger
+ *   q2drag replay DEVICE FILE                      a recorded stream (`cat /dev/input/eventN > FILE` on a Q2: its 16-byte
+ *                                                   input_events), each EV_SYN's batch at its own time after the first
  *
  * Built for the Q2 with the toolchain q2ui is (tools/ui.py), as ~/.cache/q2-xfer/scrollread.py does. */
 #include <fcntl.h>
 #include <linux/input.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,16 +34,36 @@ static void at(struct timespec *t, long period_us) {
 }
 
 int main(int argc, char **argv) {
-    int wheel = argc == 6 && !strcmp(argv[1], "wheel"), touch = argc == 9 && !strcmp(argv[1], "touch");
-    if (!wheel && !touch) {
-        fprintf(stderr, "usage: q2drag wheel DEVICE STEPS UNITS PERIOD_US | touch DEVICE X0 Y0 X1 Y1 STEPS PERIOD_US\n");
+    int wheel = argc == 6 && !strcmp(argv[1], "wheel"), touch = argc == 9 && !strcmp(argv[1], "touch"),
+        replay = argc == 4 && !strcmp(argv[1], "replay");
+    if (!wheel && !touch && !replay) {
+        fprintf(stderr, "usage: q2drag wheel DEVICE STEPS UNITS PERIOD_US | touch DEVICE X0 Y0 X1 Y1 STEPS PERIOD_US"
+                        " | replay DEVICE FILE\n");
         return 2;
     }
     fd = open(argv[2], O_WRONLY);
     if (fd < 0) return perror(argv[2]), 1;
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    if (wheel) {
+    if (replay) {
+        /* the Q2's input_event: two 32-bit words of time, then type, code and value */
+        FILE *f = fopen(argv[3], "rb");
+        if (!f) return perror(argv[3]), 1;
+        unsigned char b[16];
+        long long first = -1, last = 0;
+        while (fread(b, 1, 16, f) == 16) {
+            uint32_t sec, usec;
+            uint16_t type, code;
+            int32_t value;
+            memcpy(&sec, b, 4), memcpy(&usec, b + 4, 4), memcpy(&type, b + 8, 2), memcpy(&code, b + 10, 2);
+            memcpy(&value, b + 12, 4);
+            long long us = (long long)sec * 1000000 + usec;
+            if (first < 0) first = last = us;
+            if (us > last) at(&t, (long)(us - last)), last = us; /* a batch starts: wait for its time */
+            put(type, code, value);
+        }
+        fclose(f);
+    } else if (wheel) {
         int steps = atoi(argv[3]), units = atoi(argv[4]), x = 100;
         long period = atol(argv[5]);
         put(EV_ABS, ABS_X, x), put(EV_ABS, ABS_Y, 100), put(EV_ABS, ABS_PRESSURE, 1), put(EV_KEY, BTN_TOUCH, 1);

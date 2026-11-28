@@ -44,6 +44,10 @@ static struct {
 static int depth, quit, quit_code, again;
 static uint64_t wake_at, last_shown_us;
 static int last_moving;
+static unsigned since_shown; /* UI_SINCE_*: what the loop did since the last frame shown (the stats' gaps) */
+static uint64_t lat_from; /* when the wheel's or a finger's input the next frame shows came (input_at_us) */
+struct ui_frame_rec *ui_frame_log;
+unsigned ui_frame_log_n, ui_frame_log_at;
 static struct {
     int n;
     rect_t r[MARKS];
@@ -267,22 +271,50 @@ static void account(uint64_t start_us, uint64_t draw_ns, uint64_t show_ns, unsig
     s->px += px, s->draw_ns += draw_ns, s->show_ns += show_ns, s->work_us += work;
     if (draw_ns > s->draw_max_ns && s->frames > 2) s->draw_max_ns = draw_ns;
     if (work > s->work_max_us && s->frames > 2) s->work_max_us = work;
-    if (work > refresh) ++s->over_budget;
+    /* the pan is left out: the Q2's returns at the refresh that shows the frame, a wait and not work */
+    if (work - (fb_pan_us < work ? fb_pan_us : work) > refresh) ++s->over_budget;
     s->pan_us += fb_pan_us, s->wait_us += fb_wait_us;
     if (fb_pan_us > s->pan_max_us && s->frames > 2) s->pan_max_us = fb_pan_us;
     if (s->frames > 2 && (draw_ns + show_ns) / 1000u > refresh) ++s->cpu_over;
     /* a frame of a motion follows the last by one refresh; one that took a refresh and a half or
-     * more missed that many refreshes */
+     * more missed that many refreshes. A motion whose next step drew nothing, or after which the
+     * loop waited at rest, had ended there by its own steps: the frame after is a new motion's, its
+     * gap a pause (gaps_paused), not refreshes missed */
     if (last_moving && last_shown_us && fb_vsync) {
         uint64_t gap = mono_us() - last_shown_us, k = (gap + refresh / 2) / refresh;
-        ++s->gap_hist[k <= 1 ? 0 : k == 2 ? 1 : k == 3 ? 2 : k <= 6 ? 3 : 4];
-        if (gap >= refresh * 3 / 2) {
-            s->dropped += (unsigned)((gap + refresh / 2) / refresh) - 1, ++s->late;
-            s->streak = 0;
-        } else if (++s->streak > s->streak_max)
-            s->streak_max = s->streak;
+        if (since_shown & (UI_SINCE_REST | UI_SINCE_EMPTY))
+            ++s->gaps_paused;
+        else {
+            ++s->gap_hist[k <= 1 ? 0 : k == 2 ? 1 : k == 3 ? 2 : k <= 6 ? 3 : 4];
+            if (gap >= refresh * 3 / 2) {
+                s->dropped += (unsigned)k - 1, ++s->late;
+                s->streak = 0;
+                if (gap > s->gap_max_us) s->gap_max_us = gap, s->gap_max_flags = since_shown;
+            } else if (++s->streak > s->streak_max)
+                s->streak_max = s->streak;
+        }
     }
+    if (lat_from) {
+        uint64_t lat = fb_panned_us > lat_from ? fb_panned_us - lat_from : 0;
+        static const unsigned lat_edges[] = { 16700, 33300, 50000, 66700, 100000 };
+        unsigned b = 0;
+        while (b < 5 && lat >= lat_edges[b]) ++b;
+        ++s->lat_hist[b], ++s->lat_n, s->lat_us += lat;
+        if (lat > s->lat_max_us) s->lat_max_us = lat;
+        lat_from = 0;
+    }
+    if (ui_frame_log_n) {
+        struct ui_frame_rec *f = &ui_frame_log[ui_frame_log_at];
+        ui_frame_log_at = (ui_frame_log_at + 1) % ui_frame_log_n;
+        uint64_t dt = last_shown_us ? mono_us() - last_shown_us : 0;
+        f->dt_us = dt > 0xffffffffu ? 0xffffffffu : (uint32_t)dt;
+        f->scroll16 = list_drawn ? (int32_t)(list_drawn_scroll * 16) : INT32_MIN;
+        f->flags = (moving ? FRAME_MOVING : 0) | (fb_overlap ? FRAME_OVERLAP : 0) | (text_deferred ? FRAME_DEFER : 0) |
+                   (fb_page() ? FRAME_PAGE1 : 0) | (since_shown & UI_SINCE_INPUT ? FRAME_INPUT : 0);
+    }
+    list_drawn = 0;
     last_shown_us = mono_us(), last_moving = moving;
+    since_shown = (text_deferred ? UI_SINCE_DEFER : 0) | (slide.dir ? UI_SINCE_SLIDE : 0);
 }
 
 int ui_frame(const input_t *in, int n) {
@@ -314,7 +346,15 @@ int ui_frame(const input_t *in, int n) {
         else
             ui_mark_all(), again = 1;
     }
-    if (!marks.n && !dmg_count()) return 0;
+    if (n) since_shown |= UI_SINCE_INPUT;
+    for (int i = 0; i < n && !lat_from; ++i)
+        if (in[i].type == IN_TICK || in[i].type == IN_TUG || in[i].type == IN_TOUCH_DOWN || in[i].type == IN_TOUCH_MOVE)
+            lat_from = input_at_us ? input_at_us : start;
+    if (!marks.n && !dmg_count()) {
+        since_shown |= UI_SINCE_EMPTY;
+        lat_from = 0; /* the input moved nothing: no frame shows it */
+        return 0;
+    }
     uint64_t t0 = cpu_ns();
     /* a frame that follows another by a refresh is a motion's: it may not stop to make every new
      * glyph. A page's first frame, from rest, makes all it shows. */
@@ -449,7 +489,7 @@ int ui_run(void) {
             /* at rest: nothing until input or the clock's next minute, once the common glyphs
              * are made, a slice at a time so input is never kept waiting */
             if (!rested && rest_hook) rest_hook();
-            rested = 1;
+            rested = 1, since_shown |= UI_SINCE_REST;
             wait = !warm ? (int)(60 - time(0) % 60) * 1000 : poll(fds, (nfds_t)n, 0) > 0 ? 0 : (warm = text_warm(WARM_US), 0);
         } else
             rested = 0;
