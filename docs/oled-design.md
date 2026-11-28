@@ -981,8 +981,8 @@ as its callers move onto it.
   column) and the answers, 32 px rows of Inter Regular 20 centered, stacked; 8 px of padding.
 - **Kinds:** destructive (Cancel, then the verb in Negative red after an 18 px trash in Negative; opens on Cancel),
   consequential (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK).
-  The lit answer's bar is the accent, 8 px in from the card's sides; on a destructive verb it is a neutral gray
-  platter (`#3A3A3C`, Light `#E5E5EA`) with the verb in Text Primary, the trash staying Negative, so red never fills a
+  The lit answer's bar is the accent, 8 px in from the card's sides; on a destructive card it is a neutral gray
+  platter (`#3A3A3C`, Light `#E5E5EA`) whichever answer is lit, Cancel too, with the words in Text Primary, the trash staying Negative, so red never fills a
   row (the owner's danger-card ruling, 2026-11-28). The trash and verb are centred together and show the same lit or
   not, so the verb never moves with the selection. Every kind's
   answers stand 32 px apart, with no gap before a destructive one, as Shut Down's (the user's, 2026-11-19).

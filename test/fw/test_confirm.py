@@ -344,7 +344,8 @@ class AnyTrash(dict):
 def test_a_destructive_verb_has_the_trash_before_it_and_lit_sits_on_gray_in_text_primary(fw, ui, st, light):
     """docs/oled-design.md#confirmation-card, the owner's danger-card ruling (2026-11-28): unlit, the verb in Negative
     (#FF453A, Light #D70015); lit, a gray platter (#3A3A3C, Light #E5E5EA) and the verb in Text Primary; the trash
-    before it either way, the two centred together, so the verb stays put as the selection moves."""
+    before it either way, the two centred together, so the verb stays put as the selection moves. Cancel lit (as the
+    card opens) takes the same gray platter in Text Primary, never the accent: red on the card marks only the verb."""
     theme(fw, **({'LIGHT': b'1'} if light else {}))
     is_light = fw.fn('ipod_light', C.c_int)()
     assert is_light == light
@@ -360,9 +361,13 @@ def test_a_destructive_verb_has_the_trash_before_it_and_lit_sits_on_gray_in_text
         rows.art = AnyTrash()
         paint(card.view, rows.addr)
         verb = [t for t in rows.texts if t[0] == 'Forget Device']
-        seen[sel] = (verb[0][2] if verb else None, [b[1] for b in rows.boxes], rows.images[:], verb[0][1][0] if verb else None)
+        cancel = [t for t in rows.texts if t[0] == 'Cancel']
+        seen[sel] = (verb[0][2] if verb else None, [b[1] for b in rows.boxes], rows.images[:], verb[0][1][0] if verb else None,
+                     cancel[0][2] if cancel else None, [b[0][1] for b in rows.boxes if b[1] == rgba(gray)])
     unlit, lit = seen[0], seen[1]
-    assert unlit[0] == rgba(red) and rgba(gray) not in unlit[1] and rgba(red) not in unlit[1]
+    assert unlit[0] == rgba(red) and rgba(red) not in unlit[1]
+    # Cancel lit: its own gray platter (above the verb's row) and Text Primary, as the verb's when lit
+    assert unlit[4] == rgba(primary) and len(unlit[5]) == 1 and len(lit[5]) == 1 and unlit[5][0] < lit[5][0]
     assert lit[0] == rgba(primary) and rgba(gray) in lit[1] and rgba(red) not in lit[1]
     assert len(unlit[2]) == 1 and len(lit[2]) == 1 and unlit[2] == lit[2]  # the trash, in one place lit or not
     trash_x = unlit[2][0][0]
