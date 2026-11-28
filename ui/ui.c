@@ -55,6 +55,7 @@ static struct {
     float at; /* 0 to 1 */
 } slide;
 extern uint64_t fb_panned_us; /* fb.c: when the last frame's pan was made */
+extern uint64_t fb_pan_us, fb_wait_us; /* fb.c: the last pan ioctl's time and the refresh wait after it */
 
 static void (*rest_hook)(void), (*stack_hook)(void);
 void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
@@ -267,11 +268,14 @@ static void account(uint64_t start_us, uint64_t draw_ns, uint64_t show_ns, unsig
     if (draw_ns > s->draw_max_ns && s->frames > 2) s->draw_max_ns = draw_ns;
     if (work > s->work_max_us && s->frames > 2) s->work_max_us = work;
     if (work > refresh) ++s->over_budget;
+    s->pan_us += fb_pan_us, s->wait_us += fb_wait_us;
+    if (fb_pan_us > s->pan_max_us && s->frames > 2) s->pan_max_us = fb_pan_us;
     if (s->frames > 2 && (draw_ns + show_ns) / 1000u > refresh) ++s->cpu_over;
     /* a frame of a motion follows the last by one refresh; one that took a refresh and a half or
      * more missed that many refreshes */
     if (last_moving && last_shown_us && fb_vsync) {
-        uint64_t gap = mono_us() - last_shown_us;
+        uint64_t gap = mono_us() - last_shown_us, k = (gap + refresh / 2) / refresh;
+        ++s->gap_hist[k <= 1 ? 0 : k == 2 ? 1 : k == 3 ? 2 : k <= 6 ? 3 : 4];
         if (gap >= refresh * 3 / 2) {
             s->dropped += (unsigned)((gap + refresh / 2) / refresh) - 1, ++s->late;
             s->streak = 0;
@@ -402,7 +406,7 @@ void ui_unwatch(int fd) {
  * old one was, take effect with no restart of the Q2 and without demo's gate seeing anything end.
  * If that cannot be done it ends with UI_EXIT_RELOAD, on which a gate that knows the code starts
  * it again (patch/q2ui_gate.c). The signal is held back everywhere but in the loop's wait
- * (ppoll), so it always ends a wait and is seen at once: let in anywhere else, one that came
+ * (ppoll), from main's first line (main.c) on, so one sent while q2ui starts waits for the loop; it always ends a wait and is seen at once: let in anywhere else, one that came
  * between the loop's look at it and its next wait was seen only when that wait ended, at rest up
  * to a minute later. */
 void (*ui_restart)(void);

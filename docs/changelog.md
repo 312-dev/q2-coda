@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Look: on a question that deletes or forgets something, the red answer has a small red trash can before it, and when you move onto it the bar is gray with the words in white, instead of a solid red bar. In Light Mode reds are a deeper red that reads on white.
+  - New UI (preview): it no longer quits when asked to reload while it is still starting (as VampOS asks after its first library update); it reloads once it is up.
   - New UI (preview): lists take your finger: tap a row to open it, hold a row for its menu, and drag to scroll; flick and the list coasts on and settles on a row. Pulled past the top or the end, it gives a little and springs back.
   - New UI (preview): open Control Center follows your finger up and down: drag it up and let go past a third of the way, or flick it up, and it closes; let go short of that and it springs back open. The USB row sits inside the screen's rounded corners.
   - New UI (preview): the centre button wakes a dark screen again, as the other buttons do; the waking press only wakes.

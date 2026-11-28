@@ -50,6 +50,7 @@
  * machine's speed, for tests and recordings (docs/ui-rewrite.md#scripts); --trace writes a line
  * a frame of the list's motion (or the top page's own, ui_page.trace) while it runs, and --clock fixes the status row's clock so two
  * runs give the same picture. */
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -219,6 +220,8 @@ static void write_stats(void) {
             "\"late\": %u, \"streak_max\": %u, \"refresh_us\": %u, \"glyphs_deferred\": %u,\n"
             " \"work_hist_ms\": {\"lt1\": %u, \"lt2\": %u, \"lt4\": %u, \"lt8\": %u, \"lt12\": %u, "
             "\"lt16_7\": %u, \"lt33\": %u, \"more\": %u},\n"
+            " \"pan_us_per_frame\": %.1f, \"pan_us_max\": %llu, \"vsync_wait_us_per_frame\": %.1f, "
+            "\"gap_hist_refreshes\": {\"r1\": %u, \"r2\": %u, \"r3\": %u, \"r4_6\": %u, \"more\": %u},\n"
             " \"glyphs\": %u, \"glyph_bytes\": %u, \"glyphs_made\": %u, \"glyph_evictions\": %u, "
             "\"motion\": %d, \"panel_bits\": %d, \"page\": %d,\n"
             " \"now_seq\": %u, \"now_watched\": %d, \"playing\": %d, \"paused\": %d, \"cover\": %d, \"top\": \"%s\",\n"
@@ -227,7 +230,9 @@ static void write_stats(void) {
             (double)s->show_ns / frames / 1e3, (double)s->draw_max_ns / 1e3, (unsigned)(s->px / frames),
             (double)s->work_us / frames, (unsigned long long)s->work_max_us, s->over_budget, s->cpu_over, s->dropped,
             s->late, s->streak_max, fb_refresh_us(), s->deferred, s->hist[0], s->hist[1], s->hist[2], s->hist[3],
-            s->hist[4], s->hist[5], s->hist[6], s->hist[7], text_stats.glyphs, text_stats.bytes,
+            s->hist[4], s->hist[5], s->hist[6], s->hist[7], (double)s->pan_us / frames, (unsigned long long)s->pan_max_us,
+            (double)s->wait_us / frames, s->gap_hist[0], s->gap_hist[1], s->gap_hist[2], s->gap_hist[3], s->gap_hist[4],
+            text_stats.glyphs, text_stats.bytes,
             text_stats.made, text_stats.evictions, list_motion, fb_bits, fb_page(), now_seq(), now_watched(),
             now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(), api_vamp, api_play_live(),
             now_get()->hearts, now_get()->liked, title, notices,
@@ -561,6 +566,12 @@ static void restart(void) {
 
 int main(int argc, char **argv) {
     char regular[256], medium[256], fallback[256];
+    /* SIGHUP held from the first instruction: one that comes while the fonts, the library, the panel and input open
+     * (Vamp OS's q2libd sends `sv hup` after its first library write) waits, and the loop's wait lets it in once its
+     * handler is set (ui.c ui_run), where it starts q2ui again in place. Let in now, its default action ends q2ui. */
+    sigset_t hup;
+    sigemptyset(&hup), sigaddset(&hup, SIGHUP);
+    sigprocmask(SIG_BLOCK, &hup, 0);
     started_with = argv, ui_restart = restart;
     uint64_t t0 = mono_us();
     parse_file("/mnt/data/q2ui.args");

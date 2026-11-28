@@ -298,6 +298,8 @@ struct ui_stats {
     unsigned hist[8];                       /* work time: under 1, 2, 4, 8, 12, 16.7, 33 ms, more */
     unsigned streak, streak_max;            /* frames shown back to back, each a refresh after the last */
     unsigned deferred;                      /* glyphs a frame left for the next to make */
+    uint64_t pan_us, pan_max_us, wait_us;   /* the pan ioctl's time, inside work_us, and the wait for the refresh after it */
+    unsigned gap_hist[5]; /* a motion's frames by the time since the one before: 1, 2, 3, 4 to 6 refreshes, more */
 };
 extern struct ui_stats ui_stats;
 void ui_stats_reset(void);
