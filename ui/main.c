@@ -198,7 +198,9 @@ static void parse(int argc, char **argv) {
             unsigned n = (unsigned)atoi(v);
             ++i;
             if (n && n <= 4096 && (ui_frame_log = calloc(n, sizeof *ui_frame_log))) ui_frame_log_n = n, fb_check_page = 1;
-        } else if (!strcmp(a, "--fb-flush"))
+        } else if (!strcmp(a, "--lcd-site"))
+            fb_lcd_site = v, ++i;
+        else if (!strcmp(a, "--fb-flush"))
             fb_flush = atoi(v), ++i;
     }
 }
@@ -241,6 +243,7 @@ static void write_stats(void) {
             "\"gap_hist_refreshes\": {\"r1\": %u, \"r2\": %u, \"r3\": %u, \"r4_6\": %u, \"more\": %u}, \"gaps_paused\": %u, \"gap_max_us\": %llu, \"gap_max_flags\": %u, \"start_late\": %u,\n"
             " \"latency_hist_ms\": {\"lt17\": %u, \"lt33\": %u, \"lt50\": %u, \"lt67\": %u, \"lt100\": %u, \"more\": %u}, "
             "\"latency_n\": %u, \"latency_us_mean\": %.0f, \"latency_us_max\": %llu, \"fb_checks\": %u, \"fb_overlaps\": %u,\n"
+            " \"lcd_site_reads\": %u, \"lcd_site_outside\": %u, \"lcd_site_into\": %u,\n"
             " \"glyphs\": %u, \"glyph_bytes\": %u, \"glyphs_made\": %u, \"glyph_evictions\": %u, "
             "\"motion\": %d, \"panel_bits\": %d, \"page\": %d,\n"
             " \"now_seq\": %u, \"now_watched\": %d, \"playing\": %d, \"paused\": %d, \"cover\": %d, \"top\": \"%s\",\n"
@@ -254,6 +257,7 @@ static void write_stats(void) {
             (unsigned long long)s->gap_max_us, s->gap_max_flags, s->start_late,
             s->lat_hist[0], s->lat_hist[1], s->lat_hist[2], s->lat_hist[3], s->lat_hist[4], s->lat_hist[5], s->lat_n,
             s->lat_n ? (double)s->lat_us / s->lat_n : 0.0, (unsigned long long)s->lat_max_us, s->fb_checks, s->fb_overlaps,
+            s->lcd_site_reads, s->lcd_site_outside, s->lcd_site_into,
             text_stats.glyphs, text_stats.bytes,
             text_stats.made, text_stats.evictions, list_motion, fb_bits, fb_page(), now_seq(), now_watched(),
             now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(), api_vamp, api_play_live(),

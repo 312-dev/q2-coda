@@ -313,7 +313,8 @@ static void account(uint64_t start_us, uint64_t draw_ns, uint64_t show_ns, unsig
         f->dt_us = dt > 0xffffffffu ? 0xffffffffu : (uint32_t)dt;
         f->scroll16 = list_drawn ? (int32_t)(list_drawn_scroll * 16) : INT32_MIN;
         f->flags = (moving ? FRAME_MOVING : 0) | (fb_overlap ? FRAME_OVERLAP : 0) | (text_deferred ? FRAME_DEFER : 0) |
-                   (fb_page() ? FRAME_PAGE1 : 0) | (since_shown & UI_SINCE_INPUT ? FRAME_INPUT : 0);
+                   (fb_page() ? FRAME_PAGE1 : 0) | (since_shown & UI_SINCE_INPUT ? FRAME_INPUT : 0) |
+                   (fb_scanned ? FRAME_SCANNED : 0);
         f->work_us = work > 0xffffffffu ? 0xffffffffu : (uint32_t)work;
         f->pan_us = fb_pan_us > work ? f->work_us : (uint32_t)fb_pan_us;
         f->glyphs = text_made_frame, f->glyph_max_us = text_glyph_max_us;

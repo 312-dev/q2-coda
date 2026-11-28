@@ -48,7 +48,18 @@ uint64_t fb_panned_us; /* when the last frame was panned to: its work ended ther
 /* the last frame's pan ioctl and its wait for the refresh after it, apart (ui.c account: the stats' pan_us and
  * vsync_wait_us, to tell a pan that waits for the panel from work that runs long) */
 uint64_t fb_pan_us, fb_wait_us;
-int fb_pan_blocks, fb_check_page, fb_flush, fb_overlap;
+int fb_pan_blocks, fb_check_page, fb_flush, fb_overlap, fb_scanned;
+/* --lcd-site: the display controller's DC_LAY0_SITE, "the current pixel site in DDR memory of layer0" (X2000
+ * programming manual 7.5.3.11, the DC's registers at 0x13050000, this one at 0x3100), read through /dev/mem before
+ * and after each turn. A turn that writes into the page the controller is reading tears whatever the panel does; one
+ * that never does leaves tearing to the panel's side. A diagnostic, off unless asked for: a reading outside both
+ * pages (another layer, the simple-read channel, a controller at rest) is counted apart, never as into. */
+#define LCD_SITE_PAGE 0x13053000u
+#define LCD_SITE_WORD 0x100u
+#define LCD_FILE_PHYS 0x10000000u /* where a file panel's pages stand, for a host test with a file for /dev/mem */
+const char *fb_lcd_site;
+static const volatile uint32_t *site;
+static unsigned long site_phys;
 static void sleep_to_refresh(void) {
     /* to the next multiple of the period on the clock: where a file standing in for the panel has its refresh */
     struct timespec t;
@@ -112,6 +123,15 @@ int fb_open(const char *path, int bits) {
     pages = mmap(0, PAGE_W * PAGE_H * PAGES * 4, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (pages == MAP_FAILED) return -1;
     shown = var.yoffset >= PAGE_H;
+    if (fb_lcd_site) {
+        int m = open(fb_lcd_site, O_RDONLY | O_SYNC);
+        void *regs = m < 0 ? MAP_FAILED
+                           : mmap(0, 4096, PROT_READ, MAP_SHARED, m, strcmp(fb_lcd_site, "/dev/mem") ? 0 : LCD_SITE_PAGE);
+        if (m >= 0) close(m);
+        struct fb_fix_screeninfo fix;
+        if (regs != MAP_FAILED) site = (const volatile uint32_t *)((char *)regs + LCD_SITE_WORD);
+        site_phys = var.xres && ioctl(fd, FBIOGET_FSCREENINFO, &fix) == 0 ? fix.smem_start : LCD_FILE_PHYS;
+    }
     /* the refresh, from the mode's own timings: the pixel clock's period (ps) times the pixels of
      * a whole frame, blanking included */
     uint64_t total = (uint64_t)(var.xres + var.left_margin + var.right_margin + var.hsync_len) *
@@ -201,6 +221,13 @@ static unsigned turn(uint32_t *page, rect_t r) {
     return fb_bits == 8 ? turn_as(page, r, COPY) : turn_as(page, r, NARROW);
 }
 
+/* one DC_LAY0_SITE reading: in the page about to be (or just) turned onto? */
+static int site_into(int hidden) {
+    unsigned long at = *site, page = PAGE_W * PAGE_H * 4;
+    ++ui_stats.lcd_site_reads;
+    if (at < site_phys || at >= site_phys + PAGES * page) return ++ui_stats.lcd_site_outside, 0;
+    return (at - site_phys) / page == (unsigned long)hidden;
+}
 unsigned fb_present(void) {
     if (!now.n) return 0;
     int hidden = !shown;
@@ -216,7 +243,10 @@ unsigned fb_present(void) {
         ++ui_stats.fb_checks;
         if ((seen.yoffset >= PAGE_H) == hidden) fb_overlap = 1, ++ui_stats.fb_overlaps;
     }
+    fb_scanned = site && site_into(hidden);
     for (int i = 0; i < both.n; ++i) px += turn(page, both.r[i]);
+    if (site && site_into(hidden)) fb_scanned = 1;
+    if (fb_scanned) ++ui_stats.lcd_site_into;
     /* --fb-flush: the page's stores out of the CPU's cache before the pan, for a read of whether
      * any are late to the panel (a mapping the kernel left cached) */
     if (fb_flush == 1) msync(page, PAGE_W * PAGE_H * 4, MS_SYNC);
