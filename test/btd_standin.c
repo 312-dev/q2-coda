@@ -251,6 +251,16 @@ static int ask_agent(struct dev *d, const char *member) {
     return r != 0;
 }
 
+/* a RequestConfirmation left open (pairask): its answer printed as it comes, so a Cancel can go meanwhile */
+static void pair_done(DBusPendingCall *pc, void *data) {
+    struct dev *d = data;
+    DBusMessage *r = dbus_pending_call_steal_reply(pc);
+    out("agent RequestConfirmation %s: %s", d->addr,
+        !r ? "none" : dbus_message_get_type(r) == DBUS_MESSAGE_TYPE_METHOD_RETURN ? "yes" : dbus_message_get_error_name(r));
+    if (r) dbus_message_unref(r);
+    dbus_pending_call_unref(pc);
+}
+
 /* ---- calls ---- */
 
 /* GetAll of an interface; Get is not served (q2btd reads everything from GetManagedObjects and the signals) */
@@ -499,6 +509,24 @@ static void control(char *line) {
     } else if (!strcmp(cmd, "pairin") && d) {
         if (!d->shown) d->shown = 1, added(bz, d->path, 'd', d);
         if (ask_agent(d, "RequestConfirmation")) d->paired = 1, changed(bz, d->path, "org.bluez.Device1", "Paired", 'b', &d->paired);
+    } else if (!strcmp(cmd, "pairask") && d && agent_owner[0]) { /* as pairin, not waiting: BlueZ's own call */
+        if (!d->shown) d->shown = 1, added(bz, d->path, 'd', d);
+        DBusMessage *m = dbus_message_new_method_call(agent_owner, agent_path, "org.bluez.Agent1", "RequestConfirmation");
+        const char *p = d->path;
+        unsigned passkey = 123456;
+        DBusPendingCall *pc = 0;
+        dbus_message_append_args(m, DBUS_TYPE_OBJECT_PATH, &p, DBUS_TYPE_UINT32, &passkey, DBUS_TYPE_INVALID);
+        if (dbus_connection_send_with_reply(bz, m, &pc, 70000) && pc) dbus_pending_call_set_notify(pc, pair_done, d, 0);
+        dbus_message_unref(m);
+        out("pairask %s", d->addr);
+    } else if (!strcmp(cmd, "agentcancel") && agent_owner[0]) { /* BlueZ giving up on a request: Agent1.Cancel */
+        DBusMessage *m = dbus_message_new_method_call(agent_owner, agent_path, "org.bluez.Agent1", "Cancel"), *r;
+        DBusError err;
+        dbus_error_init(&err);
+        r = dbus_connection_send_with_reply_and_block(bz, m, 5000, &err);
+        out("agent Cancel: %s", r ? "ok" : err.name);
+        if (r) dbus_message_unref(r);
+        dbus_message_unref(m), dbus_error_free(&err);
     } else if (!strcmp(cmd, "quit")) exit(0);
     else out("? %s", line);
 }

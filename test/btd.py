@@ -108,8 +108,48 @@ class Play:
             c.sendall(f'now title={title} artist=Ann album=First state={state} pos=3 len=200 volume={volume} id=1\n'.encode())
 
 
+class Ui:
+    """a stand-in q2ui serving Q2UI/1 (docs/platform/notices.md): the hello, `ok` to an ask (or `err busy` when told),
+    `answer ID gone` after a withdraw; answer() sends the owner's choice; each line kept"""
+    def __init__(self, sock):
+        self.got, self.conns, self.busy = Lines(), [], False
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.s.bind(str(sock))
+        self.s.listen(4)
+        threading.Thread(target=self.accept, daemon=True).start()
+
+    def accept(self):
+        while True:
+            try:
+                c, _ = self.s.accept()
+            except OSError:
+                return
+            self.conns.append(c)
+            threading.Thread(target=self.serve, args=(c,), daemon=True).start()
+
+    def serve(self, c):
+        try:
+            for line in c.makefile('r'):
+                line = line.rstrip('\n')
+                self.got.add(line)
+                if line == 'Q2UI/1':
+                    c.sendall(b'Q2UI/1 ok\n')
+                elif line.startswith('ask '):
+                    c.sendall(b'err busy\n' if self.busy else b'ok\n')
+                elif line.startswith('withdraw '):
+                    c.sendall(f'ok\nanswer {line.split()[1]} gone\n'.encode())
+                else:
+                    c.sendall(b'ok\n')
+        except OSError:
+            return
+
+    def answer(self, ident, n):
+        for c in self.conns:
+            c.sendall(f'answer {ident} {n}\n'.encode())
+
+
 class Q2:
-    def __init__(self, tmp, binary, devs=(BUDS_DEV,), found=(SPEAKER_FOUND,), state='last=' + BUDS + '\n'):
+    def __init__(self, tmp, binary, devs=(BUDS_DEV,), found=(SPEAKER_FOUND,), state='last=' + BUDS + '\n', ui=False):
         self.tmp, self.binary = tmp, binary
         for d in ('mnt/data', 'run/vamp'):
             (tmp/d).mkdir(parents=True, exist_ok=True)
@@ -123,6 +163,7 @@ class Q2:
         self.env = dict(os.environ, DBUS_SYSTEM_BUS_ADDRESS=f'unix:path={tmp/"bus"}')
         self.args = [a for d in devs for a in ('--dev', d)] + [a for f in found for a in ('--found', f)]
         self.play = Play(tmp/'run/vamp/play.sock')
+        self.ui = Ui(tmp/'run/vamp/ui.sock') if ui else None
         self.standin()
         self.log = Lines()
         self.btd = None
@@ -334,6 +375,55 @@ def test_agent_refuses_a_pairing_nobody_asked_for(q2):
     assert a.ask('scan') == 'ok'
     q.tell(f'pairin {SPEAKER}')
     q.out.wait(lambda l: l == f'agent RequestConfirmation {SPEAKER}: yes')
+
+
+# ---- the pairing card (docs/btd.md#the-pairing-card): RequestConfirmation asked of the owner through Q2UI/1 ----
+
+ASK = f'ask pair-1 Pair%20with%20Fixture%20Speaker? 123%20456%0AMake%20sure%20both%20codes%20match Cancel Pair'
+
+
+@pytest.mark.parametrize('choice, want', [(2, 'yes'), (1, 'org.bluez.Error.Rejected'), (0, 'org.bluez.Error.Rejected')])
+def test_a_numeric_comparison_is_asked_on_the_card_and_only_pair_says_yes(q2, choice, want):
+    """patch/bt_pair.c's card on Q2UI/1: any device's RequestConfirmation, scan or none, asks "Pair with NAME?" over the
+    code as two groups of three and "Make sure both codes match", Cancel then Pair; only Pair (2) is a yes, Cancel (1)
+    and dismissed (0) refuse"""
+    q = q2(devs=(), found=(SPEAKER_FOUND,), state='', ui=True)
+    a = q.api()
+    until(lambda: a.status()['power'] == '1', what='powered')
+    q.out.wait(lambda l: l.startswith('agent registered /vamp/q2btd/agent'))
+    q.tell(f'pairask {SPEAKER}')
+    q.ui.got.wait(lambda l: l == ASK)
+    q.ui.answer('pair-1', choice)
+    q.out.wait(lambda l: l == f'agent RequestConfirmation {SPEAKER}: {want}')
+
+
+def test_bluez_giving_up_withdraws_the_card(q2):
+    """bt_pair.c bt_pair_poll: BlueZ's Cancel (the device gave up, the link dropped, its 60 s) closes the card with no
+    answer; a choice after it says nothing"""
+    q = q2(devs=(), found=(SPEAKER_FOUND,), state='', ui=True)
+    a = q.api()
+    until(lambda: a.status()['power'] == '1', what='powered')
+    q.out.wait(lambda l: l.startswith('agent registered /vamp/q2btd/agent'))
+    q.tell(f'pairask {SPEAKER}')
+    q.ui.got.wait(lambda l: l == ASK)
+    q.tell('agentcancel')
+    q.out.wait(lambda l: l == 'agent Cancel: ok')
+    q.ui.got.wait(lambda l: l == 'withdraw pair-1')
+    q.ui.answer('pair-1', 2)
+    time.sleep(0.5)
+    assert not q.out.has(f'agent RequestConfirmation {SPEAKER}: yes'), 'no yes after the request ended'
+
+
+def test_a_busy_card_or_no_q2ui_refuses_or_falls_back(q2):
+    """q2ui's 4 asks waiting (err busy) refuses at once; with no Q2UI/1 at all the just-works rule stands"""
+    q = q2(devs=(), found=(SPEAKER_FOUND,), state='', ui=True)
+    a = q.api()
+    until(lambda: a.status()['power'] == '1', what='powered')
+    q.out.wait(lambda l: l.startswith('agent registered /vamp/q2btd/agent'))
+    assert a.ask('scan') == 'ok'  # discoverable: the just-works rule alone would say yes
+    q.ui.busy = True
+    q.tell(f'pairin {SPEAKER}')
+    q.out.wait(lambda l: l == f'agent RequestConfirmation {SPEAKER}: org.bluez.Error.Rejected')
 
 
 def test_codec_chosen_is_asked_for_and_kept(q2):

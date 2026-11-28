@@ -7,9 +7,11 @@
  *   - The radio on and off (Adapter1.Powered), a scan (discovery, and the Q2 discoverable for as long), pairing,
  *     connecting, disconnecting and forgetting, the paired devices, the connected one's codec (bluealsa's PCM1) and
  *     battery (BlueZ's Battery1).
- *   - The pairing agent. The design that asks the user (q2ui's notices, docs/platform/notices.md) is not served yet,
- *     so the agent is a just-works fallback: it says yes to the device a `pair` command is pairing, and to a device
- *     pairing with the Q2 while a scan has it discoverable, and no to anything else (AGENT_*).
+ *   - The pairing agent. A numeric comparison (RequestConfirmation) is the owner's to answer, on q2ui's pairing card
+ *     through Q2UI/1 (docs/platform/notices.md), as today's Vamp's patch/bt_pair.c asks it: only Pair is a yes. With
+ *     no Q2UI/1 to ask, and for the calls with nothing to show, the agent is a just-works fallback: it says yes to
+ *     the device a `pair` command is pairing, and to a device pairing with the Q2 while a scan has it discoverable,
+ *     and no to anything else.
  *   - Auto-reconnect: the last device connected is paged at the start, at power on and after a drop the Q2 did not
  *     ask for, on RECONNECT_AT's schedule.
  *   - Where q2playd's audio goes: a client of Q2PLAY/1 (docs/platform/playback.md), it says `output bluetooth` while
@@ -760,6 +762,95 @@ static int agent_allows(const char *dev_path) {
     struct dev *d = dev_by_path(dev_path, 0);
     return (pairing[0] && !strcmp(pairing, dev_path)) || now_ms() < scan_until || (d && d->paired);
 }
+/* ---- the pairing card (docs/btd.md#the-pairing-card): a RequestConfirmation held while q2ui asks the owner ---- */
+
+static int ui_fd = -1; /* Q2UI/1, connected when a card is asked and kept */
+static char ui_in[512];
+static size_t ui_n;
+static struct {
+    DBusMessage *m; /* the call waiting on the card, 0 none */
+    char id[16], addr[18];
+    unsigned passkey, n;
+    int acked; /* the ask's own ok or err read */
+} card;
+
+static void ui_close(void) {
+    if (ui_fd >= 0) close(ui_fd), ui_fd = -1;
+    ui_n = 0;
+}
+
+/* a line to q2ui, connecting first; -1 when there is no Q2UI/1 to take it */
+static int ui_send(const char *line) {
+    if (ui_fd < 0) {
+        struct sockaddr_un a = {.sun_family = AF_UNIX};
+        snprintf(a.sun_path, sizeof a.sun_path, "%s", path("/run/vamp/ui.sock"));
+        ui_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        if (ui_fd < 0 || connect(ui_fd, (struct sockaddr *)&a, sizeof a) || send(ui_fd, "Q2UI/1\n", 7, MSG_NOSIGNAL) != 7)
+            return ui_close(), -1;
+    }
+    char b[700];
+    int n = snprintf(b, sizeof b, "%s\n", line);
+    if (n < 0 || n >= (int)sizeof b || send(ui_fd, b, (size_t)n, MSG_NOSIGNAL) != n) return ui_close(), -1;
+    return 0;
+}
+
+/* the held call answered: yes only from the card's Pair */
+static void card_end(int yes, const char *why) {
+    if (!card.m) return;
+    DBusMessage *r = yes ? dbus_message_new_method_return(card.m) : dbus_message_new_error(card.m, "org.bluez.Error.Rejected", why);
+    if (r) dbus_connection_send(bus, r, 0), dbus_message_unref(r);
+    dbus_message_unref(card.m), card.m = 0;
+    say("agent: the card for %s: %s", card.addr, yes ? "Pair" : why);
+    tell("pair-request addr=%s passkey=%06u answer=%s", card.addr, card.passkey, yes ? "yes" : "no");
+}
+
+/* "Pair with NAME?" (the name cut whole at a character to TITLE's 40 bytes) over the code as two groups of three and
+ * bt_pair.c's caption; a device BlueZ has no name for is "this device", its body "Unknown device" and the address
+ * first. Cancel, then Pair: the consequential kind's order (docs/oled-design.md#pairing). 0 asked. */
+static int card_ask(DBusMessage *m, const struct dev *d, const char *addr, unsigned passkey) {
+    char name[30], title[48], body[200], et[150], eb[600], line[800];
+    size_t k = d && d->name[0] ? strlen(d->name) : 0;
+    if (k > sizeof name - 1) {
+        k = sizeof name - 1;
+        while (k && ((unsigned char)d->name[k] & 0xc0) == 0x80) --k; /* not inside a UTF-8 character */
+    }
+    snprintf(name, sizeof name, "%.*s", (int)k, k ? d->name : "");
+    snprintf(title, sizeof title, "Pair with %s?", k ? name : "this device");
+    snprintf(body, sizeof body, "%s%s%s%03u %03u\nMake sure both codes match", k ? "" : "Unknown device\n", k ? "" : addr,
+             k ? "" : "\n", passkey / 1000 % 1000, passkey % 1000);
+    snprintf(card.id, sizeof card.id, "pair-%u", ++card.n);
+    enc(et, sizeof et, title), enc(eb, sizeof eb, body);
+    snprintf(line, sizeof line, "ask %s %s %s Cancel Pair", card.id, et, eb);
+    if (ui_send(line)) return -1;
+    card.m = dbus_message_ref(m), card.acked = 0, card.passkey = passkey;
+    snprintf(card.addr, sizeof card.addr, "%s", addr);
+    say("agent: RequestConfirmation from %s: asked on the card (%s)", addr, card.id);
+    return 0;
+}
+
+/* q2ui's lines: the ask's ok, or err (4 asks waiting, the text refused): no; then its answer, Pair (2) the one yes */
+static void ui_read(void) {
+    ssize_t got = recv(ui_fd, ui_in + ui_n, sizeof ui_in - 1 - ui_n, MSG_DONTWAIT);
+    if (got <= 0) {
+        if (got == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) ui_close(), card_end(0, "the UI went away");
+        return;
+    }
+    ui_n += (size_t)got;
+    ui_in[ui_n] = 0;
+    for (char *nl; (nl = strchr(ui_in, '\n'));) {
+        *nl = 0;
+        char id[40], v[16];
+        if (card.m && !card.acked && (!strcmp(ui_in, "ok") || !strncmp(ui_in, "err", 3))) {
+            card.acked = 1;
+            if (strcmp(ui_in, "ok")) card_end(0, "the card is busy");
+        } else if (sscanf(ui_in, "answer %39s %15s", id, v) == 2 && card.m && !strcmp(id, card.id))
+            card_end(!strcmp(v, "2"), "Cancel on the card");
+        ui_n -= (size_t)(nl + 1 - ui_in);
+        memmove(ui_in, nl + 1, ui_n + 1);
+    }
+    if (ui_n >= sizeof ui_in - 1) ui_n = 0, ui_in[0] = 0;
+}
+
 static DBusHandlerResult agent_msg(DBusConnection *c, DBusMessage *m, void *data) {
     (void)data;
     const char *member = dbus_message_get_member(m), *dev = "";
@@ -769,6 +860,18 @@ static DBusHandlerResult agent_msg(DBusConnection *c, DBusMessage *m, void *data
     struct dev *d = dev_by_path(dev, 0);
     const char *addr = d ? d->addr : dev;
     DBusMessage *r = 0;
+    unsigned code = 0;
+    if (!strcmp(member, "RequestConfirmation")) {
+        DBusMessageIter at = it;
+        if (dbus_message_iter_next(&at) && dbus_message_iter_get_arg_type(&at) == DBUS_TYPE_UINT32) dbus_message_iter_get_basic(&at, &code);
+        if (card.m) { /* one card at a time: BlueZ asks one request of an agent, so a second is another device's */
+            say("agent: RequestConfirmation from %s while %s's card is up: no", addr, card.addr);
+            r = dbus_message_new_error(m, "org.bluez.Error.Rejected", "another pairing waits");
+            dbus_connection_send(c, r, 0), dbus_message_unref(r);
+            return DBUS_HANDLER_RESULT_HANDLED;
+        }
+        if (!card_ask(m, d, addr, code)) return DBUS_HANDLER_RESULT_HANDLED; /* answered from the card */
+    }
     if (!strcmp(member, "RequestConfirmation") || !strcmp(member, "RequestAuthorization") || !strcmp(member, "AuthorizeService") ||
         !strcmp(member, "RequestPinCode")) {
         int yes = !strcmp(member, "AuthorizeService") ? d && (d->paired || agent_allows(dev)) : agent_allows(dev);
@@ -789,6 +892,13 @@ static DBusHandlerResult agent_msg(DBusConnection *c, DBusMessage *m, void *data
     } else if (!strcmp(member, "DisplayPasskey") || !strcmp(member, "DisplayPinCode") || !strcmp(member, "Release") ||
                !strcmp(member, "Cancel")) {
         say("agent: %s", member);
+        if (!strcmp(member, "Cancel") && card.m) { /* BlueZ gave up: the card goes with no answer, as bt_pair_poll */
+            char w[40];
+            snprintf(w, sizeof w, "withdraw %s", card.id);
+            ui_send(w);
+            dbus_message_unref(card.m), card.m = 0;
+            tell("pair-request addr=%s passkey=%06u answer=cancelled", card.addr, card.passkey);
+        }
         r = dbus_message_new_method_return(m);
     } else return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
     if (r) dbus_connection_send(c, r, 0), dbus_message_unref(r);
@@ -1211,11 +1321,12 @@ int main(int argc, char **argv) {
     unsigned seen = ~0u;
     int was_powered = 0, started = 0;
     while (!stopping) {
-        struct pollfd p[3 + CLIENTS];
+        struct pollfd p[4 + CLIENTS];
         int n = 0;
         p[n++] = (struct pollfd){.fd = dfd, .events = POLLIN | (dbus_connection_has_messages_to_send(bus) ? POLLOUT : 0)};
         p[n++] = (struct pollfd){.fd = api, .events = POLLIN};
         p[n++] = (struct pollfd){.fd = play_fd, .events = POLLIN};
+        p[n++] = (struct pollfd){.fd = ui_fd, .events = POLLIN};
         for (int i = 0; i < CLIENTS; ++i) p[n++] = (struct pollfd){.fd = cl[i].fd, .events = POLLIN};
         poll(p, (nfds_t)n, tmo_next(500));
         dbus_connection_read_write(bus, 0);
@@ -1230,8 +1341,9 @@ int main(int argc, char **argv) {
             else if (fd >= 0) cl[i] = (struct client){.fd = fd, .gen = ++gens};
         }
         if (play_fd >= 0 && p[2].fd == play_fd && p[2].revents) play_read();
+        if (ui_fd >= 0 && p[3].fd == ui_fd && p[3].revents) ui_read();
         for (int i = 0; i < CLIENTS; ++i)
-            if (cl[i].fd >= 0 && p[3 + i].fd == cl[i].fd && p[3 + i].revents) client_read(&cl[i]);
+            if (cl[i].fd >= 0 && p[4 + i].fd == cl[i].fd && p[4 + i].revents) client_read(&cl[i]);
         unsigned long long t = now_ms();
         if (play_fd < 0 && t >= play_tried + PLAY_RETRY_MS) play_connect(), route();
         if (adapter.have && adapter.powered != power_wanted && power_asked != power_wanted) power_set(power_wanted, 0);

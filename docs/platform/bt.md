@@ -14,12 +14,12 @@
 | `forget ADDR` | `ok`, `err forget`, `err no such device`: the pairing removed |
 | `codec` | `codec name=CODEC rate=HZ available=CODEC,CODEC,... choice=auto\|CODEC` |
 | `codec CODEC`, `codec auto` | `ok`, or `err codec` for one the headset does not offer; kept, and asked for at each connection of a headset that offers it. `auto` is bluealsa's own choice |
-| `watch` | `ok`; then `status ...` lines as they change, `found addr=ADDR name=... kind=KIND` for a device a scan hears, `pair-request addr=ADDR passkey=NNNNNN answer=yes\|no` for each pairing question the agent answered |
+| `watch` | `ok`; then `status ...` lines as they change, `found addr=ADDR name=... kind=KIND` for a device a scan hears, `pair-request addr=ADDR passkey=NNNNNN answer=yes\|no\|cancelled` for each pairing question answered (`cancelled`: BlueZ gave up on it) |
 | `caps` | `caps status power scan devices pair connect disconnect forget codec watch` |
 
 **`kind`**, from the device's Class of Device: `headphones`, `headset`, `speaker`, `car`, `audio` (another audio device), `phone`, `computer`, `other`. **Codecs** are bluealsa's names: `SBC`, `aptX`, `aptX-HD`, `LDAC` (and `AAC` in an image built with it, [vamp-os-base: Bluetooth](../vamp-os-base.md#bluetooth)).
 
-**Pairing questions.** Until the notice design is served, nothing asks the user: the agent says yes to the device `pair` names, and to a device pairing with the Q2 during a `scan`'s 60 s, and no to any other ([q2btd: The agent](../btd.md#the-agent)). The `pair-request` line says what it answered.
+**Pairing questions.** A numeric comparison is asked of the owner on `q2ui`'s pairing card through [Q2UI/1](notices.md) and only its Pair is a yes ([q2btd: The pairing card](../btd.md#the-pairing-card)); with no Q2UI/1, and for the other questions, the agent says yes to the device `pair` names, and to a device pairing with the Q2 during a `scan`'s 60 s, and no to any other ([q2btd: The agent](../btd.md#the-agent)). The `pair-request` line says what was answered.
 
 The transcripts' stand-in (`test/btd.py`): a pair of headphones, `Fixture Buds` (`AA:BB:CC:DD:EE:01`, paired, the last device, battery 80 %, offering SBC, aptX and LDAC), connected by the auto-reconnect before the first line, and a speaker a scan hears, `Fixture Speaker` (`AA:BB:CC:DD:EE:02`).
 
