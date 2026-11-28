@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - New UI (preview): open Control Center follows your finger up and down: drag it up and let go past a third of the way, or flick it up, and it closes; let go short of that and it springs back open. The USB row sits inside the screen's rounded corners.
+  - New UI (preview): the centre button wakes a dark screen again, as the other buttons do; the waking press only wakes.
   - New UI (preview): the selected row is alive: faint red cells drift through its red bar to a resting heartbeat. They settle after 20 seconds without a press and move again when you turn the wheel; with Reduce Motion they stay still, and with the Blue accent there are none.
   - Look: the accent is now **Arterial**, a deep red, in place of the blue: the selection bar, progress bars, switches and the rest that took the blue. **Blue** is still there under Settings > Display > Appearance > Accent, and the new UI follows that choice too. The status row's download ring and Guest Play's phone stay blue whichever you pick.
   - New UI (preview): Control Center comes down from the top of the screen under your finger as you pull it, and settles open or back up when you let go, instead of sliding in from the side; Return held drops it from the top. Its Brightness and Volume sliders now stay right under your finger while you drag them.

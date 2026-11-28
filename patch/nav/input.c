@@ -27,7 +27,7 @@ static int remote_match(void *e, int spend);
  * Return's press only wakes, its long press and release dropped with it (wake_return), so a hold
  * from dark does not open Home. The wheel never gets here dark: wheel_lock_gate (keylock.c), before
  * this gate, drops its ticks, so a turn neither wakes nor acts. Center is left to stock's release,
- * which lights it as it always has. A key the Buttons Lock holds is left to keylock.c, whose card
+ * which lights it as it always has, but while q2ui has the screen (ringnav_input wakes at its press then). A key the Buttons Lock holds is left to keylock.c, whose card
  * lights the screen. */
 static int wake_key(void *e, unsigned type, unsigned key, unsigned now) {
     if (key == KEY_RETURN && st.wake_return) { /* the waking press's long press and release */
@@ -240,6 +240,14 @@ int ringnav_input(void *wm, void *e) {
     unsigned key = e ? (unsigned)I(e, EVENT_KEY) : 0;
     if (video_on()) {
         if (e && I(e, EVENT_TYPE) == EVT_KEY_UP) video_key((unsigned)I(e, EVENT_KEY));
+        return 0;
+    }
+    /* q2ui reads Centre, so stock's Centre release, which lights a dark screen, never sees it: the press wakes it here,
+     * as Return's does (wake_key), and goes no further; q2ui drops what reaches it dark, the release with it (ui/ui.c) */
+    if (e && type == EVT_KEY_DOWN && key == KEY_CENTER && !g_backlight_status && q2ui_on()) {
+        awake_screen();
+        reset_poweroptions_timer(1, 1, 1);
+        woke((unsigned)time_now_ms());
         return 0;
     }
     if (e && q2ui_input(type, key)) return 0; /* q2ui has the screen and reads this itself (q2ui_gate.c) */
