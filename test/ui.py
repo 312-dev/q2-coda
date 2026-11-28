@@ -55,9 +55,12 @@ def folder(work, n):
     d = pathlib.Path(tempfile.mkdtemp(dir=work))
     fixture.make(n, d/'library.db')
     (d/'fonts').mkdir()
-    shutil.copy(ROOT/'assets/fonts/Inter-Regular.ttf', d/'fonts/inter.ttf')
-    shutil.copy(ROOT/'assets/fonts/Inter-Medium.ttf', d/'fonts/inter-medium.ttf')
-    (d/'fb').write_bytes(bytes(320 * 375 * 2 * 4))
+    # Links and a sparse panel file: the suite makes a few hundred folders on the gate's shared /tmp (tools/ci/gate.py
+    # TMP), and copies took 1.8 MB each before q2ui drew a pixel.
+    (d/'fonts/inter.ttf').symlink_to(ROOT/'assets/fonts/Inter-Regular.ttf')
+    (d/'fonts/inter-medium.ttf').symlink_to(ROOT/'assets/fonts/Inter-Medium.ttf')
+    with open(d/'fb', 'wb') as f:
+        f.truncate(320 * 375 * 2 * 4)
     (d/'config.ini').write_text('[IPOD]\nLIGHT=0\n')  # dark, as these checks were written for (Light Mode is Auto unset)
     return d
 
