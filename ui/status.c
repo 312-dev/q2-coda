@@ -335,8 +335,8 @@ static void glyphs(void) {
     }
     if (!strcmp(S.out, "wire"))
         art("status_wired", x - GLYPH, 16), x -= GLYPH + GAP;
-    /* a headset is the rune alone, whatever level it reports (option A, 2026-11-28; q2gate says headset) */
-    if (!strcmp(S.bt, "connecting") || !strcmp(S.bt, "rune") || !strcmp(S.bt, "headset"))
+    /* a headset is the rune alone, whatever level it reports (option A, 2026-11-28) */
+    if (!strcmp(S.bt, "connecting") || !strcmp(S.bt, "rune"))
         art(S.bt[0] == 'c' ? "status_btdim" : "status_bt", x - RUNE_W, 16), x -= RUNE_W + GAP;
     else if (!strcmp(S.bt, "car"))
         art("status_car", x - CAR_W, 16), x -= CAR_W + GAP;

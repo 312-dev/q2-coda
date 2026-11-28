@@ -250,17 +250,19 @@ int api_told(char *out, size_t room) {
     api_field(bt_status, "output", output, sizeof output);
     int wired = jack && strcmp(output, "bluetooth"), bton = num(bt_status, "power", 0) == 1;
     api_field(bt_status, "state", state, sizeof state), api_field(bt_status, "kind", kind, sizeof kind);
-    const char *slot = !bton                           ? "none"
+    /* the Bluetooth word by demo's rule (patch/status_row.c bt_slot) and q2gate's: nothing while off, on and idle, or
+     * the wire takes the sound; a connected car its glyph, any other connected device the rune */
+    const char *slot = !bton || wired                  ? "none"
                        : !strcmp(state, "connecting")  ? "connecting"
-                       : strcmp(state, "connected")    ? "rune"
+                       : strcmp(state, "connected")    ? "none"
                        : !strcmp(kind, "car")          ? "car"
-                                                       : "headset";
+                                                       : "rune";
     api_field(net_status, "state", netstate, sizeof netstate);
     int pick = config_int("Q2POD", "USBPICK", 0);
     snprintf(out, room,
              "out=%s\nbt=%s\nbtbatt=%d\nrelay=none\nlock=0\nsync=0\nsyncpm=0\noffline=0\nnet=1\nclock24=%d\n"
              "wifi=%d\nbton=%d\nbtbusy=0\nairplay=0\ncar=%d\nsmart=%d\neq=0\nusb=%s\ncable=%d\nbright=%d\nvol=%d\nvolmax=%d\n",
-             wired ? "wire" : "other", slot, !strcmp(slot, "headset") ? num(bt_status, "battery", -1) : -1,
+             wired ? "wire" : "other", slot, -1,
              config_int("SYSSET", "TIME24H", 1) != 0, *netstate && strcmp(netstate, "off"), bton,
              config_int("Q2POD", "CARREMOTE", 0) == 1, config_int("Q2POD", "SMARTWIFI", 0) == 1,
              picks[pick >= 0 && pick < 6 ? pick : 0], num(sys_battery, "cable", 0) == 1, config_int("SYSSET", "LIGHTNESS", 50),
