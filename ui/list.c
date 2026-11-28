@@ -901,7 +901,10 @@ static void az_draw(const ui_list *l) {
     run_draw(&big, bx + AZ_BUBBLE_W / 2.0f - big.w / 2, ly - TYPE(22) / 2.0f, 0xffffff, alpha);
 }
 
+double list_drawn_scroll; /* the frame log's scroll (ui.c account) */
+int list_drawn;
 void list_draw(ui_list *l, rect_t r) {
+    list_drawn_scroll = l->scroll.x, list_drawn = 1;
     list_draw_rows(l, r);
     if (l->az_at && rect_meet(r, az_rect(), 0)) {
         clip_set(r);

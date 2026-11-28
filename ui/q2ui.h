@@ -49,6 +49,10 @@ void dmg_all(void); /* both pages are stale (the screen came back from another p
 unsigned fb_present(void);
 int fb_page(void);      /* the page on screen, 0 or 1 */
 extern int fb_vsync;    /* 0: fb_present does not wait (the bench, a script's clock) */
+extern int fb_pan_blocks; /* a file's pan waits for the refresh, as the Q2's does (--pan-blocks, a host test) */
+extern int fb_check_page; /* read the panel's shown page back before each turn (the stats' fb_overlaps) */
+extern int fb_flush;      /* between the turn and the pan: 0 nothing, 1 msync, 2 the data cache written back (MIPS) */
+extern int fb_overlap;    /* the last turn's page was the one the panel said it showed */
 extern int fb_bits;     /* the panel's bits a channel, as given */
 unsigned fb_refresh_us(void); /* the panel's refresh period, from its timings (16667 unknown) */
 /* A second canvas a page is drawn into for a slide: canvas_swap makes it the one draw.c draws
@@ -221,6 +225,7 @@ typedef struct {
 int input_open(const char *dir);
 int input_fds(int *fds, int max);
 int input_read(input_t *out, int max); /* what has arrived, without waiting */
+extern uint64_t input_at_us;            /* when the first event the last input_read took happened (mono_us) */
 int wheel_steps(int speed); /* a level's steps for a tick at speed: demo's volume curve (patch/volume.c vol_accel) */
 int input_wait_ms(void);               /* until a held key's hold is due; -1: no key is down */
 void input_flush(void);                /* what arrived while another program had the keys is dropped */
@@ -293,14 +298,43 @@ struct ui_stats {
     unsigned frames, ticks, px, dropped, late;
     uint64_t draw_ns, show_ns, draw_max_ns; /* CPU time */
     uint64_t work_us, work_max_us;          /* wall time from a frame's start to its pan */
-    unsigned over_budget;                   /* frames whose work took longer than a refresh, */
+    unsigned over_budget;                   /* frames whose work, its pan left out, took longer than a refresh, */
     unsigned cpu_over;                      /* and those whose CPU time did: the machine's other work left out */
     unsigned hist[8];                       /* work time: under 1, 2, 4, 8, 12, 16.7, 33 ms, more */
     unsigned streak, streak_max;            /* frames shown back to back, each a refresh after the last */
     unsigned deferred;                      /* glyphs a frame left for the next to make */
     uint64_t pan_us, pan_max_us, wait_us;   /* the pan ioctl's time, inside work_us, and the wait for the refresh after it */
     unsigned gap_hist[5]; /* a motion's frames by the time since the one before: 1, 2, 3, 4 to 6 refreshes, more */
+    unsigned gaps_paused; /* frames after a motion that had ended by its own steps (ui.c account): no gap counted */
+    uint64_t gap_max_us;  /* the longest gap counted as refreshes missed, and the UI_SINCE_* flags of its wait */
+    unsigned gap_max_flags;
+    /* from a wheel's or a finger's input to the end of the pan of the first frame shown after it (its first refresh
+     * on the panel): under 17, 33, 50, 67, 100 ms, more; how many, their sum and the longest */
+    unsigned lat_hist[6], lat_n;
+    uint64_t lat_us, lat_max_us;
+    unsigned fb_checks, fb_overlaps; /* frames whose page was read back before the turn, and those it said is shown */
 };
+/* The frame log (--frame-log N): the last N frames shown, each its time since the one before, the scroll of the list
+ * it drew (in 16ths of a pixel; INT32_MIN, none) and FRAME_* flags, for a device read of judder and tearing */
+struct ui_frame_rec {
+    uint32_t dt_us;
+    int32_t scroll16;
+    uint32_t flags;
+};
+#define FRAME_MOVING 1  /* the frame asked for the next */
+#define FRAME_OVERLAP 2 /* the panel said the page this frame was turned onto was the one shown */
+#define FRAME_DEFER 4   /* glyphs were left for the next frame */
+#define FRAME_PAGE1 8   /* turned onto page 1 (else 0) */
+#define FRAME_INPUT 16  /* input came in for it */
+extern struct ui_frame_rec *ui_frame_log;
+extern unsigned ui_frame_log_n, ui_frame_log_at; /* the log's length and the next slot, oldest first from there */
+extern double list_drawn_scroll;                 /* list.c: the scroll of the list drawn last (list_drawn: one was) */
+extern int list_drawn;
+#define UI_SINCE_REST 1   /* the loop waited at rest (nothing due, no motion asked for) */
+#define UI_SINCE_EMPTY 2  /* a step drew nothing */
+#define UI_SINCE_DEFER 4  /* the frame before left glyphs to be made */
+#define UI_SINCE_SLIDE 8  /* the frame before was a slide's */
+#define UI_SINCE_INPUT 16 /* input came in */
 extern struct ui_stats ui_stats;
 void ui_stats_reset(void);
 

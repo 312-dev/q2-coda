@@ -19,6 +19,9 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#ifdef __mips__
+#include <sys/cachectl.h>
+#endif
 #include <time.h>
 #include <unistd.h>
 
@@ -45,6 +48,16 @@ uint64_t fb_panned_us; /* when the last frame was panned to: its work ended ther
 /* the last frame's pan ioctl and its wait for the refresh after it, apart (ui.c account: the stats' pan_us and
  * vsync_wait_us, to tell a pan that waits for the panel from work that runs long) */
 uint64_t fb_pan_us, fb_wait_us;
+int fb_pan_blocks, fb_check_page, fb_flush, fb_overlap;
+static void sleep_to_refresh(void) {
+    /* to the next multiple of the period on the clock: where a file standing in for the panel has its refresh */
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    uint64_t ns = (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec, period = (uint64_t)refresh_us * 1000u;
+    paced_ns = (ns / period + 1) * period;
+    t.tv_sec = (time_t)(paced_ns / 1000000000u), t.tv_nsec = (long)(paced_ns % 1000000000u);
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, 0);
+}
 static uint32_t *pages;
 static struct fb_var_screeninfo var;
 static struct damage {
@@ -195,26 +208,36 @@ unsigned fb_present(void) {
     unsigned px = 0;
     struct damage both = now;
     for (int i = 0; i < last.n; ++i) add(&both, last.r[i]);
+    /* the page about to be turned onto must not be the one the panel scans out (a frame drawn into
+     * it would tear): the panel's word for which it shows, read back first (--frame-log) */
+    fb_overlap = 0;
+    struct fb_var_screeninfo seen;
+    if (fb_check_page && var.xres && ioctl(fd, FBIOGET_VSCREENINFO, &seen) == 0) {
+        ++ui_stats.fb_checks;
+        if ((seen.yoffset >= PAGE_H) == hidden) fb_overlap = 1, ++ui_stats.fb_overlaps;
+    }
     for (int i = 0; i < both.n; ++i) px += turn(page, both.r[i]);
+    /* --fb-flush: the page's stores out of the CPU's cache before the pan, for a read of whether
+     * any are late to the panel (a mapping the kernel left cached) */
+    if (fb_flush == 1) msync(page, PAGE_W * PAGE_H * 4, MS_SYNC);
+#ifdef __mips__
+    if (fb_flush == 2) cacheflush(page, PAGE_W * PAGE_H * 4, DCACHE);
+#endif
     var.yoffset = (unsigned)(hidden * PAGE_H);
     uint64_t pan_at = mono_us();
     ioctl(fd, FBIOPAN_DISPLAY, &var);
+    /* the Q2's pan returns at the refresh that shows it (a device read, 2026-11-28: 11.9 ms of each
+     * 16.7), and its FBIO_WAITFORVSYNC then at once: --pan-blocks makes a file's pan the same */
+    int blocked = fb_pan_blocks && fb_vsync && !var.xres;
+    if (blocked) sleep_to_refresh();
     fb_panned_us = mono_us();
     fb_pan_us = fb_panned_us - pan_at, fb_wait_us = 0;
-    if (fb_vsync) {
+    if (fb_vsync && !blocked) {
         uint32_t crtc = 0;
         if (can_wait && ioctl(fd, FBIO_WAITFORVSYNC, &crtc) < 0) can_wait = 0;
-        if (!can_wait) {
-            /* a file standing in for the panel has no refresh: the next multiple of the period on
-             * the clock stands in for it, so a host run is paced as a panel paces it */
-            struct timespec t;
-            clock_gettime(CLOCK_MONOTONIC, &t);
-            uint64_t ns = (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec,
-                     period = (uint64_t)refresh_us * 1000u;
-            paced_ns = (ns / period + 1) * period;
-            t.tv_sec = (time_t)(paced_ns / 1000000000u), t.tv_nsec = (long)(paced_ns % 1000000000u);
-            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, 0);
-        }
+        /* a file standing in for the panel has no refresh: the clock's stands in for it, so a host
+         * run is paced as a panel paces it */
+        if (!can_wait) sleep_to_refresh();
     }
     if (fb_vsync) fb_wait_us = mono_us() - fb_panned_us;
     shown = hidden;

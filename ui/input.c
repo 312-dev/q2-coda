@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <linux/input.h>
@@ -85,6 +86,18 @@ int wheel_steps(int speed) {
 }
 
 static unsigned now_ms(void) { return (unsigned)(mono_us() / 1000u); }
+/* When the first event of a read happened, on mono_us's clock (the stats' latency, ui.c): evdev stamps events on the
+ * wall clock, so its age there is taken from now. An event with no stamp, or one stamped in the future or more than a
+ * second back (the clock set meanwhile), is taken as happening now. */
+uint64_t input_at_us;
+static void stamp(const struct input_event *e) {
+    if (input_at_us) return;
+    struct timespec t;
+    clock_gettime(CLOCK_REALTIME, &t);
+    int64_t ev = (int64_t)e->input_event_sec * 1000000 + (int64_t)e->input_event_usec,
+            age = (int64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000 - ev;
+    input_at_us = mono_us() - (ev && age > 0 && age < 1000000 ? (uint64_t)age : 0);
+}
 
 int input_open(const char *dir) {
     for (int i = 0; i < 8; ++i) {
@@ -176,14 +189,17 @@ static int touch_event(const struct input_event *e, input_t *out, int max) {
 int input_read(input_t *out, int max) {
     struct input_event e[32];
     int n = 0;
+    input_at_us = 0;
     for (;;) {
         long got = wheel_fd >= 0 ? read(wheel_fd, e, sizeof e) : 0;
         if (got < (long)sizeof *e) break;
+        stamp(e);
         for (unsigned i = 0; i < got / sizeof *e; ++i) n += wheel_event(&e[i], out + n, max - n);
     }
     for (;;) {
         long got = keys_fd >= 0 ? read(keys_fd, e, sizeof e) : 0;
         if (got < (long)sizeof *e) break;
+        stamp(e);
         for (unsigned i = 0; i < got / sizeof *e && n < max; ++i) {
             if (e[i].type != EV_KEY || e[i].value == 2) continue;
             if (e[i].value) {
@@ -199,6 +215,7 @@ int input_read(input_t *out, int max) {
     for (;;) {
         long got = touch_fd >= 0 ? read(touch_fd, e, sizeof e) : 0;
         if (got < (long)sizeof *e) break;
+        stamp(e);
         for (unsigned i = 0; i < got / sizeof *e; ++i) n += touch_event(&e[i], out + n, max - n);
     }
     if (down.code && !down.held && now_ms() - down.at >= KEY_HOLD_MS && n < max) {
