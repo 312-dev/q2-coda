@@ -4,7 +4,7 @@
     test/os_image.py BUILD [--zip ZIP [--no-boot] [--qemu QEMU_MIPSEL_STATIC] [--keep DIR]] [--perturb WHAT]
 
 BUILD is a `tools/vampos.py build --out` folder. Without --zip only the image and the tree are checked:
-  - the pins: os/package's versions and hashes are tools/player.py's, tools/thirdparty.py's and tools/ui.py's (at Q2UI_COMMIT);
+  - the pins: os/package's versions and hashes are tools/player.py's, tools/thirdparty.py's and tools/ui.py's (at HEAD, where ui/ is);
   - the image fits mtd2, holds no /vendor and no file whose SHA-256 the vendor manifest lists (nothing of
     Shanling's), nothing that formats flash, and /module_driver and /firmware point into /vendor;
   - every ELF file is stock's ABI: MIPS32R2 little-endian o32, NaN 2008, hard float with a 64-bit FPU,
@@ -102,7 +102,7 @@ def check_pins():
               f'{name} {version} as tools/thirdparty.py pins it')
     got = hashes(pkg/'q2ui-stb')
     # tools/ui.py is on q2ui's branch: its STB and STB_IMAGE at the commit the image builds
-    text = subprocess.check_output([*vamp_os.GIT, 'show', f'{vamp_os.Q2UI_COMMIT}:tools/ui.py'], text=True)
+    text = subprocess.check_output([*vamp_os.GIT, 'show', 'HEAD:tools/ui.py'], text=True)
     pins = re.findall(r"^STB(?:_IMAGE)? = \('[^']*', '([^']+)',\s*'([0-9a-f]{64})'\)", text, re.M)
     check(len(pins) == 2, 'tools/ui.py names two stb headers')
     for url, digest in pins:
@@ -548,6 +548,14 @@ def launch_check(fs):
     check((fs/'run/vamp/sv/navi/supervise/stat').exists(), 'q2pkgd: the app ran under a runsv of its own, /run/vamp/sv/navi')
 
 
+def stats_check(data):
+    """q2ui with the image's arguments, its stats file's default among them, writes none on /mnt/data (internal flash,
+    UBIFS mounted sync: a write a second during motion and Now Playing), and removes the copy an older q2ui left there
+    (ui/main.c); by now it has drawn Home and been asked for the library"""
+    left = sorted(p.name for p in data.glob('q2ui-stats.json*'))
+    check(not left, f'q2ui keeps its stats off /mnt/data and removes a stale copy ({left or "none there"})')
+
+
 def lib_check(fs):
     """q2libd's Q2LIB/1 in the booted image (docs/platform/library.md#q2lib1-the-library-socket): its caps, the
     card's one song (song1.wav, scanned for play_check) asked by id, as a client of the socket, and its GB18030
@@ -785,6 +793,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         if not (inp/f'event{n}').exists():
             os.mkfifo(inp/f'event{n}')
     import sqlite3
+    (fs/'mnt/data/q2ui-stats.json').write_text('{}\n')  # a stale stats file, which q2ui removes (stats_check)
     db = sqlite3.connect(fs/'mnt/data/database.db')
     db.execute('create table songtable (name text, songer text, id integer, album text, track integer, fileurl text)')
     db.executemany('insert into songtable values (?, ?, ?, ?, ?, ?)',
@@ -825,6 +834,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         # as today's Vamp hands the Q2 over from the card (patch/q2vampos.sh): /mnt/data mounted, stock's modules loaded
         (emu/'data').mkdir(exist_ok=True)
         (emu/'data/database.db').write_bytes((fs/'mnt/data/database.db').read_bytes())
+        (emu/'data/q2ui-stats.json').write_text('{}\n')  # a stale stats file, which q2ui removes (stats_check)
         (emu/'data/wpa_supplicant.conf').write_text('network={\n\tssid="Home"\n\tpsk="secret123"\n}\n')  # networks saved
         # a zone chosen, Light Mode and the accent never: the zone's clock at midday, so Auto is light (light_check), and
         # the accent the default (accent_check)
@@ -863,6 +873,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             adb_checks(fs)
         if proc.poll() is None:
             lib_check(fs)
+            stats_check(emu/'data' if card else fs/'mnt/data')
         if proc.poll() is None:
             netd_check(fs, card)
         if not card and proc.poll() is None:

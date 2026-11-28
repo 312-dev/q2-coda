@@ -1,6 +1,6 @@
 ################################################################################
 #
-# q2ui: ui/ from the pinned commit of feat/render-engine (tools/vampos.py Q2UI_COMMIT)
+# q2ui: this tree's ui/, exported from the commit the image is built from (tools/vampos.py build)
 #
 ################################################################################
 
