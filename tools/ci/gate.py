@@ -51,7 +51,7 @@ only what the batch did not run. --no-cache runs everything.
 A suite that fails is run once more, alone (--no-retry: not). One that then passes on the same tree and build
 (tree_state: HEAD, the work tree's changes, untracked files, the build's manifest) is `flaky` (the run counts as
 passed) and is appended to ~/.cache/q2-queue/flakes.jsonl; one that passes only after either changed is a failure,
-`failed, then passed after a change`, with the first try's log. The table ends with every suite whose first try
+`failed, then passed after a change`, with the first try's log and a line naming what differed (state_change). The table ends with every suite whose first try
 failed and the tests that log names, so a flake is never silent. A result's
 `kind` says what a failure was: `crash` when the process died of a signal or its log shows one (a Unicorn
 segfault, a memory limit's kill, a deadline's), else `fail`. merge_batch.py blames no branch for a crash.
@@ -72,6 +72,7 @@ import argparse
 import contextlib
 import datetime
 import hashlib
+import itertools
 import json
 import os
 import pathlib
@@ -88,6 +89,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAVY = pathlib.Path(os.environ.get('Q2_HEAVY', pathlib.Path.home()/'.local/bin/q2-heavy'))
 FLOOR = 4.0  # GB of MemAvailable a new suite must leave
 RAMP = 30    # s: a suite this young may not have reached its peak yet, so its estimate still counts
+# /tmp, which every suite shares (on the Mac a 2 GB tmpfs, tools/mac/q2env). Each suite runs with TMPDIR a folder of
+# its own in it (short_dir), removed when the suite ends. While /tmp has less than TMP_LOW of its size free, each poll
+# measures every running suite's folder, so a suite that fails with /tmp full is reported with who held it.
+TMP = pathlib.Path('/tmp')
+TMP_LOW = 0.10
+TMP_FULL = 0.01  # free, of /tmp's size, under which a write of a few MB fails
+NO_SPACE = 'No space left on device'
 # A suite's peak memory (GB) and how long it takes alone (s), from the gate's runs on 2026-11-16 (unit's and
 # test/player/run.py's from 2026-11-22; PLANNED's
 # from their own runs on 2026-11-18, each under 0.25 GB; test/iap_probe.py's 9:02 and 77 MB and test/coda_rc_e2e.py's
@@ -148,6 +156,8 @@ class Suite:
         self.retried: Any = None  # the kind of its first failure, once it is being run again
         self.states: list = []  # tree_state at each try's start
         self.first_tests: list = []  # the tests its first failed try named
+        self.tmp: Any = None  # its TMPDIR, while it runs
+        self.tmp_low: Any = None  # (free bytes, holders) at the lowest /tmp a poll saw while it ran under TMP_LOW
 
     @staticmethod
     def fill(arg, build):
@@ -286,8 +296,8 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/subsonic_contract.py': [],  # the pinned zip (~/.cache/q2-apps) and ~/repos/q2-subsonic; skipped without
     'test/suite_source.py': "test/patch.py's loader (and a line-number lookup by hand), not a test",
     'test/tuner.py': [],  # Radio's receiver on a dropout, its restarts and the dial's click (tuner_core.c with fmrx.c), host cc
-    'test/uac1_bind.py': 'needs a usb_f_uac1.ko, which only tools/uac1_module/uac1_build.py makes (a cross gcc and a kernel tree); run it by hand',
-    'test/uac1_isoc.py': 'needs a usb_f_uac1.ko, which only tools/uac1_module/uac1_build.py makes (a cross gcc and a kernel tree); run it by hand',
+    'test/uac1_bind.py': ['{build}/usb_f_uac1.ko'],  # the module the build carries, tools/uac1.py's pinned one
+    'test/uac1_isoc.py': ['{build}/usb_f_uac1.ko'],
     'test/ui.py': [],  # q2ui built for this machine, a file for the panel; without the build's inputs it fails, naming them
     'test/thirdparty.py': ['{build}', '{qemu_static}', '--offline'],  # its TLS checks need the network, which a gate does not
 }
@@ -442,17 +452,38 @@ def tree_key(root=ROOT):
 def tree_state(build=None, root=ROOT):
     """What a suite's try ran against, dirty or not: HEAD, the work tree's changes from it, the files git does not
     know outside its ignores, and the build's manifest.json. Two tries of one suite with different states ran
-    different code, so a pass on the second says nothing about the first's failure."""
+    different code, so a pass on the second says nothing about the first's failure. A tuple of (part, SHA-256):
+    HEAD, each changed file ('changed PATH'), each untracked one ('untracked PATH') and the manifest, so
+    state_change can say which part differs."""
     def git(*a):
         return subprocess.run(['git', '-C', str(root), *a], capture_output=True).stdout
-    h = hashlib.sha256(git('rev-parse', 'HEAD') + git('diff', 'HEAD', '--binary'))
+    def sha(b):
+        return hashlib.sha256(b).hexdigest()
+    parts = [('HEAD', sha(git('rev-parse', 'HEAD')))]
+    for name in sorted(git('diff', 'HEAD', '--name-only', '-z').split(b'\0')):
+        if name:
+            parts.append((f'changed {name.decode()}', sha(git('diff', 'HEAD', '--binary', '--', name.decode()))))
     for name in sorted(git('ls-files', '--others', '--exclude-standard', '-z').split(b'\0')):
         if name and (root/name.decode()).is_file():
-            h.update(name + b'\0' + (root/name.decode()).read_bytes())
+            parts.append((f'untracked {name.decode()}', sha((root/name.decode()).read_bytes())))
     manifest = pathlib.Path(build)/'manifest.json' if build else None
     if manifest and manifest.is_file():
-        h.update(manifest.read_bytes())
-    return h.hexdigest()
+        parts.append(('manifest', sha(manifest.read_bytes())))
+    return tuple(parts)
+
+
+def state_change(first, second):
+    """What differs between two tree_states, for the log: 'untracked x appeared, HEAD moved, ...'."""
+    if not (isinstance(first, tuple) and isinstance(second, tuple)):
+        return 'the tree changed'
+    a, b = dict(first), dict(second)
+    said = {'HEAD': 'HEAD moved', 'manifest': "the build's manifest changed"}
+    def what(k):
+        if k.startswith('changed '):
+            return k[8:] + (' changed back' if k not in b else ' changed')
+        return said.get(k) or f'{k} ' + ('appeared' if k not in a else 'went' if k not in b else 'changed')
+    out = [what(k) for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)]
+    return ', '.join(out) or 'nothing'
 
 
 FAILED_TEST = re.compile(r'^(?:FAILED (\S+::\S+)|FAIL (?:protocol )?(\S+)[ :(])', re.M)
@@ -493,15 +524,54 @@ def avail_gb():
     return 0.0
 
 
+def tmp_space(path=TMP):
+    """(free bytes, size in bytes) of the file system that holds path."""
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize
+
+
+def tree_bytes(path):
+    """The space the files under path take, in bytes (0 once it is gone)."""
+    n = 0
+    for d, _, files in os.walk(path):
+        for f in files:
+            with contextlib.suppress(OSError):
+                n += os.lstat(os.path.join(d, f)).st_blocks * 512
+    return n
+
+
+def short_dir(parent=TMP):
+    """A new folder parent/gN, N the lowest free: a suite's TMPDIR. Short, as suites build paths under it into
+    fixtures sized for the Q2's (test/coverflow.py's card root, test/peq.py's Tidal folder) and sockets'
+    108-byte addresses; mkdir is atomic, so two gates sharing /tmp never share one."""
+    for n in itertools.count():
+        try:
+            (d := pathlib.Path(parent)/f'g{n}').mkdir()
+            return d
+        except FileExistsError:
+            continue
+    raise AssertionError('unreachable')
+
+
+def holders(sizes, used):
+    """'s1 1400 MB, s2 80 MB, elsewhere 20 MB': who held /tmp, largest first, from {suite: bytes} and /tmp's use."""
+    mb = 1 << 20
+    parts = [f'{n} {b // mb} MB' for n, b in sorted(sizes.items(), key=lambda kv: -kv[1]) if b >= mb]
+    rest = used - sum(sizes.values())
+    return ', '.join(parts + ([f'elsewhere {rest // mb} MB'] if rest >= mb else [])) or 'nothing measured'
+
+
 def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock=time.monotonic, force_build=False,
-        poll=2.0, retry=False, tree=None, flakes=None):
+        poll=2.0, retry=False, tree=None, flakes=None, tmp=tmp_space, tmp_dir=TMP):
     """Build (unless build is given, or nothing needs it and not force_build) and run the suites, as memory
     allows; returns {name: {'rc', 'seconds', 'log'}} with 'build' among them when it ran. A failed result
     has 'kind' (classify). retry: a suite that fails runs once more, with nothing beside it, and a pass then
     is the result, marked 'flaky' with the first failure's kind and appended to the file flakes, when both tries
     ran on the same tree_state; after a change it fails with rc 'changed' and the first try's log. A retried
     result names the tests the first try's log failed ('first_tests'). tree (the
-    hash tree_key gives): a suite recorded as passed on it is not run ('cached'), and each pass is recorded."""
+    hash tree_key gives): a suite recorded as passed on it is not run ('cached'), and each pass is recorded.
+    Each suite's TMPDIR is a folder of its own in tmp_dir (short_dir), gone when it ends; a failed suite that saw tmp_dir
+    full, or whose log says so, has 'tmp_full' (who held it) and the line '/tmp full: <who>'."""
     logs.mkdir(parents=True, exist_ok=True)
     done: dict = {}
     if tree:
@@ -520,11 +590,12 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
 
     def launch(s):
         s.log = logs/f'{s.name.replace("/", "_")}.log'
+        s.tmp, s.tmp_low = short_dir(tmp_dir), None
         s.states.append(tree_state(build))  # what this try runs against, before it starts
         s.start = clock()
         cmd = s.command(build or '')
         log_file = open(s.log, 'w')
-        s.proc = subprocess.Popen(cmd, cwd=ROOT, env={**os.environ, **s.env},
+        s.proc = subprocess.Popen(cmd, cwd=ROOT, env={**os.environ, **s.env, 'TMPDIR': str(s.tmp)},
                                   stdout=subprocess.PIPE if s is builder else log_file,  # the build's path
                                   stderr=log_file if s is builder else subprocess.STDOUT, text=True,
                                   start_new_session=True)  # its own group, which the finally below ends whole
@@ -538,6 +609,18 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                     continue
                 running.remove(s)
                 s.rc, s.seconds = s.proc.returncode, clock() - s.start
+                full = None
+                if s.rc != 0:
+                    free, size = tmp()
+                    if s.tmp_low and s.tmp_low[0] < TMP_FULL * size:
+                        full = s.tmp_low[1]
+                    elif NO_SPACE in pathlib.Path(s.log).read_text(errors='replace')[-20000:]:
+                        # it may have ended between polls: who holds /tmp now, this suite's folder among it
+                        full = s.tmp_low[1] if s.tmp_low else holders(
+                            {r.name: tree_bytes(r.tmp) for r in [s, *running]}, size - free)
+                shutil.rmtree(s.tmp, ignore_errors=True)
+                if full:
+                    log(f'/tmp full: {full}')
                 if s is builder:
                     lines = s.proc.stdout.read().strip().splitlines()
                     build = lines[-1] if s.rc == 0 and lines else None
@@ -548,6 +631,8 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                         s.rc = subprocess.run(s.after, cwd=ROOT, env={**os.environ, **s.env}, stdout=f,
                                               stderr=subprocess.STDOUT).returncode
                 result = {'rc': s.rc, 'seconds': round(s.seconds), 'log': str(s.log)}
+                if full:
+                    result['tmp_full'] = full
                 if s.rc != 0:
                     result['kind'] = classify(s.rc, pathlib.Path(s.log).read_text(errors='replace')[-20000:])
                     if retry and s is not builder and s.retried is None:
@@ -561,7 +646,9 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                         continue
                 elif s.retried and len(set(s.states)) > 1:
                     # passed only after the tree or the build changed: the first failure stands
-                    result.update(rc='changed', kind=s.retried, changed=True, log=str(s.log.with_suffix('.first.log')))
+                    result.update(rc='changed', kind=s.retried, changed=True, log=str(s.log.with_suffix('.first.log')),
+                                  change=state_change(s.states[0], s.states[-1]))
+                    log(f'{s.name}: between its tries {result["change"]}')
                 elif s.retried:
                     result['flaky'] = s.retried
                     if flakes:
@@ -578,9 +665,9 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                     # a pass after a failure is not recorded: the next run on this tree tests it again
                     hit = cache_file(tree, s, build_args)
                     hit.parent.mkdir(parents=True, exist_ok=True)
-                    tmp = hit.with_suffix(f'.{os.getpid()}.tmp')
-                    tmp.write_text(json.dumps({**result, 'when': time.strftime('%Y-%m-%d %H:%M'), 'tree': tree}))
-                    tmp.replace(hit)
+                    part = hit.with_suffix(f'.{os.getpid()}.tmp')
+                    part.write_text(json.dumps({**result, 'when': time.strftime('%Y-%m-%d %H:%M'), 'tree': tree}))
+                    part.replace(hit)
                 done[s.name] = result
                 note = ', failed, then passed after a change' if result.get('changed') else \
                     f', flaky: first {s.retried}' if s.rc == 0 and s.retried else \
@@ -606,12 +693,20 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                     pending.remove(s)
                     launch(s)
                     young += s.mem
+            if running:
+                free, size = tmp()
+                if free < TMP_LOW * size:
+                    who = holders({s.name: tree_bytes(s.tmp) for s in running}, size - free)
+                    for s in running:
+                        if s.tmp_low is None or free < s.tmp_low[0]:
+                            s.tmp_low = (free, who)
             if pending or running:
                 time.sleep(poll)
     finally:
         for s in running:  # stopped early: end each suite with what it started (q2-heavy ends its job on TERM)
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(s.proc.pid, signal.SIGTERM)
+            shutil.rmtree(s.tmp, ignore_errors=True)
     return done
 
 

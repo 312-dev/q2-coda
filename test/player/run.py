@@ -22,7 +22,7 @@ that bound real-time behaviour or read the host's /tmp, each tried again (TRIES 
 machine starved (Stalls). Each line gives the test's seconds, and the run ends with the side-by-side part's and the
 whole run's, the last line also counting what failed, and what failed side by side and passed alone, by name.
 """
-import array, concurrent.futures, functools, math, multiprocessing, os, pathlib, re, signal, struct, subprocess, sys, tempfile, threading, time
+import array, concurrent.futures, functools, math, multiprocessing, os, pathlib, re, shutil, signal, struct, subprocess, sys, tempfile, threading, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -3621,9 +3621,14 @@ def timed(f, *args):
 
 def chain(n, names, player, songs, tmp):
     """The tests names, one after another in folder tmp/c<n> (AFTER's reader after its writer; short, as the player's
-    socket path under it must fit a sockaddr_un): [(name, ok, text, s)]."""
+    socket path under it must fit a sockaddr_un): [(name, ok, text, s)]. The folder goes when the chain ends, as
+    nothing reads it after: the tests' captured PCM is tens of MB each, and the gate's /tmp is a 2 GB tmpfs that
+    every suite shares (tools/mac/q2env)."""
     d = tmp/f'c{n}'; d.mkdir()
-    return [(n, *timed(globals()[n], player, songs, d)) for n in names]
+    try:
+        return [(n, *timed(globals()[n], player, songs, d)) for n in names]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def alone(name, player, songs, tmp):
@@ -3632,6 +3637,7 @@ def alone(name, player, songs, tmp):
         d = tmp/f's{SERIAL.index(name)}-{attempt}'; d.mkdir()
         with Stalls() as stalls:
             ok, text, secs = timed(globals()[name], player, songs, d)
+        shutil.rmtree(d, ignore_errors=True)  # as chain's folders go
         if ok or stalls.worst < STALL_S:
             break
         print(f'again {name}: failed while starved for {stalls.worst * 1000:.0f} ms ({text[:200]})', flush=True)

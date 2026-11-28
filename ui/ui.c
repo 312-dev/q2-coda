@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <time.h>
 
 #include "q2ui.h"
@@ -65,6 +66,9 @@ static void (*rest_hook)(void), (*stack_hook)(void);
 void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
 static void (*second_hook)(void);
 void ui_on_second(void (*fn)(void)) { second_hook = fn; }
+/* the loop's own work since the last frame shown (the frame log's loop_us), and whether the second's hook was in it */
+static uint64_t loop_us;
+static int loop_second;
 static int hold_key;
 static void (*hold_fn)(void);
 void ui_on_hold(int key, void (*fn)(void)) { hold_key = key, hold_fn = fn; }
@@ -286,7 +290,9 @@ static void account(uint64_t start_us, uint64_t draw_ns, uint64_t show_ns, unsig
             ++s->gaps_paused;
         else {
             ++s->gap_hist[k <= 1 ? 0 : k == 2 ? 1 : k == 3 ? 2 : k <= 6 ? 3 : 4];
-            if (gap >= refresh * 3 / 2) {
+            if (gap >= refresh * 3 / 2 && s->frames <= 2) /* the first turns: start-up, not the motion's pace */
+                ++s->start_late;
+            else if (gap >= refresh * 3 / 2) {
                 s->dropped += (unsigned)k - 1, ++s->late;
                 s->streak = 0;
                 if (gap > s->gap_max_us) s->gap_max_us = gap, s->gap_max_flags = since_shown;
@@ -310,9 +316,17 @@ static void account(uint64_t start_us, uint64_t draw_ns, uint64_t show_ns, unsig
         f->dt_us = dt > 0xffffffffu ? 0xffffffffu : (uint32_t)dt;
         f->scroll16 = list_drawn ? (int32_t)(list_drawn_scroll * 16) : INT32_MIN;
         f->flags = (moving ? FRAME_MOVING : 0) | (fb_overlap ? FRAME_OVERLAP : 0) | (text_deferred ? FRAME_DEFER : 0) |
-                   (fb_page() ? FRAME_PAGE1 : 0) | (since_shown & UI_SINCE_INPUT ? FRAME_INPUT : 0);
+                   (fb_page() ? FRAME_PAGE1 : 0) | (since_shown & UI_SINCE_INPUT ? FRAME_INPUT : 0) |
+                   (fb_scanned ? FRAME_SCANNED : 0) | (loop_second ? FRAME_SECOND : 0);
+        f->loop_us = loop_us > 0xffffffffu ? 0xffffffffu : (uint32_t)loop_us;
+        f->work_us = work > 0xffffffffu ? 0xffffffffu : (uint32_t)work;
+        f->pan_us = fb_pan_us > work ? f->work_us : (uint32_t)fb_pan_us;
+        f->glyphs = text_made_frame, f->glyph_max_us = text_glyph_max_us;
+        struct rusage ru;
+        static long faults_before;
+        if (!getrusage(RUSAGE_SELF, &ru)) f->faults = (uint32_t)(ru.ru_majflt - faults_before), faults_before = ru.ru_majflt;
     }
-    list_drawn = 0;
+    list_drawn = 0, loop_us = 0, loop_second = 0;
     last_shown_us = mono_us(), last_moving = moving;
     since_shown = (text_deferred ? UI_SINCE_DEFER : 0) | (slide.dir ? UI_SINCE_SLIDE : 0);
 }
@@ -499,7 +513,11 @@ int ui_run(void) {
          * lit it (demo's wake, at the same key) may be read in the same pass as that word */
         int dark = ui_dark();
         for (int k = 0; k < watches; ++k)
-            if (fds[nfds + k].revents && fds[nfds + k].fd == watch[k].fd && watch[k].fd >= 0) watch[k].fn();
+            if (fds[nfds + k].revents && fds[nfds + k].fd == watch[k].fd && watch[k].fd >= 0) {
+                uint64_t t0 = mono_us();
+                watch[k].fn();
+                loop_us += mono_us() - t0;
+            }
         input_t in[64];
         int got = input_read(in, 64);
         /* the press that wakes the screen is only that, its release included. demo lights it at a
@@ -527,7 +545,10 @@ int ui_run(void) {
         showed = ui_frame(in, got);
         if (showed) rested = 0;
         static uint64_t second_at; /* while it runs, once a second (the stats file, read live on a Q2) */
-        if (second_hook && mono_us() - second_at >= 1000000u) second_at = mono_us(), second_hook();
+        if (second_hook && mono_us() - second_at >= 1000000u) {
+            second_at = mono_us(), second_hook();
+            loop_us += mono_us() - second_at, loop_second = 1;
+        }
     }
     while (depth) {
         --depth;

@@ -53,6 +53,8 @@ extern int fb_pan_blocks; /* a file's pan waits for the refresh, as the Q2's doe
 extern int fb_check_page; /* read the panel's shown page back before each turn (the stats' fb_overlaps) */
 extern int fb_flush;      /* between the turn and the pan: 0 nothing, 1 msync, 2 the data cache written back (MIPS) */
 extern int fb_overlap;    /* the last turn's page was the one the panel said it showed */
+extern const char *fb_lcd_site; /* --lcd-site: where the display controller's registers are read (/dev/mem), or 0 */
+extern int fb_scanned;   /* the last turn wrote into the page the display controller was reading (--lcd-site) */
 extern int fb_bits;     /* the panel's bits a channel, as given */
 unsigned fb_refresh_us(void); /* the panel's refresh period, from its timings (16667 unknown) */
 /* A second canvas a page is drawn into for a slide: canvas_swap makes it the one draw.c draws
@@ -197,6 +199,7 @@ float text_width(int face, int px, const char *s);
 void text_frame(void); /* a frame is over: the cache's clock moves on */
 extern int text_budget_us; /* what a frame may spend making new glyphs, wall time; 0: all it needs */
 extern int text_deferred;  /* glyphs this frame left for the next */
+extern unsigned text_made_frame, text_glyph_max_us; /* glyphs this frame made, and the slowest one's time */
 int text_warm(unsigned budget_us); /* make common glyphs ahead of need; 1 while more are left */
 struct text_stats {
     unsigned glyphs, bytes, made, evictions;
@@ -309,11 +312,15 @@ struct ui_stats {
     unsigned gaps_paused; /* frames after a motion that had ended by its own steps (ui.c account): no gap counted */
     uint64_t gap_max_us;  /* the longest gap counted as refreshes missed, and the UI_SINCE_* flags of its wait */
     unsigned gap_max_flags;
+    unsigned start_late; /* gaps of a refresh and a half or more in the first turns after the start: not a motion's */
     /* from a wheel's or a finger's input to the end of the pan of the first frame shown after it (its first refresh
      * on the panel): under 17, 33, 50, 67, 100 ms, more; how many, their sum and the longest */
     unsigned lat_hist[6], lat_n;
     uint64_t lat_us, lat_max_us;
     unsigned fb_checks, fb_overlaps; /* frames whose page was read back before the turn, and those it said is shown */
+    /* --lcd-site: DC_LAY0_SITE readings (two a turn), those outside both pages, and the turns that wrote into the page
+     * it was read from */
+    unsigned lcd_site_reads, lcd_site_outside, lcd_site_into;
 };
 /* The frame log (--frame-log N): the last N frames shown, each its time since the one before, the scroll of the list
  * it drew (in 16ths of a pixel; INT32_MIN, none) and FRAME_* flags, for a device read of judder and tearing */
@@ -321,12 +328,20 @@ struct ui_frame_rec {
     uint32_t dt_us;
     int32_t scroll16;
     uint32_t flags;
+    uint32_t work_us;      /* from the frame's start to the end of its pan (ui.c account) */
+    uint32_t glyphs;       /* glyphs made for it (text.c) */
+    uint32_t glyph_max_us; /* the slowest of them */
+    uint32_t faults;       /* major page faults since the frame before (a mapped font's pages read from flash) */
+    uint32_t pan_us;       /* its pan ioctl's time, the refresh wait included: work_us less this is the frame's own */
+    uint32_t loop_us;      /* the loop's own work since the frame before: the watches' readers and the second's hook */
 };
 #define FRAME_MOVING 1  /* the frame asked for the next */
 #define FRAME_OVERLAP 2 /* the panel said the page this frame was turned onto was the one shown */
 #define FRAME_DEFER 4   /* glyphs were left for the next frame */
 #define FRAME_PAGE1 8   /* turned onto page 1 (else 0) */
 #define FRAME_INPUT 16  /* input came in for it */
+#define FRAME_SCANNED 32 /* its turn wrote into the page the display controller was reading (--lcd-site) */
+#define FRAME_SECOND 64  /* the once-a-second hook (ui_on_second: the stats file) ran since the frame before */
 extern struct ui_frame_rec *ui_frame_log;
 extern unsigned ui_frame_log_n, ui_frame_log_at; /* the log's length and the next slot, oldest first from there */
 extern double list_drawn_scroll;                 /* list.c: the scroll of the list drawn last (list_drawn: one was) */

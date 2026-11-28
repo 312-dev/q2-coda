@@ -2676,7 +2676,12 @@ int main(void) {
     body = 'enum { REACH_TIDAL = 5 };\nstatic void reach_note(int s, int rc, long h) { (void)s, (void)rc, (void)h; }\n' + body
     (tmp/'tidal_dl.c').write_text(TIDAL_DL.replace('TIDAL_SOURCE', body))
     binary = tmp/'tidal_dl'
-    subprocess.run(['cc', '-pthread', '-D_GNU_SOURCE', f'-DTIDAL_DIR="{tmp}/tidal"', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
+    # tidal.c's paths are TIDAL_DIR "/" and a name of up to 255 bytes in 300, so -Wformat-truncation holds the
+    # folder to 43 bytes (the Q2's, /mnt/mmc/.tidal, is 15). A long TMPDIR would fail the compile obscurely.
+    folder = f'{tmp}/tidal'
+    if len(folder) > 43:
+        raise SystemExit(f'{folder} is over 43 bytes, past tidal.c\'s path[300] for a 255-byte name: set a shorter TMPDIR')
+    subprocess.run(['cc', '-pthread', '-D_GNU_SOURCE', f'-DTIDAL_DIR="{folder}"', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                     str(tmp/'tidal_dl.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=30)
     print('Tidal cache: stream file extensions, eviction at the chosen cap, failed deletion, Stop, re-fetch and skip downloads, Clear All under a download, Tidal lists paged to the end passed.')

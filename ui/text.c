@@ -79,7 +79,8 @@ int text_open(const char *regular, const char *medium, const char *fallback) {
     face_open(FACE_FALLBACK, fallback);
     return 0;
 }
-void text_frame(void) { ++frame, spent_us = 0, text_deferred = 0; }
+unsigned text_made_frame, text_glyph_max_us;
+void text_frame(void) { ++frame, spent_us = 0, text_deferred = 0, text_made_frame = text_glyph_max_us = 0; }
 
 /* The cache is full: every glyph no frame drew since it last filled goes, and the runs with it. */
 static void evict(void) {
@@ -126,7 +127,7 @@ static const struct glyph *glyph_get(int face, int px, unsigned cp, int phase) {
         ++text_deferred;
         return &later;
     }
-    uint64_t began = text_budget_us ? mono_us() : 0;
+    uint64_t began = mono_us();
     if (text_stats.glyphs >= GLYPHS * 3 / 4) {
         evict();
         if (text_stats.glyphs >= GLYPHS * 3 / 4) { /* a frame that needs them all: start over */
@@ -146,7 +147,10 @@ static const struct glyph *glyph_get(int face, int px, unsigned cp, int phase) {
     g->adv = (float)adv * scale;
     ++text_stats.glyphs, ++text_stats.made;
     text_stats.bytes += (unsigned)(w * h);
-    if (text_budget_us) spent_us += mono_us() - began;
+    uint64_t took = mono_us() - began;
+    if (text_budget_us) spent_us += took;
+    ++text_made_frame;
+    if (took > text_glyph_max_us) text_glyph_max_us = took > 0xffffffffu ? 0xffffffffu : (unsigned)took;
     return g;
 }
 

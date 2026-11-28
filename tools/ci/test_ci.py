@@ -756,6 +756,54 @@ def test_gate_stopped_early_ends_what_its_suites_started(tmp_path):
     raise AssertionError(f'suite s\'s sleep ({pid}) outlived the gate')
 
 
+def test_each_suite_has_a_tmpdir_of_its_own_gone_when_it_ends(tmp_path):
+    seen = tmp_path/'seen'
+    suites = {n: gate.Suite(n, ['bash', '-c', f'echo $TMPDIR >> {seen}; head -c 4096 /dev/urandom > $TMPDIR/f'])
+              for n in ('a', 'b')}
+    gate.run(suites, [], tmp_path/'logs', sys.executable, build='B', log=lambda m: None, mem=lambda: 12.0, poll=0.02,
+             tmp_dir=tmp_path)
+    dirs = seen.read_text().split()
+    assert len(set(dirs)) == 2 and all(d.startswith(str(tmp_path)) for d in dirs)
+    assert not any(os.path.exists(d) for d in dirs) and not list(tmp_path.glob('g*'))
+
+
+def test_the_gates_real_tmpdir_leaves_the_fixtures_their_margins(tmp_path):
+    """vd43 (2026-11-28): under a TMPDIR of /tmp/q2gXXXXXXXX/N, test/coverflow.py's card root passed coverflow.c's
+    72-byte folder length (names_of) and test/peq.py's Tidal folder tidal.c's 43 bytes, and both failed obscurely.
+    A suite run by the gate on the real /tmp makes each fixture's folder as those suites do, and both fit."""
+    out = tmp_path/'paths'
+    probe = ("import tempfile; print(tempfile.mkdtemp(prefix='q2-coverflow-check-')); "
+             "print(tempfile.mkdtemp(prefix='q2-peq-check-'))")
+    r = gate.run({'probe': gate.Suite('probe', [sys.executable, '-c', probe])}, [], tmp_path/'logs', sys.executable,
+                 build='B', log=lambda m: None, mem=lambda: 12.0, poll=0.02)
+    assert r['probe']['rc'] == 0
+    cf, peq = pathlib.Path(r['probe']['log']).read_text().split()
+    assert len(cf + '/c0/mnt/mmc/.coverflow') < 72, cf  # test/coverflow.py's card c0
+    assert len(peq + '/tidal') <= 43, peq  # test/peq.py's tidal_check
+    assert pathlib.Path(cf).parent.parent == gate.TMP and not pathlib.Path(cf).exists()
+
+
+def test_a_suite_that_fails_on_a_full_tmp_names_who_held_it(tmp_path):
+    """vd41 (2026-11-28): test/ui.py failed with OSError ENOSPC writing its panel file, while test/player/run.py held
+    1.4 GB of the Mac container's 2 GB /tmp, and nothing said so. The gate says who held /tmp."""
+    events = []
+    hog = gate.Suite('hog', ['bash', '-c', 'head -c 3145728 /dev/urandom > $TMPDIR/pcm; sleep 0.5'])
+    victim = gate.Suite('victim', ['bash', '-c', 'sleep 0.3; echo "OSError: [Errno 28] No space left on device"; exit 1'])
+    r = gate.run({'hog': hog, 'victim': victim}, [], tmp_path/'logs', sys.executable, build='B', log=events.append,
+                 mem=lambda: 12.0, poll=0.02, tmp=lambda: (0, 4 << 20), tmp_dir=tmp_path)
+    assert r['victim']['tmp_full'].startswith('hog 3 MB'), r['victim']
+    assert [e for e in events if e.startswith('/tmp full: ')] == ['/tmp full: ' + r['victim']['tmp_full']]
+    assert 'tmp_full' not in r['hog']  # it passed
+
+
+def test_a_failure_with_tmp_free_says_nothing_of_tmp(tmp_path):
+    events = []
+    bad = gate.Suite('bad', ['bash', '-c', 'exit 1'])
+    r = gate.run({'bad': bad}, [], tmp_path/'logs', sys.executable, build='B', log=events.append, mem=lambda: 12.0,
+                 poll=0.02, tmp=lambda: (3 << 30, 4 << 30), tmp_dir=tmp_path)
+    assert 'tmp_full' not in r['bad'] and not [e for e in events if '/tmp' in e]
+
+
 def test_bisection_never_takes_more_than_the_dry_run_says():
     for n in (1, 2, 5, 10):
         fake = FakeBatch(bad={f'b{i}': {'unit'} for i in range(n)})  # every branch bad: the worst case
@@ -1427,6 +1475,23 @@ def test_an_integration_branch_given_a_base_runs_that_diffs_plan():
     assert affected.runs_everything(False, None, 'integ/q2-1129')
     assert not affected.runs_everything(False, 'integ/q2-1128', 'integ/q2-1129')
     assert affected.runs_everything(True, 'integ/q2-1128', 'fix/x') and not affected.runs_everything(False, None, 'fix/x')
+
+
+def test_a_change_between_tries_is_named(tmp_path):
+    """vd42 (2026-11-28) recorded test/ui.py as passed after a change with a clean worktree before and after: the
+    gate says which part of tree_state differed."""
+    def git(*a):
+        subprocess.run(['git', '-C', str(tmp_path), *a], check=True, capture_output=True)
+    git('init', '-q')
+    (tmp_path/'a.py').write_text('1\n')
+    git('add', 'a.py')
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'a')
+    clean = gate.tree_state(root=tmp_path)
+    assert gate.tree_state(root=tmp_path) == clean and gate.state_change(clean, clean) == 'nothing'
+    (tmp_path/'9710').write_text('x')
+    (tmp_path/'a.py').write_text('2\n')
+    assert gate.state_change(clean, gate.tree_state(root=tmp_path)) == 'a.py changed, untracked 9710 appeared'
+    assert gate.state_change('s1', 's2') == 'the tree changed'
 
 
 def test_a_retry_that_passes_after_the_tree_changed_is_not_flaky(monkeypatch, tmp_path, capsys):

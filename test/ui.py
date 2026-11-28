@@ -55,9 +55,12 @@ def folder(work, n):
     d = pathlib.Path(tempfile.mkdtemp(dir=work))
     fixture.make(n, d/'library.db')
     (d/'fonts').mkdir()
-    shutil.copy(ROOT/'assets/fonts/Inter-Regular.ttf', d/'fonts/inter.ttf')
-    shutil.copy(ROOT/'assets/fonts/Inter-Medium.ttf', d/'fonts/inter-medium.ttf')
-    (d/'fb').write_bytes(bytes(320 * 375 * 2 * 4))
+    # Links and a sparse panel file: the suite makes a few hundred folders on the gate's shared /tmp (tools/ci/gate.py
+    # TMP), and copies took 1.8 MB each before q2ui drew a pixel.
+    (d/'fonts/inter.ttf').symlink_to(ROOT/'assets/fonts/Inter-Regular.ttf')
+    (d/'fonts/inter-medium.ttf').symlink_to(ROOT/'assets/fonts/Inter-Medium.ttf')
+    with open(d/'fb', 'wb') as f:
+        f.truncate(320 * 375 * 2 * 4)
     (d/'config.ini').write_text('[IPOD]\nLIGHT=0\n')  # dark, as these checks were written for (Light Mode is Auto unset)
     return d
 
@@ -168,7 +171,7 @@ def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=
 class Run:
     """One live q2ui over a library of n songs, with its panel file, inputs and stats in a folder of its own."""
 
-    def __init__(self, binary, work, n, *options, at=None, fds=()):
+    def __init__(self, binary, work, n, *options, at=None, fds=(), stats=True):
         self.dir = at or folder(work, n)
         if not at:
             (self.dir/'input').mkdir()
@@ -176,7 +179,12 @@ class Run:
                 os.mkfifo(self.dir/'input'/f'event{k}')
             os.mkfifo(self.dir/'cmdq')
         self.queue = os.open(self.dir/'cmdq', os.O_RDWR | os.O_NONBLOCK)  # demo's end of the player's queue
-        self.proc = subprocess.Popen(base_args(binary, self.dir) + ['--input', self.dir/'input', *options], pass_fds=fds)
+        args = base_args(binary, self.dir)
+        self.stats_file = self.dir/'stats.json' if stats else pathlib.Path('/tmp/q2ui-stats.json')
+        if not stats:  # q2ui's own stats file, where it puts it with no --stats
+            k = args.index('--stats')
+            del args[k:k + 2]
+        self.proc = subprocess.Popen(args + ['--input', self.dir/'input', *options], pass_fds=fds)
         self.wheel = open(self.dir/'input/event3', 'wb', buffering=0)
         self.keys = open(self.dir/'input/event1', 'wb', buffering=0)
         self.touch = open(self.dir/'input/event2', 'wb', buffering=0)
@@ -194,7 +202,7 @@ class Run:
             time.sleep(gap)
 
     def stats(self):
-        return json.loads((self.dir/'stats.json').read_text())
+        return json.loads(self.stats_file.read_text())
 
     def wakes(self):
         """How often the program has been woken from a wait (its voluntary context switches)."""
@@ -3104,6 +3112,34 @@ def stats_rests(binary, work):
     return good
 
 
+def lcd_site(binary, work):
+    """--lcd-site reads the display controller's DC_LAY0_SITE (the DDR address it reads layer 0's pixels from) around
+    each turn, and counts the turns that wrote into the page it was reading: tearing from the turn, told apart from
+    the panel's own (docs/ui-rewrite.md#the-frame). A file stands in for /dev/mem here, its word at 0x100 the site,
+    and a file panel's pages stand at LCD_FILE_PHYS (ui/fb.c)."""
+    good, page = True, 320 * 375 * 4
+    for name, site, expect in (('page 1', 0x10000000 + page + 4096, 'some'), ('none', 0, 'outside')):
+        path = pathlib.Path(tempfile.mkdtemp(dir=work))/'site'
+        path.write_bytes(bytes(0x100) + struct.pack('<I', site) + bytes(4096 - 0x104))
+        run = Run(binary, work, 400, '--lcd-site', path)
+        try:
+            run.rest()
+            run.ticks(8, 0.05)
+            s = run.rest()
+            reads, into, out = (s.get('lcd_site_' + k) for k in ('reads', 'into', 'outside'))
+            if expect == 'some':
+                ok = isinstance(reads, int) and reads > 4 and 0 < into < reads // 2 and out == 0  # two readings a turn, half the turns onto page 1
+                what = ('a site inside page 1 counts the turns onto page 1 as into the page being read, and only those'
+                        f' ({name})')
+            else:
+                ok = isinstance(reads, int) and reads > 4 and into == 0 and out == reads
+                what = f'a site outside both pages is counted apart, never as into ({name})'
+            good &= check(what, ok, f'reads {reads}, into {into}, outside {out}')
+        finally:
+            run.proc.kill(), run.proc.wait(timeout=5), os.close(run.queue)
+    return good
+
+
 def frame_log(binary, work):
     """--frame-log keeps the last frames shown for a device read of judder (the scroll a frame drew, against the one
     before) and the latency from the wheel's input to the first frame shown after it (docs/ui-rewrite.md#the-frame)."""
@@ -3117,6 +3153,27 @@ def frame_log(binary, work):
                      0 < len(dt) == len(sc) == len(fl) <= 256 and len(dt) == min(s['frames'], 256), f'{len(dt)} {len(sc)} {len(fl)} of {s["frames"]}')
         moved = [b - a for a, b in zip(sc, sc[1:]) if a is not None and b is not None and b != a]
         good &= check("twelve ticks down 400 songs scroll the list on, frame by frame", len(moved) > 5 and all(m > 0 for m in moved), str(moved[:12]))
+        work_us, made, slowest, faults = (s.get('frame_log_' + k, []) for k in ('work_us', 'glyphs', 'glyph_max_us', 'faults'))
+        good &= check("each frame logged has its work time, the glyphs it made, its slowest glyph's time and its major faults; text scrolled "
+                      'in makes glyphs, and a frame that made none has no slowest',
+                      len(work_us) == len(made) == len(slowest) == len(faults) == len(dt) and all(w > 0 for w in work_us) and
+                      any(m > 0 and g > 0 for m, g in zip(made, slowest)) and all(g == 0 for m, g in zip(made, slowest) if not m),
+                      f'{len(work_us)} {len(made)} {len(slowest)} of {len(dt)}; made {sum(made)}, slowest {max(slowest or [0])} us')
+        pan = s.get('frame_log_pan_us', [])
+        good &= check("each frame logged has its pan's time (the refresh wait in it), inside its work time, so a late frame's own "
+                      'cost is its work less its pan',
+                      len(pan) == len(work_us) and any(p > 0 for p in pan) and all(p <= w for p, w in zip(pan, work_us)),
+                      f'{len(pan)} of {len(work_us)}; pan max {max(pan or [0])} us')
+        run.ticks(30, 0.05)  # a second and a half of motion: the once-a-second stats write lands between two frames
+        s = run.rest()
+        loop, fl = s.get('frame_log_loop_us', []), s.get('frame_log_flags', [])
+        second = [u for u, f in zip(loop, fl) if f & 64]  # FRAME_SECOND
+        good &= check("each frame logged has the loop's own work before it, and a frame after the once-a-second stats write is "
+                      'flagged so, with that write in its loop time',
+                      len(loop) == len(fl) > 0 and bool(second) and all(u > 0 for u in second),
+                      f'{len(loop)} of {len(fl)}; after the stats write {second[:6]} us')
+        good &= check("a gap in the first turns after the start is counted apart (start_late), not as a motion's late frame",
+                      isinstance(s.get('start_late'), int), str(s.get('start_late')))
         good &= check('each tick is timed to the first frame shown after it, inside a refresh or two on the host',
                       s['latency_n'] >= 10 and 0 < s['latency_us_mean'] < 40000 and sum(s['latency_hist_ms'].values()) == s['latency_n'],
                       f"{s['latency_n']} inputs, mean {s['latency_us_mean']} us, max {s['latency_us_max']}, {s['latency_hist_ms']}")
@@ -3196,6 +3253,37 @@ def wheel_scroll(binary, work):
     d = steps(trace)
     good &= check('a fast turn moves the rows one way only, and to whole rows', min(d) >= -0.01 and whole(trace, 32),
                   f'least step {min(d):.2f}, rest {trace[-1]["scroll"]}')
+    return good
+
+
+def stats_default(binary, work):
+    """With no --stats the stats file is on tmpfs (/tmp/q2ui-stats.json), never the internal flash: /mnt/data is UBIFS
+    mounted sync on a Q2, where a write each second wore it. A stats file a q2ui before left on /mnt/data, and its
+    half-written .new, are removed at the start: checked where /mnt/data can be written (a Q2, an emulator), not on a
+    host that has none."""
+    data, tmp = pathlib.Path('/mnt/data'), pathlib.Path('/tmp/q2ui-stats.json')
+    old = [data/'q2ui-stats.json', data/'q2ui-stats.json.new']
+    can = os.access(data, os.W_OK)
+    for f in old if can else ():
+        f.write_text('{}')
+    tmp.unlink(missing_ok=True)
+    run = Run(binary, work, 50, stats=False)
+    try:
+        run.ticks(30, 0.05)  # over a second of motion: the once-a-second write too, not only the start's and the rest's
+        time.sleep(1.5)
+        good = check('with no --stats, q2ui writes its stats to /tmp/q2ui-stats.json (tmpfs), live while the list moves',
+                     tmp.exists() and json.loads(tmp.read_text()).get('frames', 0) > 0, f'/tmp/q2ui-stats.json {tmp.exists()}')
+        if can:
+            left = sorted(p.name for p in data.iterdir() if p.name.startswith('q2ui-stats'))
+            good &= check('nothing of the stats under /mnt/data: the file and .new an earlier q2ui left there are removed at the start',
+                          not left, str(left))
+        else:
+            print('skip the stale /mnt/data stats file removal: no writable /mnt/data here')
+    finally:
+        run.end()
+        tmp.unlink(missing_ok=True)
+        for f in old if can else ():
+            f.unlink(missing_ok=True)
     return good
 
 
@@ -3550,8 +3638,10 @@ def main():
         if not only or 'live' in only:
             good &= live(binary, work)
             good &= live_stats(binary, work)
+            good &= stats_default(binary, work)
             good &= stats_rests(binary, work)
             good &= frame_log(binary, work)
+            good &= lcd_site(binary, work)
             good &= routes(binary, work)
             good &= reload(binary, work)
             good &= early_hup(binary, work)
@@ -3597,6 +3687,8 @@ def main():
             good &= stats_rests(binary, work)
         if not only or 'wheelscroll' in only:
             good &= wheel_scroll(binary, work)
+        if 'lcdsite' in only:  # --lcd-site alone ('live' runs it too)
+            good &= lcd_site(binary, work)
         if 'framelog' in only:  # --frame-log alone ('live' runs it too)
             good &= frame_log(binary, work)
         if 'danger' in only:  # the danger card alone ('pages' runs it too)
