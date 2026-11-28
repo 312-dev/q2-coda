@@ -5,9 +5,9 @@ The Q2 plays a known signal over the air, the laptop records what arrives, and a
 what was negotiated and sent. It is for the work in [bluez](bluez.md), [bluealsa](bluealsa.md) and
 [bt-own-plan](bt-own-plan.md), whose steps otherwise need a person and a pair of headphones each time.
 
-Each statement says how it is known: **measured** (run on the laptop or in the unit tests, 2026-11-27),
-**read** (from documentation or source), or **needs a Q2** (nothing here has yet been run over the air: the
-first pairing changes the owner's Bluetooth settings, so it waits for a yes).
+Each statement says how it is known: **measured** (run on the laptop or in the unit tests, 2026-11-27, or on a
+Q2 running V288i, 2026-11-28), **read** (from documentation or source), or **needs a Q2** (not yet run over the
+air: the first run paired and then stopped, see [The first run](#the-first-run)).
 
 ## Design
 
@@ -27,6 +27,7 @@ cannot hand it to WSL: Linux on this laptop gets a radio only from a dongle.
 
 **Codecs** (read): Windows' A2DP sink is reported to offer SBC alone. Whether this build offers more is settled by
 the first capture, whose `peer offers:` line is Windows' answer to the Q2's AVDTP Get Capabilities (needs a Q2).
+The other direction is measured: Windows as an A2DP source to the Q2's sink role negotiated AAC at 48 kHz.
 A codec the sink does not offer cannot be streamed to it, so AAC, aptX, aptX HD and LDAC over the air need the
 dongle, or a headset with the Q2's own capture running.
 
@@ -74,27 +75,31 @@ tools/btrelay/btrelay.sh unpair AA:BB:CC:DD:EE:FF
   default output's mix format (here 48 kHz, 2 channels, 32-bit float) and Windows' media sessions.
 - **`pair`** watches for the unpaired Q2 (which runs an inquiry, the scan for nearby devices), pairs with it
   and accepts the confirmation itself, printing the code. It notes the address in `paired.txt` beside the exe
-  (needs a Q2).
+  (measured: Paired 37 s after the start, 30 s of it the inquiry; Windows asked ConfirmPinMatch and the Q2
+  accepted with no card on its screen). Windows then connects to the Q2 as an A2DP source at once, because the
+  Q2 also offers an A2DP sink ([The first run](#the-first-run)).
 - **`sink`** opens `AudioPlaybackConnection` for that device: `StartAsync` lets the Q2 connect, `OpenAsync`
   connects to it. For `--seconds` it prints the sink's state changes and any media session that appears, sends
   `--send`'s keys at their times, and with `--wav` records. Closing the sink ends the stream (needs a Q2).
 - **The recording** is WASAPI loopback (Windows' tap on what an output device is playing) of the default
   output, in the output's own mix format, written from start to stop with silence where nothing played
   (measured with nothing playing: a 3 s run gives a 2.7 s file of silence; with sound, needs a Q2). It holds
-  everything Windows plays in that time, so keep other sound off during a run.
+  everything Windows plays in that time, so keep other sound off during a run. It is taken before the
+  endpoint's mute and volume (measured: the test signal played on a muted output at volume 24 recorded at
+  -6.0 dBFS and passed `wavcheck.py`), so a run can keep the laptop silent: mute the output first.
 - **`--send`** goes only to a media session that appeared after the sink opened. If Windows makes none for a
   Bluetooth source, nothing is sent: a media key would reach whatever the owner is playing instead.
 - **`unpair`** removes only an address in `paired.txt`; any other is refused (measured).
 
 ### What it changes
 
-| Command                            | Changes                                                                         | Undo                                                                 |
-| ---------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `btrelay.sh pair ADDR`             | adds the Q2 to Windows' paired devices; the Q2 gains the laptop in its own list | `btrelay.sh unpair ADDR`, and `vamp bt forget LAPTOP-ADDR` on the Q2 |
-| `btrelay.sh sink`                  | a Bluetooth audio link for its run; sound on the default output                 | it closes the link when it ends                                      |
-| `vamp bt discoverable on`          | the Q2 answers inquiries for the time given                                     | `vamp bt discoverable off`, or the time runs out                     |
-| `vamp bt connect`, `codec`, `play` | the Q2's link to the laptop and its codec; nothing stored                       | `vamp bt disconnect ADDR`; the next connection negotiates afresh     |
-| `vamp bt snoop install`, `start`   | files in the Q2's `/tmp` (RAM)                                                  | gone at the next start; `vamp bt snoop stop` ends the capture        |
+| Command                            | Changes                                                                                                                                                                                             | Undo                                                                                                                                                                                                                             |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `btrelay.sh pair ADDR`             | adds the Q2 to Windows' paired devices; the Q2 gains the laptop in its own list; Windows makes a speaker for the Q2 and makes it the default output; the Q2's `[SYSSET] BTLINKMAC` names the laptop | `btrelay.sh unpair ADDR`, and `vamp bt forget LAPTOP-ADDR` on the Q2 (the speaker goes and the old default output returns); `BTLINKMAC` put back by hand, in `config.ini` and in demo's memory ([The first run](#the-first-run)) |
+| `btrelay.sh sink`                  | a Bluetooth audio link for its run; sound on the default output                                                                                                                                     | it closes the link when it ends                                                                                                                                                                                                  |
+| `vamp bt discoverable on`          | the Q2 answers inquiries for the time given                                                                                                                                                         | `vamp bt discoverable off`, or the time runs out                                                                                                                                                                                 |
+| `vamp bt connect`, `codec`, `play` | the Q2's link to the laptop and its codec; nothing stored                                                                                                                                           | `vamp bt disconnect ADDR`; the next connection negotiates afresh                                                                                                                                                                 |
+| `vamp bt snoop install`, `start`   | files in the Q2's `/tmp` (RAM)                                                                                                                                                                      | gone at the next start; `vamp bt snoop stop` ends the capture                                                                                                                                                                    |
 
 `probe`, `capture`, `vamp bt status` and a bare `vamp bt codec` change nothing.
 
@@ -191,7 +196,7 @@ to their paired devices.
 | #   | Where      | Step                                                                                                                                       | Pass                                                                                                                                                      |
 | --- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | laptop     | `btrelay.sh probe`                                                                                                                         | an adapter with classic support; a loopback format                                                                                                        |
-| 2   | Q2, laptop | `vamp bt discoverable on 120`, then `btrelay.sh pair Q2`                                                                                   | `pairing: Paired`; if the Q2 shows a pairing card, accept it (`vamp key centre`)                                                                          |
+| 2   | Q2, laptop | `vamp bt discoverable on 120`, then `btrelay.sh pair Q2`                                                                                   | `pairing: Paired` (no card on the Q2, measured); then Windows connects to the Q2 as a speaker: see [The first run](#the-first-run)                        |
 | 3   | Q2         | `vamp bt snoop install "$B"`, `vamp bt snoop start`                                                                                        | `capturing to /tmp/btrelay.snoop`                                                                                                                         |
 | 4   | laptop     | `btrelay.sh sink Q2 --seconds 40 --wav run.wav --send pause@30` (in the background)                                                        | `sink open: Success`                                                                                                                                      |
 | 5   | Q2         | `vamp bt status`; if no PCM, `vamp bt connect PC`                                                                                          | a `pcm A2DP-source sink` line                                                                                                                             |
@@ -203,11 +208,38 @@ to their paired devices.
 | 11  |            | steps 3 to 10 again for each codec `peer offers:` lists, each Quality setting, and `BLUEZ=1`, `BLUEALSA=1` ([bt-own-plan](bt-own-plan.md)) | the codec and rate asked for, each time                                                                                                                   |
 | 12  | both       | when the rig is no longer wanted: `btrelay.sh unpair Q2`, `vamp bt forget PC`                                                              | `unpairing: Unpaired`                                                                                                                                     |
 
-What the first run has to settle (needs a Q2), each to be written back here as measured: whether Windows-led
-pairing raises the Q2's pairing card; which codecs Windows' sink offers; whether Windows makes a media session
-for a Bluetooth source (without one, AVRCP from the sink cannot be driven from the laptop, and the Q2's side of
-AVRCP is still read from the capture); whether Windows takes the hands-free role for the Q2; and whether the
-loopback recording is unaffected by the laptop's volume and mute, as WASAPI's documentation says.
+Still to settle over the air (needs a Q2): which codecs Windows' sink offers; whether Windows makes a media
+session for a Bluetooth source (without one, AVRCP from the sink cannot be driven from the laptop, and the
+Q2's side of AVRCP is still read from the capture); and the Q2's own `vamp bt` commands beyond `status`,
+`discoverable` and `forget`.
+
+### The first run
+
+2026-11-28, a Q2 running V288i (stock's bluetoothd and bluealsa), driven over the laptop's `adb.exe`. Step 2
+ran and the run stopped there, because the pairing changed the owner's settings on both sides (measured):
+
+- **Pairing.** Windows-led pairing raises no card on the Q2: Windows asked ConfirmPinMatch, `btrelay pair`
+  accepted it, and the Q2 accepted by itself. Paired 37 s after the start.
+- **Windows takes the Q2 as a speaker.** The Q2 offers an A2DP sink (its "Playing from Phone" mode), and
+  within seconds of pairing Windows connected as the A2DP source: `vamp bt status` showed `pcm A2DP-sink
+source: AAC 48000 Hz` and the Q2's screen "Playing from Phone, AAC". Windows made a render endpoint for the
+  Q2 and made it the default output for all three roles (console, multimedia, communications), unmuted at
+  volume 100. So the laptop's own sound would go to the Q2, and a loopback recording would record the Q2's
+  endpoint, not the laptop's.
+- **The Q2's preferred device changed.** Stock wrote the laptop into `[SYSSET] BTLINKMAC` in
+  `/mnt/data/config.ini` and into demo's copy (`0xa4c0d8`), so boot and Bluetooth on would page the laptop
+  instead of the last headset ([internals](internals.md#bluetooth-boot-reconnect)). `vamp bt forget` does not
+  clear it (only the Q2's own Forget does, and only while the device is listed), so the undo is to write the
+  old value back to both.
+- **No hands-free.** Windows added the Q2's AVRCP target and controller services and no HFP or HSP entry.
+- After `btrelay.sh unpair` and `vamp bt forget`, and `BTLINKMAC` written back, the Q2's paired list,
+  pairing store, `bta2dpfile`, `BTLINKMAC`, the laptop's Bluetooth devices and its audio endpoints hashed
+  equal to before the run.
+
+The relay direction (Q2 as source, Windows as sink) therefore needs the Q2's sink role kept out of the
+way first, an owner's choice: start bluealsa for the run with the A2DP source profile only (a restart of
+bluealsa), turn off the Q2's audio sink service in Windows' device properties after pairing (whether that
+needs admin is not known), or let the default output move for the run, then put it and `BTLINKMAC` back.
 
 ## Tests
 
