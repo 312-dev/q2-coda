@@ -107,6 +107,9 @@ audio_function() {
     echo 8 > functions/uac2.q2/req_number
     echo 0 > functions/uac2.q2/p_mute_present
     echo 0 > functions/uac2.q2/p_volume_present
+    # the names a computer shows: Windows lists the function's (its interface association) as the
+    # recording device, "Microphone (Q2 Output)"; Shanling's default is "Source/Sink"
+    echo "Q2 Output" > functions/uac2.q2/function_name
     echo "Q2 Output" > functions/uac2.q2/if_ctrl_name
     ln -s functions/uac2.q2 configs/c.1/
     : > "$AUDIO"
@@ -115,7 +118,7 @@ audio_function() {
 # q2adb-wifi's and holds no FunctionFS, so it is left running.
 usb_adbd() {
     for c in "$PROC"/[0-9]*/cmdline; do
-        [ "$(tr '\0' ' ' < "$c" 2>/dev/null)" = "$ADBD " ] || continue
+        [ "$( { tr '\0' ' ' < "$c"; } 2>/dev/null)" = "$ADBD " ] || continue  # a process may end mid-scan
         c=${c%/cmdline}
         echo "${c##*/}"
     done
@@ -202,7 +205,7 @@ usb_back() {
 # What each adbd and gadget call is doing, and the kernel's last lines, into the log.
 snapshot() {
     for c in "$PROC"/[0-9]*/cmdline; do
-        line=$(tr '\0' ' ' < "$c" 2>/dev/null)
+        line=$( { tr '\0' ' ' < "$c"; } 2>/dev/null)
         case "$line" in *adbd*|*q2adb-gadget*|*storage_config*|*uac_device*) ;; *) continue ;; esac
         d=${c%/cmdline}
         say "pid ${d##*/} [$line] state $(cut -d' ' -f3 "$d/stat" 2>/dev/null) wchan $(cat "$d/wchan" 2>/dev/null)"

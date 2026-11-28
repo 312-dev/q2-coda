@@ -58,6 +58,7 @@ On the Q2 it runs `[ -p /tmp/q2tap.pcm ] || { rm -f /tmp/q2tap.pcm; mkfifo /tmp/
 | `p_hs_bint` | 1 | one packet a microframe at high speed |
 | `req_number` | 8 | dwc2's descriptor DMA sends an empty packet in two with one request and in three with two ([iphone-mode: Empty packets](iphone-mode.md#empty-packets)) |
 | `p_mute_present`, `p_volume_present` | 0 | the computer's level is its own |
+| `function_name`, `if_ctrl_name` | Q2 Output | the name Windows shows, "Microphone (Q2 Output)"; Shanling's default `function_name` is "Source/Sink" |
 
 With audio the gadget is another device to Windows, which keys its drivers on vendor, product and `bcdDevice`: `1d6b:0104` (the Linux Foundation's Multifunction Composite Gadget), `bcdDevice` `0x0224`, device class `EF/02/01` (an interface association descriptor, which `f_uac2` has, groups the audio interfaces), so Windows' composite driver gives adb's interface to WinUSB (its Microsoft OS descriptor, as before) and the audio interfaces to `usbaudio2.sys` (Windows 10 1703 and later). Without audio it is `1d6b:0105` as ever. The controller's FIFOs fit both: adb's bulk IN needs 512 bytes, the isochronous IN at most 200 a microframe (192 kHz, 32-bit stereo), and the transmit FIFOs are 64, 64, 64, 512, 1,024, 1,024, 2,048 and 3,072 bytes (debugfs `fifo`, 2026-11-27).
 
@@ -76,6 +77,13 @@ Each makes the gadget again: USB adb drops for the seconds adbd takes to come ba
 **The gadget's removal** stops the USB adbd alone (its command line is `/usr/bin/adbd` with no argument), waits for it to end (3 s, then `SIGKILL`), and stops if FunctionFS cannot be unmounted or the directory is still there: a new `ffs.adb` function under an old FunctionFS mount would get no descriptors (adbd writes them to the old mount, whose function is gone), and the gadget would never bind. The removal before 2026-11-27 sent `killall adbd`, which also ended adb over Wi-Fi, and unmounted at once, before adbd had ended.
 
 **What broke on 2026-11-27, and what is not known.** The second try (run by hand, detached) dropped USB adb, which never came back, through and after the 300 s revert; Windows saw no `1d6b:0104` device; over Wi-Fi a TCP connection was accepted but no `adb shell` was answered; the Q2 needed a restart, and no log survived (`/tmp`). What the code says: that version's removal sent `killall adbd`, ending both adbds, and unmounted FunctionFS without waiting for adbd to end; an unmount refused while adbd still held it leaves the remade gadget's `ffs.adb` without descriptors, which matches USB adb never returning and the revert, which removes and makes the gadget the same way, not saving it. It does not explain the Wi-Fi adbd: `adbd --tcp` opens no FunctionFS (`tools/adbd.patch`: with `--tcp` only `local_init` runs) and `q2adb-wifi` starts it again within 10 s; a TCP connection accepted with nothing answering is a listening socket whose process is not running its loop, which a process stuck in the kernel would be (a bind that oopsed holding the gadget's lock, as the UAC1 module's first binds did, [iphone-mode: The UAC1 module](iphone-mode.md#the-uac1-module), is one such way). Neither is shown. The next try's log says which: `rehearse` first (the remake alone), then `try`.
+
+**At the desk (2026-11-27, V282i, the script run from `/tmp`):** `rehearse 60` made the gadget again as it was, bound in about 2.5 s, USB adb back; `try 90` made `1d6b:0104` with `ffs.adb` and `uac2.q2`, bound, USB adb back at once, the card `1 [UAC2Gadget]: UAC2_Gadget`, and Windows 11 listed "ADB Interface" (WinUSB), "USB Composite Device" and "Source/Sink" (MEDIA), as a capture device "Microphone (Source/Sink)"; the watchdog went back to adb alone at 90 s with adb unharmed. Windows opened the capture at 44.1 kHz, 16-bit stereo (its shared-mode default); a 48 kHz tone played into the card arrived at -33 dB peak where it was -12 dBFS: played at another rate than the computer's. [The desk test](#the-desk-test) plays at the computer's rate.
+
+<a id="the-desk-test"></a>
+### The desk test
+
+`tools/uac_tone.sh` runs on the Q2 with audio on: it waits for the computer to start recording, reads the rate the computer chose (the card's `Playback Rate` control, or the kernel's last `srate=` line since it started), and plays `/tmp/tone-RATE.wav` into the card at that rate, logging to `/mnt/data/vamp-usb-audio.log` with the card's `hw_params`. Tones: `ffmpeg -f lavfi -i sine=frequency=1000:duration=10:sample_rate=48000 -af volume=-12dB,aformat=channel_layouts=stereo -c:a pcm_s32le tone-48000.wav`. A clean test is a steady 1 kHz at about -12 dBFS in the computer's recording.
 
 ### Listening on Windows
 
@@ -105,5 +113,5 @@ On a host build the card is a file (`Q2PLAYER_UAC`, `Q2PLAYER_UAC_RATE`), paced 
 
 ## What is missing
 
-- On a Q2: the composite gadget bound and enumerated, Windows' drivers on it, the card's name and its `Playback Rate` control, the sound clean at each rate. The tap has not run on a Q2 either.
+- On a Q2: the sound clean at the computer's rate ([the desk test](#the-desk-test)), and whether the card has the `Playback Rate` control `player/uac.c` follows (without it the sink opens at 48 kHz). The gadget binds and Windows takes it (above). The tap has not run on a Q2.
 - A setting in the UI: audio is a command (`q2adb-gadget audio`), from adb.

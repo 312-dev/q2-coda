@@ -508,7 +508,8 @@ def gadget_checks():
                 os.path.islink(g/'configs/c.1/uac2.q2') and os.readlink(g/'configs/c.1/uac2.q2') == 'functions/uac2.q2' and \
                 os.readlink(g/'configs/c.1/ffs.adb') == 'functions/ffs.adb' and \
                 [rd(f'functions/uac2.q2/{a}') for a in ('p_chmask', 'c_chmask', 'p_srate', 'p_ssize', 'req_number', 'p_volume_present')] == \
-                ['3', '0', '44100,48000,88200,96000,176400,192000', '4', '8', '0'] and (run/'q2adb.audio').exists()
+                ['3', '0', '44100,48000,88200,96000,176400,192000', '4', '8', '0'] and \
+                rd('functions/uac2.q2/function_name') == 'Q2 Output' and (run/'q2adb.audio').exists()
         def audio_off():
             return g.is_dir() and rd('idProduct') == '0x0105' and rd('bDeviceClass') == '0x00' and \
                 not (g/'functions/uac2.q2').exists() and not (run/'q2adb.audio').exists()
@@ -531,11 +532,14 @@ def gadget_checks():
         r = gadget('unpark')
         expect('unpark with audio remembered: the composite gadget again', r.returncode == 0 and bound() and audio_on(), r.stderr)
         usb, tcp = fake_adbds(proc, '/usr/bin/adbd', '/usr/bin/adbd --tcp 5555')
+        (proc/'99999').mkdir()  # a process gone between the scan's glob and its read: its cmdline found, then not there
+        os.symlink(d/'gone', proc/'99999/cmdline')
         r = gadget('audio', 'off')
         expect('audio off: adb alone again, forgotten, bound', r.returncode == 0 and until(audio_off) and bound()
                and not (data/'q2adb.audio').exists(), r.stderr)
         expect('audio off: the USB adbd stopped and waited for, adb over Wi-Fi left running',
                usb.poll() is not None and tcp.poll() is None and said('stopped'))
+        expect('a process gone mid-scan says nothing in the log', 'No such file' not in log.read_text(), log.read_text()[-500:])
         tcp.kill(); tcp.wait()
         # the shell that ran it gets SIGHUP as it ends (adb's pty): the work goes on
         log.write_text('')
