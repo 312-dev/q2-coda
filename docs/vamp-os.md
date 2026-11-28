@@ -199,6 +199,25 @@ Every duty of `demo`, its VampOS owner, the interface underneath, and whether th
 | Tidal, QQ Music, NetEase, Baidu Netdisk, stock's Internet Radio, the AirPlay receiver, the VU meter and spectrum | not carried                                                                                                                               |                                                                                                                   | [Scope](#scope)                                                                                                                                                                       |
 | SyncLink (Shanling's phone remote)                                                                               | not carried                                                                                                                               |                                                                                                                   | Kept off in Vamp today ([internals](internals.md#synclink)); Car Remote is Vamp's                                                                                                     |
 
+### Start-up side effects
+
+What stock's init scripts and `demo`'s start leave set up, which anything after them relies on, and whether VampOS does it. A card boot inherits all of them from today's Vamp's own start, so "card boot" below says only what a boot from flash would miss.
+
+| Set up at start | By, in stock | VampOS |
+| --- | --- | --- |
+| The MCU's firmware (the buzzer's click, Key Tone) | `demo`'s `buzzer_init`: three `cmd_mcu` (`/vendor/mcu/libmcu-bare.bin`, bootup) | `q2sysd`'s `mcu_up` at its start, the same ioctls; shown on the owner's Q2 in the second card boot (`click` answered `ok`) |
+| The backlight's PWM (`PC00`, 10 kHz, 111 steps) | `demo`'s `initToolsModule(23)` | `q2sysd` at the first screen or brightness change ([q2sysd: The backlight](sysd.md#the-backlight)); a boot from flash shows the saved Brightness only from that first change |
+| The modules (Wi-Fi `8733bs`, touch, slider, DAC codec, PWM, MCU, watchdog) | `S11module_driver_default` | rcS runs the same script |
+| Wi-Fi up: `wpa_supplicant -B`, `udhcpc` | `demo` at start | `q2netd`; its control socket needs `/var/run` on the tmpfs ([where the services say things](vamp-os-base.md#where-the-services-say-things)) |
+| The loopback interface | `S40network`: `ifup -a` | **not done**: rcS brings up no `lo`. A card boot has stock's; a boot from flash needs `ifconfig lo 127.0.0.1 up` in rcS |
+| The random seed | `S20urandom` from `/var/lib/random-seed` | **not done**: the kernel's own entropy only; a seed file on `/mnt/data` would carry it |
+| The splash | `S11logo_display_shell`: `display_logo` | **not done** in the image's rcS (a card boot has stock's splash before the hand-off) |
+| D-Bus | `S90play` | the `dbus` service |
+| The DAC opened, its volume and output | `demo` (`/dev/shanling_dac`) | `q2playd` at its start (`config_outputchannel`) |
+| Touch (tslib on `event2`) | `S90play`'s environment for `demo` | `q2ui` reads `hyn_ts` itself |
+| Bluetooth's radio (`rtk_hciattach`) | `demo`'s Bluetooth start | the `bt-attach` service |
+| The watchdog | never started | `q2sysd`, 60 s |
+
 ### Every other stock program and library
 
 Read from the stock V1.36 rootfs's file list. "Buildroot" means the upstream project built by the base ([Base system](#base-system-and-build)).
