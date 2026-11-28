@@ -276,14 +276,21 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
         assert size == (art.STATUS_WIFI_W, art.STATUS_PX) and colours == {rgb(primary)} and hues == {rgb(primary)}
         assert (76 in faint or 77 in faint) == (level < 3)  # the unlit bands' insides: the ink at 30%
     assert boxes == {(0, 15, 1, 11)}  # 16 columns (15.6 of ink), rows 1 to 11: 11 tall
-    for name, w in (('wifi_x', art.STATUS_WIFI_W), ('headphones', art.STATUS_PX), ('car', art.STATUS_CAR_W),
+    for name, w in (('headphones', art.STATUS_PX), ('car', art.STATUS_CAR_W),
                     ('vol', art.STATUS_PX), ('mute', art.STATUS_PX)):
         size, lit, colours = ink(name, 8)
         assert size == (w, art.STATUS_PX) and (name == 'btdim' or colours == {rgb(primary)})
         x0, x1, y0, y1 = box(lit)
         assert (y0, y1) == (1, 11) and x1 - x0 + 1 <= w
-    x0, x1, _, _ = box(ink('wifi_x', 8)[1])
-    assert x1 - x0 + 1 == 14  # wider than its 11 rows
+    # no internet (No net option A): the fan whole and faint, a small x at full ink where its right edge meets the
+    # baseline, the fan cut away round it
+    w, h, at = pixels(got[f'oled_status_wifi_x_{half}'])
+    solid = {(x, y) for y in range(h) for x in range(w) if at(x, y)[3] >= 250}
+    faint = {at(x, y)[3] for y in range(h) for x in range(w) if 0 < at(x, y)[3] < 250}
+    assert (w, h) == (art.STATUS_WIFI_W, art.STATUS_PX) and {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]} == {rgb(primary)}
+    assert solid and all(x >= 10 and y >= 9 for x, y in solid)  # only the x is solid, at the bottom right
+    assert (76 in faint or 77 in faint) and at(7, 2)[3] in (76, 77)  # the fan's outer band, faint at its top
+    assert not any(at(x, y)[3] in (76, 77) for y in range(8, 14) for x in range(9, 16))  # the cut: no fan round the x
     size, lit, colours = ink('offline', 8)  # a card app's server out of reach: cloud-slash in Warning, both halves
     assert size == (art.STATUS_PX, art.STATUS_PX) and colours == {rgb(0xff9f0a)} and box(lit)[2:] == (1, 11)
     frames = [got[f'oled_status_sync_{f}_{half}'] for f in range(art.STATUS_SPIN)]

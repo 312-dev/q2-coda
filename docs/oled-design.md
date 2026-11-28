@@ -267,7 +267,7 @@ All lists share one grid.
     baseline (15.6 x 11 px), cut into a dot (radius 3) and two 2 px bands (5 to 7, 9 to 11) with 2 px gaps, on whole
     pixels up its centre so the gaps are wholly dark (the owner's, chosen by eye on a Q2, 2026-11-27);
     the signal lights the dot, then the bands, in Text Primary and the rest is Text Primary at 30% (iOS's rule,
-    the owner's, 2026-11-27: faint white on black, faint black in Light Mode), so the shape keeps its size; Phosphor `wifi-x` (bold) connected with no internet; nothing with Wi-Fi
+    the owner's, 2026-11-27: faint white on black, faint black in Light Mode), so the shape keeps its size; connected with no internet, the fan whole and faint with a small x at full ink where its right edge meets the baseline, the fan cut away round it (`tools/art.py` status_wifi_none; the review sheet's No net option A, taken by default 2026-11-28, the owner may revisit); nothing with Wi-Fi
     off or not connected (`mock_wifi_status.py`, `mock_status_icons.py`).
   - **Sync**, left of the glyph before it: while a card app checks its server or its metadata, Phosphor
     `arrows-clockwise` (bold) turning in Text Primary, 30 frames a second, a half turn a second (S1, the user's
@@ -1557,7 +1557,7 @@ one is a bare one the strip takes in its first frame (`patch/keyboard.c` `kb_hos
   `heart-slash.svg` for Favorites' empty state: Phosphor's regular heart cut as its outline `bell-slash`
   is (a 16 unit slash from (48,40) to (208,216) joined to the ring below it, the ring above it ending in
   round caps 32 units from the slash), traced to filled paths.
-- Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's `wifi-x`, sync, Bluetooth and `cloud-slash`, Now
+- Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's sync, Bluetooth and `cloud-slash`, Now
   Playing's and the confirmation's shuffle and repeat, About's quality badge and Now Playing's heart while off, `regular`
   for row symbols and Now Playing's More. Sizes are the design's: 13 px padlock, 11 px tall status glyphs ([Status row](#status-row)), 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
