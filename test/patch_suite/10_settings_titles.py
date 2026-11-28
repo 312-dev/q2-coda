@@ -315,9 +315,9 @@ for k in range(1,len(items)):
 assert m.confirm()==11 and m.dispatched()[0][1]==buttons[-1]; passed()
 m.click(buttons[2]); assert m.selected(view)==2; passed()
 
-# The payload's own accent drawing: the selection is OLED's flat bar in its one scheme, Blue (oled/theme.xml
-# colorScheme oled-blue, its five tones one colour), whatever OLED_ACCENT holds (Blue is all OLED offers) or ACCENT, a
-# key OLED does not read, says.
+# The payload's own accent drawing: the selection is OLED's flat bar in its default scheme, Arterial (oled/theme.xml
+# colorScheme oled-arterial, its five tones one colour), whatever OLED_ACCENT holds that OLED does not offer (2) or
+# ACCENT, a key OLED does not read, says.
 from build import FACES
 FACE_NAMES=[FACES[k].name for k in FACES]  # theme_t.font's FONT_* by index
 STATES=('normal','focused','disable')
@@ -332,7 +332,7 @@ passed()
 # runs the migration too; here nothing boots, so no preset is applied and Home reads as stored, Split).
 for stored in (None,'0','1','2','3','9'):
     m,view,kids=appearance({} if stored is None else {'THEME':stored})
-    assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],stored
+    assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Arterial','Home: Split','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],stored
 passed()
 # Songs' action bar on OLED's set (its action_row; navigation.c action_row): what stock builds in it (it does again on a
 # refresh) takes the plain row's shape: the label reads Shuffle after the theme's glyph (list.shuffle, SHUFFLE_LABEL_DX
@@ -502,15 +502,17 @@ assert lit(au)==1 and style_color(au,0xff000000,'bg_color')[1]==0xffffffff
 au.clock=(19,0); au.calls=[]; au.call(address=payload_syms['clock_due'],args=(0,0,0,0),gap=0,clear=False)
 assert [c[:2] for c in au.calls if c[0]=='image_manager_unload_all']==[('image_manager_unload_all',0x1000500)]
 assert lit(au)==0 and half_of(au)!=day and style_color(au,0xff000000,'bg_color')[1]==0xff000000; passed()
-# Accent is Blue, OLED's one scheme, by default and for a stored value OLED does not offer (Graphite's 7) or cannot read
-# (12); the row's click writes Blue again under OLED's key (theme.xml accent key OLED_ACCENT).
-for stored in (None,'7','12'):
+# Accent is Arterial, OLED's default scheme, by default and for a stored value OLED does not offer (Graphite's 7, and
+# 9, the ACCENTS row Arterial, what a Q2 stored while Blue was OLED's one value) or cannot read (12); the row's click
+# writes Blue, then Arterial again, under OLED's key (theme.xml accent key OLED_ACCENT).
+OLED_BLUE_ROW=[s.get('name') for s in OLT['schemes']].index('oled-blue')
+for stored in (None,'7','9','12'):
     m,view,kids=appearance({} if stored is None else {'OLED_ACCENT':stored})
-    assert row_text(kids[1])=='Accent: Blue',stored
+    assert row_text(kids[1])=='Accent: Arterial',stored
 f,ctx=m.handler(m.nodes[kids[1]]['children'][0],O['EVT_CLICK'])
-for _ in range(2):
+for v,name in ((OLED_BLUE_ROW,'Blue'),(OLED_ACCENT,'Arterial')):
     m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
-    assert [(c[1],m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(OLED_ACCENT,'OLED_ACCENT')] and row_text(kids[1])=='Accent: Blue'
+    assert [(c[1],m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(v,'OLED_ACCENT')] and row_text(kids[1])=='Accent: '+name
 passed()
 # OLED's own keys are read after the payload's, OLED_ACCENT then its options in theme.xml's order, each at its default.
 m,view,kids=appearance({}); reads=[r[2:] for r in m.config_reads if r[1]=='IPOD']; at=reads.index(('OLED_ACCENT',str(OLED_ACCENT)))

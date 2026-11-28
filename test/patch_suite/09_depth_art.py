@@ -581,9 +581,10 @@ def mapped(c,preset,tone=3): return Machine().call(address=ps['accent_map'],args
 def rgba(r,g,b,a=255): return r|g<<8|b<<16|a<<24
 def blend(t,k,to,a=255): return rgba(*(round(t*x+k) for x in to),a)
 def close(x,y): return x>>24==y>>24 and all(abs((x>>s&255)-(y>>s&255))<=2 for s in (0,8,16))
-# OLED's own scheme, after the ACCENTS rows: Accent Blue in all five tones (assets/themes/oled/theme.xml oled-blue)
-OLED_ROW=(len(ACCENTS),(0x2160d8,)*5)
-for (preset,accent),column in ((p,c) for p in (*enumerate(ACCENTS),OLED_ROW) for c in (2,3)):  # light and red tones
+# OLED's own schemes, after the ACCENTS rows: Blue and Arterial in all five tones (assets/themes/oled/theme.xml oled-blue,
+# oled-arterial)
+OLED_ROWS=((len(ACCENTS),(0x2160d8,)*5),(len(ACCENTS)+1,(0xb8141c,)*5))
+for (preset,accent),column in ((p,c) for p in (*enumerate(ACCENTS),*OLED_ROWS) for c in (2,3)):  # light and red tones
     hi=(accent[column]>>16,accent[column]>>8&255,accent[column]&255)
     for c in (rgba(0,0,0),rgba(255,255,255),rgba(0x80,0x80,0x80),rgba(0x2b,0x2b,0x2b,0x40),  # greys
               rgba(0xff,0x9f,0x0a),rgba(0x16,0x9a,0xa6),rgba(0xff,0,0xff),rgba(0x0a,0x84,0xff),  # other hues
@@ -616,29 +617,31 @@ def hook(self,u,address,size,x):
     if address==GET and getattr(self,'get_gradient',None): return self.get_gradient(u)
     return orig_hook(self,u,address,size,x)
 Machine.hook=hook
-# OLED's accent is its own key, OLED_ACCENT, whose one value is Blue: its scheme after the nine ACCENTS rows
-# (oled/theme.xml oled-blue, the option's values mask 0x200). Any stored value reads as Blue, the payload's ACCENT
-# and THEME included. Its five tones are one colour, so text and every other color property take it.
-OLED=theme_builtins()[0]; BLUE_ROW=len(ACCENTS); BLUE=OLED['schemes'][BLUE_ROW]
-assert BLUE['name']=='oled-blue' and theme_keys(theme_builtins())['OLED_ACCENT'][1]==BLUE_ROW
-BLUE_TONES=BLUE['tones']; assert len(set(BLUE_TONES))==1
+# OLED's accent is its own key, OLED_ACCENT, whose values are Blue and Arterial, its schemes after the ten ACCENTS rows
+# (oled/theme.xml oled-blue, oled-arterial; the option's values mask 0xc00), Arterial the default. Any stored value
+# OLED does not offer reads as Arterial (9 too, the ACCENTS row Arterial), the payload's ACCENT and THEME included. Its
+# five tones are one colour, so text and every other color property take it.
+OLED=theme_builtins()[0]; DEF_ROW=len(ACCENTS)+1; DEF=OLED['schemes'][DEF_ROW]
+assert DEF['name']=='oled-arterial' and theme_keys(theme_builtins())['OLED_ACCENT'][1]==DEF_ROW
+OLED_BLUE_ROW=len(ACCENTS); assert OLED['schemes'][OLED_BLUE_ROW]['name']=='oled-blue'
+DEF_TONES=DEF['tones']; assert len(set(DEF_TONES))==1
 for config in ({},{'OLED_ACCENT':'9'},{'OLED_ACCENT':'0'},{'OLED_ACCENT':'1'},{'OLED_ACCENT':'12'},{'ACCENT':'1'},
                {'ACCENT':'3','HOME':'1'},{'THEME':'1'},{'THEME':'0','OLED_ACCENT':'4'}):
     m=Machine(); m.config=config
     ret,got,out=style_color(m,red)
-    assert ret==out and got==color_t(BLUE_TONES[3]),(config,hex(got))
+    assert ret==out and got==color_t(DEF_TONES[3]),(config,hex(got))
     for name in ('highlight_text_color','bg_color','fg_color','border_color','selected_fg_color'):
-        want=BLUE_TONES[3 if name.endswith('text_color') else 2]
+        want=DEF_TONES[3 if name.endswith('text_color') else 2]
         assert style_color(m,red,name)[1]==color_t(want),(config,name)
     assert style_color(m,grey)[1]==grey
     assert len(m.config_reads)==CONFIG_READS  # every key, once, on first use
     passed()
 # Real paint order, no persistent widget styles: the selected row's text takes the scheme's sel_text (white) over
-# the Blue bar, alpha kept; stock's #aaaaaa second lines elsewhere take its muted (Text Tertiary); recycled text,
+# the Arterial bar, alpha kept; stock's #aaaaaa second lines elsewhere take its muted (Text Tertiary); recycled text,
 # touch hiding and Home's rows follow the selection.
 def begin(m,w): m.call(address=HOOKS['widget_on_paint_background'][0],args=(w,m.canvas,0,0),gap=0)
 def end(m,w): m.call(address=HOOKS['widget_on_paint_border'][0],args=(w,m.canvas,0,0),gap=0)
-SEL_TEXT,MUTED=0xff000000|BLUE['sel_text'],0xff000000|BLUE['muted']
+SEL_TEXT,MUTED=0xff000000|DEF['sel_text'],0xff000000|DEF['muted']
 m=Machine(); w,rows=m.page_list(3)
 labels=[]
 for row in rows:
@@ -646,7 +649,7 @@ for row in rows:
 begin(m,w); begin(m,rows[0]); begin(m,labels[0])
 assert style_color(m,0xffffffff)[1]==SEL_TEXT
 assert style_color(m,0xffaaaaaa)[1]==SEL_TEXT
-assert style_color(m,0x66ffffff)[1]==0x66000000|BLUE['sel_text']
+assert style_color(m,0x66ffffff)[1]==0x66000000|DEF['sel_text']
 end(m,labels[0]); end(m,rows[0]); begin(m,rows[1]); begin(m,labels[1])
 assert style_color(m,0xffffffff)[1]==0xffffffff and style_color(m,0xffaaaaaa)[1]==MUTED
 end(m,labels[1]); end(m,rows[1]); end(m,w)
@@ -676,7 +679,7 @@ passed()
 m=Machine(); style_color(m,red)
 # config_value passes its default in decimal (LIGHT's Auto, 2); IPOD SHORTCUT is not a setting and is never read
 assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','LIGHT','2'),('/mnt/data/config.ini','IPOD','KEEPLIT','1'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','REDUCEMOTION','0')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
-# theme()/scheme(): OLED, the one built-in (themes[0]), and its Blue scheme, settings read on first use; THEME is no
+# theme()/scheme(): OLED, the one built-in (themes[0]), and its Arterial scheme, settings read on first use; THEME is no
 # setting the engine reads. Light Mode's On picks the light half's row (oled_light), Auto by the clock, Off the dark
 # one; both point at oled_tones and derive their half (SCHEME_DERIVE, scheme_t.mode @4).
 SCHEME_SIZE=(payload_syms['oled_light']-payload_syms['oled_schemes'])//len(OLED['schemes'])
@@ -686,12 +689,12 @@ for config,half in (({},'oled_schemes'),({'OLED_ACCENT':'7'},'oled_schemes'),({'
     t=k.call(address=payload_syms['theme'],args=(0,0,0,0),gap=0)&0xffffffff
     assert t==payload_syms['themes'] and len(k.config_reads)==CONFIG_READS,config
     s=k.call(address=payload_syms['scheme'],args=(0,0,0,0),gap=0)&0xffffffff
-    assert s==payload_syms[half]+SCHEME_SIZE*BLUE_ROW and k.get(s)==payload_syms['oled_tones'] and k.u.mem_read(s+4,1)[0]==0,(config,hex(s))
+    assert s==payload_syms[half]+SCHEME_SIZE*DEF_ROW and k.get(s)==payload_syms['oled_tones']+20 and k.u.mem_read(s+4,1)[0]==0,(config,hex(s))
 passed()
-# A paint before any config read draws the built-in theme, never zeroed scratch: the selection is OLED's Blue bar.
+# A paint before any config read draws the built-in theme, never zeroed scratch: the selection is OLED's Arterial bar.
 k=Machine(); k.config={}; kw,_=k.page_list(5,extent=1000); assert k.config_reads==[]
-k.paint(kw); assert len(k.config_reads)==CONFIG_READS and k.bands and {b[4]&0xffffff for b in k.bands}=={color_t(BLUE_TONES[0])&0xffffff},k.bands[:2]
-assert k.bands[0][4]==color_t(BLUE_TONES[0]); passed()
+k.paint(kw); assert len(k.config_reads)==CONFIG_READS and k.bands and {b[4]&0xffffff for b in k.bands}=={color_t(DEF_TONES[0])&0xffffff},k.bands[:2]
+assert k.bands[0][4]==color_t(DEF_TONES[0]); passed()
 # Gradients: the leaf's null checks, then the caller's stops mapped (nr @8, stops @0xc).
 def gradient(config,stops,same_out=True,vt_get=True,style=True):
     m=Machine(); m.config=config
@@ -708,9 +711,9 @@ def gradient(config,stops,same_out=True,vt_get=True,style=True):
     g=out if same_out else other
     return ret,[m.get(g+0xc+8*i) for i in range(len(stops))],out,other
 ret,cols,out,_=gradient({},[red,grey,color_t(0x7f0a24)])
-half=color_t(BLUE_TONES[2]>>1&0x7f7f7f)  # 0x7f0a24 is half of stock's red over black: half the tone, per channel
-assert ret==out and cols[:2]==[color_t(BLUE_TONES[2]),grey] and cols[2]==mapped(color_t(0x7f0a24),BLUE_ROW,2) and all(abs(a-b)<=2 for a,b in zip(cols[2].to_bytes(4,'little'),half.to_bytes(4,'little'))),[hex(c) for c in cols]; passed()
-assert gradient({'ACCENT':'1'},[red])[1]==[color_t(BLUE_TONES[2])]; passed()  # the payload's ACCENT is not OLED's accent
+half=color_t(DEF_TONES[2]>>1&0x7f7f7f)  # 0x7f0a24 is half of stock's red over black: half the tone, per channel
+assert ret==out and cols[:2]==[color_t(DEF_TONES[2]),grey] and cols[2]==mapped(color_t(0x7f0a24),DEF_ROW,2) and all(abs(a-b)<=2 for a,b in zip(cols[2].to_bytes(4,'little'),half.to_bytes(4,'little'))),[hex(c) for c in cols]; passed()
+assert gradient({'ACCENT':'1'},[red])[1]==[color_t(DEF_TONES[2])]; passed()  # the payload's ACCENT is not OLED's accent
 ret,cols,_,other=gradient({},[red],same_out=False); assert ret==other and cols==[red]; passed()
 assert gradient({},[red],vt_get=False)[0]==0 and gradient({},[red],style=False)[0]==0; passed()
 # Through stock style_get_color, which asks style_get_gradient first for every color: its call
@@ -722,18 +725,18 @@ for name,column in (('text_color',3),('bg_color',2)):
         m.returns(g)
     m.get_gradient=get; out=m.alloc(4)
     m.call(address=HOOKS['style_get_color'][0],args=(out,st,m.string(name),0),gap=0)
-    assert m.get(out)==color_t(BLUE_TONES[column]),(name,hex(m.get(out))); passed()
+    assert m.get(out)==color_t(DEF_TONES[column]),(name,hex(m.get(out))); passed()
 
 # Light Mode: neutral colours flip between the light half's paper and ink (OLED's own, white and black: oled/theme.xml
-# light.paper and light.ink), other hues stay; red takes Blue, which is no neutral, so it stays Blue in both halves;
+# light.paper and light.ink), other hues stay; red takes Arterial, which is no neutral, so it stays Arterial in both halves;
 # a red tint over black becomes the same tint over paper; gradient stops alike.
-P,K=BLUE['paper'],BLUE['ink']; assert (P,K)==(0xffffff,0)
+P,K=DEF['paper'],DEF['ink']; assert (P,K)==(0xffffff,0)
 P,K=P&255,K&255
 flipv=lambda v: P-v*(P-K)//255
 paper,ink=0xff000000|P*0x010101,0xff000000|K*0x010101
 for config in ({'LIGHT':'1'},{'LIGHT':'1','OLED_ACCENT':'4'},{'LIGHT':'1','ACCENT':'1'}):
     m=Machine(); m.config=config
-    assert style_color(m,red)[1]==color_t(BLUE_TONES[3]) and style_color(m,red,'bg_color')[1]==color_t(BLUE_TONES[2]),config
+    assert style_color(m,red)[1]==color_t(DEF_TONES[3]) and style_color(m,red,'bg_color')[1]==color_t(DEF_TONES[2]),config
     assert style_color(m,0xff000000)[1]==paper and style_color(m,0xffffffff)[1]==ink and style_color(m,grey)[1]==0xff000000|flipv(0x80)*0x010101
     assert style_color(m,0xffff8000)[1]==0xffff8000  # another hue
     tint=style_color(m,color_t(0x3d1920),'bg_color')[1]  # stock's pressed tint: light now, of the tone
@@ -772,11 +775,11 @@ def image(config,name,fmt=3,prep=None,px=None):
     ret=m.call(address=HOOKS['image_manager_add'][0],args=(0x1000500,m.string(name),bm,0),gap=0)
     assert ret==0 and [c[1:] for c in m.calls if c[0]=='stock_image'][0][2]==bm
     return [bytes(m.u.mem_read(data+12*y,12)) for y in range(2)]
-hi=BLUE_TONES[3]; want=bytes([hi&255,hi>>8&255,hi>>16,0x80])+bytes([0x80,0x80,0x80,0xff])+b'\xee'*4
+hi=DEF_TONES[3]; want=bytes([hi&255,hi>>8&255,hi>>16,0x80])+bytes([0x80,0x80,0x80,0xff])+b'\xee'*4
 assert image({},'eqdrop_dot')==[want,want]; passed()
 # Q2_TRACE's hook answers: the style hook's colour (the word at v0); the image hook's v0 and the pixels it mapped.
 saved,TRACE=TRACE,io.StringIO(); m=Machine(); m.config={}; style_color(m,color_t(0xff1448))
-assert TRACE.getvalue().splitlines()[-1]=='ret\tringnav_style_color\t%08x'%color_t(BLUE_TONES[3])
+assert TRACE.getvalue().splitlines()[-1]=='ret\tringnav_style_color\t%08x'%color_t(DEF_TONES[3])
 px=image({},'eqdrop_dot')
 assert TRACE.getvalue().splitlines()[-1]=='ret\tringnav_image_add\t00000000\t'+hashlib.sha1(b''.join(px)).hexdigest()[:12]
 TRACE=saved; passed()
@@ -837,21 +840,21 @@ def rgba(config,name,pixels_,fmt=3):
 def pixels(config,name,colors):
     return [c for c,_ in rgba(config,name,[(c,255) for c in colors])]
 S=O['CONFIRM_SURFACE']
-# OLED's Blue, any stored accent value.
+# OLED's Arterial, any stored accent value.
 for config in ({},{'OLED_ACCENT':'1'},{'ACCENT':'1'}):
     disc,glyph=pixels(config,'confirm_ok',[0xff1448,0xffffff])
     assert disc==S and glyph==0xffffff and ratio(glyph,disc)>=4.5,(config,hex(disc))
     disc,glyph=pixels(config,'confirm_cancel',[0xff4871,0xffe4ea])
     assert ratio(glyph,disc)>=4.5 and ratio(disc,0)<ratio(glyph,0),(config,hex(disc),hex(glyph))
     assert pixels(config,'confirm_okdown',[0x7f0a24])[0]<S  # pressed: darker than the disc
-    assert pixels(config,'sleepdot',[0xff1448])==[BLUE_TONES[3]]
+    assert pixels(config,'sleepdot',[0xff1448])==[DEF_TONES[3]]
     passed()
 
 # OLED's icons are mono (oled/theme.xml list.icons mono): the settings and list icons' discs turn the scheme's chevron
 # grey, their glyphs stay white, edges blend by saturation against the disc's, alpha kept. Stock's list_into is
 # emptied (OLED's caret is paint_into's). Navigation and control images (Quick Settings' discs among them) take the
-# grey of their mapped colour, codec badges the muted grey's; other images keep Blue whatever ACCENT holds.
-ink=BLUE['chevron']; assert ink==O['MINIMAL_CHEVRON']
+# grey of their mapped colour, codec badges the muted grey's; other images keep Arterial whatever ACCENT holds.
+ink=DEF['chevron']; assert ink==O['MINIMAL_CHEVRON']
 def grey_of(c): return ((c>>16)*299+(c>>8&255)*587+(c&255)*114)//1000*0x010101  # the payload's mono grey of 0xRRGGBB
 edge=255-(255-(ink&255))*(0xff-0x8a)//(0xff-0x14); edge*=0x010101  # #ff8aa4's saturation against the disc's
 px=[(0xff1448,255),(0xff8aa4,255),(0xffffff,255),(0xff1448,128),(0xffffff,0)]
@@ -863,10 +866,10 @@ for config in ({},{'ACCENT':'2'}):
     assert rgba(config,'system_netservice',px)==[(ink,255),(edge,255),(0xffffff,255),(ink,128),(0xffffff,0)]
     assert rgba(config,'list_into',px)==[(0,0)]*len(px) and rgba(config,'list_intodown',px)==[(0,0)]*len(px)
     assert rgba(config,'list_delete',[(0xffffff,255),(0xffffff,0)])==[(0xffffff,255),(0xffffff,0)]
-    # Codec badges take the muted grey (#858585), legible on black and on the Blue bar; other img_ art doesn't.
-    assert rgba(config,'img_flac',[(0xff1448,255),(0xff1448,0)])==[(grey_of(BLUE['muted']),255),(grey_of(BLUE['muted']),0)]
-    assert rgba(config,'img_delete',[(0xff1448,255)])==[(grey_of(BLUE_TONES[3]),255)]
-    assert rgba(config,'sleepdot',disc[:2])==[(BLUE_TONES[2],255),(0xffffff,255)]
+    # Codec badges take the muted grey (#858585), legible on black and on the Arterial bar; other img_ art doesn't.
+    assert rgba(config,'img_flac',[(0xff1448,255),(0xff1448,0)])==[(grey_of(DEF['muted']),255),(grey_of(DEF['muted']),0)]
+    assert rgba(config,'img_delete',[(0xff1448,255)])==[(grey_of(DEF_TONES[3]),255)]
+    assert rgba(config,'sleepdot',disc[:2])==[(DEF_TONES[2],255),(0xffffff,255)]
     assert rgba(config,'file:///mnt/mmc/system_netservice',px)==px
     # Active Delete keeps stock's white; the pressed/disabled glyph keeps its grey.
     assert rgba(config,'navbar_delete',[(0xffffff,255)])==[(0xffffff,255)]
@@ -894,14 +897,14 @@ for config in ({},{'ACCENT':'2'}):
 passed()
 
 # Packaged icon pixels: monochrome, alpha preserved and existing grey glyphs unchanged. Quick Settings' active discs
-# are Blue's grey under a white glyph (Blue is no brighter than GLYPH_LIGHT_MAX), the inactive ones stock's #444444.
+# are Arterial's grey under a white glyph (Arterial is no brighter than GLYPH_LIGHT_MAX), the inactive ones stock's #444444.
 for fmt in (1,2,3,4):
     assert rgba({},'local_album',px,fmt)==rgba({},'local_album',px)
     assert rgba({},'stream_spotify',px,fmt)==rgba({},'stream_spotify',px)
-assert grey_of(BLUE_TONES[3])&255<=O['GLYPH_LIGHT_MAX']
+assert grey_of(DEF_TONES[3])&255<=O['GLYPH_LIGHT_MAX']
 for name in ('drop_wifiopen','drop_btopen','drop_keylockopen','drop_highgain','drop_lo','drop_usbaudio','drop_usbdac'):
     active=rgba({},name,disc[:2]); inactive=rgba({},'drop_wifi',[(0x444444,255),(0xffffff,255)])
-    assert active==[(grey_of(BLUE_TONES[3]),255),(0xffffff,255)] and inactive==[(0x444444,255),(0xffffff,255)],(name,active)
+    assert active==[(grey_of(DEF_TONES[3]),255),(0xffffff,255)] and inactive==[(0x444444,255),(0xffffff,255)],(name,active)
     assert ratio(active[0][0],active[1][0])>=3
 passed()
 import subprocess
@@ -964,7 +967,7 @@ assert [row_text(r) for r in (hold,tone)]==['Hold Return: Recent','Clicker: Off'
 view=display_page(m,1); rows=setting_rows(m,view)
 # the theme's options (assets/themes/oled/theme.xml): no Shortcut row
 kids=m.nodes[view]['children']; light,song_artist,song_length,np_time=kids[0],kids[4],kids[5],kids[6]
-assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],[row_text(r) for r in kids]
+assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Arterial','Home: Split','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],[row_text(r) for r in kids]
 assert kids==[light,*rows,song_artist,song_length,np_time] and m.nodes[rows[0]].get('visible',1)==1
 assert m.icons_set==['system_display','system_display','playset_covermode','system_powermanager']+['system_display']*3,m.icons_set and all(m.nodes[r]['type']=='list_item' and m.nodes[r]['style']=='s_listitem_black' for r in rows)
 assert not {'switch_on','switch_off'} & set(m.icons_set)  # values, not switches
@@ -1006,7 +1009,7 @@ assert [nm.text(c[1]) for c in nm.calls if c[0]=='stock_ui_load']==['system_bar'
 assert OLED_G.bar==58 and Machine().call(address=payload_syms['client_h'],args=(0,0,0,0),gap=0)==320-OLED_G.bar; passed()
 # Migration (navigation.c theme_boot): a unit an older build left on another theme (IPOD THEME other than 3, or no
 # key) takes OLED's preset once at its first system_bar load, as choosing OLED did, then THEME 3 is written; with
-# THEME 3 nothing is written. The preset is theme.xml's (theme_preset): Light Mode off unless Auto (keep), Blue,
+# THEME 3 nothing is written. The preset is theme.xml's (theme_preset): Light Mode off unless Auto (keep), Arterial,
 # Home Split, and its own options' presets; Battery is kept, and only a change is saved. A second load
 # does nothing again.
 OPT_KEY={'SETTING_LIGHT':'LIGHT','SETTING_ACCENT':'OLED_ACCENT','SETTING_HOME':'HOME','SETTING_BATTERY':'BATTERY'}
@@ -1020,7 +1023,7 @@ def preset_writes(config):  # theme_preset's saves for config, from OLED's optio
         if o['values'] and o['def']>=0 and not o['values']>>v&1: v=o['def']
         if o['preset']>=0 and v!=o['keep'] and v!=o['preset']: out.append((o['preset'],'IPOD',key))
     return out
-assert preset_writes({})==[]  # a fresh unit: already OLED's preset (Home Split, Light Mode off, Blue)
+assert preset_writes({})==[]  # a fresh unit: already OLED's preset (Home Split, Light Mode off, Arterial)
 for config in ({},{'THEME':'1'},{'THEME':'0','LIGHT':'1','HOME':'2','SONGARTIST':'2','SONGLENGTH':'1','NPTIME':'1','OLED_ACCENT':'4'},
                {'THEME':'2','LIGHT':'2','HOME':'1','BATTERY':'1','SHORTCUT':'5'},{'THEME':'12'},
                {'THEME':'3'},{'THEME':'3','LIGHT':'1','HOME':'2'}):
@@ -1056,7 +1059,7 @@ f,ctx=m.handler(m.nodes[cf_refresh]['children'][0],O['EVT_CLICK']); m.mock('open
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.toasts[-1][3]=='Cover Flow rebuilds artwork next time'
 assert [m.text(c[1]) for c in m.calls if c[0]=='opendir@GLIBC_2.0']==['/mnt/mmc/.coverflow','/mnt/mmc/.sldp']
 assert did(m,'image_manager_unload_all') and m.nodes[refresh_label]['text']=='Refresh Cover Flow'; passed()
-assert texts()==['Accent: Blue','Home: Split','Battery: Icon']; passed()
+assert texts()==['Accent: Arterial','Home: Split','Battery: Icon']; passed()
 def click(i):
     m.calls=[]; f,ctx=m.handler(buttons[i],O['EVT_CLICK'])
     assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
@@ -1120,19 +1123,20 @@ for value,text in ((1,'On'),(2,'Auto'),(0,'Off')):
         m.clock=(18,14)
         m.call(address=payload_syms['clock_due'],args=(0,0,0,0),gap=0,clear=False)
 passed()
-# Accent: Blue is OLED's one value (values mask 0x200), so a click comes round to it and saves it as OLED_ACCENT,
-# dropping the images and repainting; the selection stays Blue's bar.
+# Accent: from Arterial a click moves to Blue, OLED's other value (values mask 0xc00), and saves it as OLED_ACCENT,
+# dropping the images and repainting; the selection is then Blue's bar.
 writes=click(0)
-assert [(w[0],m.text(w[1]),m.text(w[2])) for w in writes]==[(BLUE_ROW,'IPOD','OLED_ACCENT')] and texts()[0]=='Accent: Blue'
+assert [(w[0],m.text(w[1]),m.text(w[2])) for w in writes]==[(OLED_BLUE_ROW,'IPOD','OLED_ACCENT')] and texts()[0]=='Accent: Blue'
 assert ('image_manager_unload_all',0x1000500) in [c[:2] for c in m.calls] and ('widget_invalidate_force',m.wm) in [c[:2] for c in m.calls]
-m.paint(view); assert m.bands and {b[4]&0xffffff for b in m.bands}=={color_t(BLUE_TONES[0])&0xffffff}; passed()
+m.paint(view); assert m.bands and {b[4]&0xffffff for b in m.bands}=={color_t(OLED['schemes'][OLED_BLUE_ROW]['tones'][0])&0xffffff}
+writes=click(0); assert [(w[0],m.text(w[2])) for w in writes]==[(DEF_ROW,'OLED_ACCENT')] and texts()[0]=='Accent: Arterial'; passed()
 # Battery: OLED offers Icon and Percent (values="icon percent"); each click saves and repaints the bar alone.
 bar=m.node('window','system_bar'); m.word(syms['system_bar'],bar)
 for value,name in ((1,'Percent'),(0,'Icon')):
     writes=click(2); assert [(w[0],m.text(w[2])) for w in writes]==[(value,'BATTERY')] and texts()[2]=='Battery: '+name
     assert ('widget_invalidate_force',bar) in [c[:2] for c in m.calls] and not [c for c in m.calls if c[0]=='image_manager_unload_all']
 passed()
-# A stored value outside an option's values reads as its default, the key untouched: ACCENT and OLED_ACCENT are Blue,
+# A stored value outside an option's values reads as its default, the key untouched: ACCENT and OLED_ACCENT are Arterial,
 # Battery's Icon + Percent and Percent Inside are Icon.
-m,view,rows=display({'ACCENT':'2','OLED_ACCENT':'3','HOME':'1','BATTERY':'2','SHORTCUT':'1'}); assert [row_text(r) for r in rows]==['Accent: Blue','Home: Full','Battery: Icon']
+m,view,rows=display({'ACCENT':'2','OLED_ACCENT':'3','HOME':'1','BATTERY':'2','SHORTCUT':'1'}); assert [row_text(r) for r in rows]==['Accent: Arterial','Home: Full','Battery: Icon']
 m,view,rows=display({'BATTERY':'3'}); assert row_text(rows[2])=='Battery: Icon'; passed()

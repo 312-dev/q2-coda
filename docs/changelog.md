@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Look: the accent is now **Arterial**, a deep red, in place of the blue: the selection bar, progress bars, switches and the rest that took the blue. **Blue** is still there under Settings > Display > Appearance > Accent, and the new UI follows that choice too. The status row's download ring and Guest Play's phone stay blue whichever you pick.
   - New UI (preview): Control Center comes down from the top of the screen under your finger as you pull it, and settles open or back up when you let go, instead of sliding in from the side; Return held drops it from the top. Its Brightness and Volume sliders now stay right under your finger while you drag them.
   - New UI (preview): **Genres** and **Recently Added** are in the Library, as in the classic menus: a genre's songs with their artists, and every song newest first. In Artists, Albums and Genres the songs with no name for it are listed last.
   - Status row: the orange crossed-out cloud now shows whenever anything the Q2 fetches from the internet can't be reached while Wi-Fi is connected (scrobbling, online lyrics and covers, updates and the App Store, the time zone, the radio directory), not only a streaming app's server; it goes once that service answers again.

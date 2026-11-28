@@ -82,7 +82,8 @@ static const unsigned accents[][5] = { ACCENTS };
 _Static_assert(sizeof accents / sizeof *accents == ACCENT_N, "one accent per ACCENTS row");
 const char *const accent_names[] = { "Accent: Graphite",  "Accent: Crimson", "Accent: Tidal",
                                      "Accent: Champagne", "Accent: Cobalt",  "Accent: Tangerine",
-                                     "Accent: Plum",      "Accent: Ivory",   "Accent: Green" };
+                                     "Accent: Plum",      "Accent: Ivory",   "Accent: Green",
+                                     "Accent: Arterial" };
 _Static_assert(sizeof accent_names / sizeof *accent_names == ACCENT_N, "one name per ACCENTS row");
 _Static_assert(sizeof st.setting_label / sizeof *st.setting_label == SETTING_OWN + THEME_KEYS,
                "one label per Display row");

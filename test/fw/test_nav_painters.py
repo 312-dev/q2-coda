@@ -1439,7 +1439,7 @@ def test_an_own_scheme_s_tones_compile_into_its_row(tmp_path):
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Werror', '-I', str(host.ROOT/'patch'), str(tmp_path/'tones.c'), '-o', str(tmp_path/'tones')],
                    check=True)
     out = subprocess.run([str(tmp_path/'tones')], capture_output=True, text=True, check=True).stdout.splitlines()
-    assert out == [' '.join(f'{x:06x}' for x in row) for row in T.ACCENT_TONES] + ['2f5bea 2f5bea 5a7cee 5a7cee 2f5bea']
+    assert out == [' '.join(f'{x:06x}' for x in row) for row in T.ACCENT_TONES] + ['2f5bea 2f5bea 5a7cee 5a7cee 2f5bea', 'b8141c ' * 4 + 'b8141c']
 
 
 def test_a_radius_past_half_the_row_is_the_pill(fw, layout, theme_layout):

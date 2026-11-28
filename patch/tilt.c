@@ -19,12 +19,12 @@
  * The press (docs/internals.md#row-press, after Apple TV, design/row-press option C): the bar at
  * rest sits raised, PRESS_FOCUS thousandths of its size with a soft accent shadow (PRESS_LIFT);
  * Centre's press sinks it to PRESS_DOWN over PRESS_DOWN_MS, cubic out, the shadow pulled in to a
- * quarter, and brightens its blue (tilt_tone); the release springs it back to PRESS_FOCUS over
- * PRESS_SPRING_MS with one small overshoot (spring[]) and fades the blue back over PRESS_FADE_MS.
+ * quarter, and brightens its accent (tilt_tone); the release springs it back to PRESS_FOCUS over
+ * PRESS_SPRING_MS with one small overshoot (spring[]) and fades the accent back over PRESS_FADE_MS.
  * The bar has one transform: a press wins over a lean, which goes to 0. The runs are anim_t on
  * ui_kit.h's shared frame timer, and tilt_poll, from the UI loop, paints the bar's box again
  * whenever what it shows changes, never the bar's own paint. Under Reduce Motion nothing scales or
- * casts a shadow: the blue steps up for the press and down PRESS_RM_HOLD_MS after the release. */
+ * casts a shadow: the accent steps up for the press and down PRESS_RM_HOLD_MS after the release. */
 #include "navigation.h"
 #include "playback.h"
 #include "ui_kit.h"
@@ -52,15 +52,15 @@ static struct {
 #define PRESS_DOWN 965       /* ... at the bottom of a press */
 #define PRESS_DOWN_MS 90     /* Centre down to PRESS_DOWN, cubic out */
 #define PRESS_SPRING_MS 280  /* Centre up back to PRESS_FOCUS, spring[] */
-#define PRESS_FADE_MS 120    /* the blue's way back after the release, linear */
-#define PRESS_RM_HOLD_MS 80  /* Reduce Motion: the blue held this long past the release */
+#define PRESS_FADE_MS 120    /* the accent's way back after the release, linear */
+#define PRESS_RM_HOLD_MS 80  /* Reduce Motion: the lighter step held this long past the release */
 #define PRESS_LIFT 160       /* the rest shadow's strength, 256ths of the lean's at the tick */
-#define PRESS_BLUE 0x4080f0  /* the pressed step of OLED's one accent, its Blue scheme */
+#define PRESS_LIGHT_STEP 120 /* the pressed step, thousandths of the way to white (theme.py) */
 
 static struct {
-    anim_t down, up, fade; /* the press, the spring and the blue's way back */
+    anim_t down, up, fade; /* the press, the spring and the accent's way back */
     short from;            /* the size at the release, thousandths */
-    short bright_from;     /* the blue's step at the release, 0..1000 */
+    short bright_from;     /* the accent's step at the release, 0..1000 */
     int held;              /* Centre is down on the bar */
     unsigned shown;        /* what the bar last showed (press_sign), for tilt_poll */
 } press __attribute__((section(".scratch")));
@@ -81,7 +81,7 @@ static int press_scale(void) {
     return PRESS_FOCUS - (PRESS_FOCUS - press.from) * s / 1000;
 }
 
-/* The blue's step toward its pressed tone now, 0..1000. Under Reduce Motion it steps: full from
+/* The accent's step toward its pressed tone now, 0..1000. Under Reduce Motion it steps: full from
  * the press to PRESS_RM_HOLD_MS past the release. */
 static int press_bright(void) {
     if (press.held) return anim_at(&press.down);
@@ -120,13 +120,12 @@ void tilt_press(int down) {
                MO_FEEDBACK);
 }
 
-/* The bar's tone c (the accent's top, bottom or highlight) at the press's blue step (row_paint.c
- * paint_selection): toward PRESS_BLUE. ponytail: OLED has one accent, Blue (theme.xml oled-blue),
- * whose five tones are all the one blue, so every tone steps to PRESS_BLUE; a second accent would
- * need its own pressed step, carried in its scheme. */
+/* The bar's tone c (the accent's top, bottom or highlight) at the press's step (row_paint.c
+ * paint_selection): toward c lightened PRESS_LIGHT_STEP of the way to white, whatever the
+ * accent, as q2ui's pressed step is (tools/theme.py accent_set). */
 unsigned tilt_tone(unsigned c) {
     int b = press_bright();
-    return b ? mix(c, PRESS_BLUE, b, 1000) : c;
+    return b ? mix(c, 0xffffff, b * PRESS_LIGHT_STEP / 1000, 1000) : c;
 }
 
 /* A wheel tick that met an end of w's list, toward dir (+1 the last row): the selection stays, and

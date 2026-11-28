@@ -964,7 +964,7 @@ Display page again (`display_open`, `display_sub` naming the sub-page while its 
 drops the stock rows, takes the sub-page's title and builds only its own rows:
 
 - Appearance: the theme's options in its theme.xml's order (`setting_row`), under OLED "Light Mode: Auto"
-  ([Light Mode](#light-mode)), "Accent: Blue", "Home: Split" and "Battery: Icon" (Icon or
+  ([Light Mode](#light-mode)), "Accent: Arterial", "Home: Split" and "Battery: Icon" (Icon or
   Percent; see [Status bar and clock](#status-bar-and-clock)), then its own options, "Song Artist: Inline",
   "Song Length: Albums" and "Track Time: Remaining" ([Theme](#theme)). Under OLED (`set_text`) a row shows its
   value on the right column, apart from its label.
@@ -1018,10 +1018,12 @@ a valid one (up to three digits, below the key's count), is Split and Icon; a th
 values reads as its default, the key untouched (`settings_read`). A `THEME` other than 3, or none, is a unit
 from a build with more themes: it takes OLED's preset once ([Theme](#theme)).
 
-OLED offers one accent, its own Blue (`OLED_ACCENT` 9, after the nine `ACCENTS` rows): `#2160D8` in all
-five tones (`<colorScheme name="oled-blue" base="cobalt">`), the selection bar, the progress fill and
-every red stock draws ([Theme](#theme)). The engine keeps the `ACCENTS` rows (`patch/offsets.inc`:
-Graphite, Crimson, Tidal, Champagne, Cobalt, Tangerine, Plum, Ivory, Green) for a theme to offer;
+OLED offers two accents of its own, after the ten `ACCENTS` rows: Blue (`OLED_ACCENT` 10, `#2160D8` in all five
+tones, `<colorScheme name="oled-blue" base="cobalt">`) and Arterial, the default (11, `#B8141C`,
+`<colorScheme name="oled-arterial" base="arterial">`): the selection bar, the progress fill and every red stock draws
+([Theme](#theme)). A value it does not offer, 9 too (the `ACCENTS` row Arterial, which a Q2 stored while Blue was
+OLED's one accent), reads as Arterial. The engine keeps the `ACCENTS` rows (`patch/offsets.inc`: Graphite, Crimson,
+Tidal, Champagne, Cobalt, Tangerine, Plum, Ivory, Green, Arterial) for a theme to offer;
 Crimson returns every color unchanged. Grays and artwork remain unchanged by the live accent
 mapper. See [internals.md](internals.md#accent) for the mapping.
 
@@ -1030,7 +1032,7 @@ Now Playing uses 24 px monochrome control glyphs on 28 px canvases inside the ex
 ### Theme
 
 OLED is the one theme, built to [oled-design.md](oled-design.md): black, white sentence-case Inter, one
-blue, on its own layout. `assets/themes/oled/theme.xml` stands alone (it extends no other theme), states its
+accent, on its own layout. `assets/themes/oled/theme.xml` stands alone (it extends no other theme), states its
 own grid (its `<geometry>`) and is row 0 of the theme table, so Appearance has no Theme row and
 there is no picker ([internals.md](internals.md#themes)).
 
@@ -1070,8 +1072,8 @@ painted it white, which drew the box at rest.
   opens a page and shows a value (Resume Songs, Volume) has the value just left of its chevron. The status row
   names the Library and Songs by those words, where stock calls both "Local Songs".
 - **Color.** Black (white in Light Mode), white text, second lines in Text Tertiary (`#858585`), a settings row's
-  value in Text Secondary (`#ABABAB`, `#5C5C5C` on paper), and one blue, `#2160D8`, for the selection bar, the
-  progress fill and every mark stock draws red. **Accent** offers that Blue alone (`OLED_ACCENT`).
+  value in Text Secondary (`#ABABAB`, `#5C5C5C` on paper), and one accent, Arterial `#B8141C`, for the selection bar,
+  the progress fill and every mark stock draws red. **Accent** offers Arterial and Blue `#2160D8` (`OLED_ACCENT`).
 - **Type.** Inter Regular for rows (20 px) and second lines (15 px), Inter Medium for the status row (15 px) and
   Now Playing's title (22 px), with tabular digits ([Its font](#oled-type) below).
 - **The selection.** The accent's flat bar, 16 px in from each side with 8 px ends on every row.
