@@ -5232,9 +5232,17 @@ def main():
         (tmp/'test.c').write_text(TEST)
         (tmp/'ffmpeg').write_text(FFMPEG_STUB)
         (tmp/'ffmpeg').chmod(0o755)
-        builds = {'coverflow_test': ()}  # each build's own flags; its card is <name>-root
+        builds = {'coverflow_test': ()}  # each build's own flags; its card is c<k>, k its place here
+        cards = {name: f'{tmp}/c{k}' for k, name in enumerate(builds)}
+        for card in cards.values():
+            # coverflow.c keeps a folder's names (names_of) only for a path under 72 bytes and asks the card a file
+            # at a time past it, which the access counts below catch; the Q2's longest, /mnt/mmc/.coverflow and
+            # an app's /mnt/mmc/.<id>/covers, are 31 at most. A long TMPDIR would fail those checks obscurely.
+            if len(card + '/mnt/mmc/.coverflow') >= 72:
+                raise SystemExit(f'{card}/mnt/mmc/.coverflow is 72 bytes or more, past coverflow.c names_of\'s folder '
+                                 'length: set a shorter TMPDIR')
         def cc(name, src):  # each source on its own, so they compile at once
-            return subprocess.Popen(['cc', '-m32', '-pthread', '-DPEQ_HOST', f'-DPEQ_ROOT="{tmp}/{name}-root"',
+            return subprocess.Popen(['cc', '-m32', '-pthread', '-DPEQ_HOST', f'-DPEQ_ROOT="{cards[name]}"',
                         f'-DART_FFMPEG="{tmp}/ffmpeg"', '-D_GNU_SOURCE', '-O1', '-Wall', '-Wextra', '-Werror', '-Wno-unused-result', '-Wno-unused-parameter', '-Wno-unused-function',
                         *builds[name], *cf_style, '-I', str(ROOT/'patch'), '-include', str(tmp/'shim.h'), '-c', str(tmp/src), '-o', str(tmp/f'{name}-{src}.o')])
         objects = [cc(name, src) for name in builds for src in ('coverflow_all.c', 'test.c')]

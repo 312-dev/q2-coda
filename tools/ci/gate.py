@@ -72,6 +72,7 @@ import argparse
 import contextlib
 import datetime
 import hashlib
+import itertools
 import json
 import os
 import pathlib
@@ -81,7 +82,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from typing import Any
 
@@ -90,7 +90,7 @@ HEAVY = pathlib.Path(os.environ.get('Q2_HEAVY', pathlib.Path.home()/'.local/bin/
 FLOOR = 4.0  # GB of MemAvailable a new suite must leave
 RAMP = 30    # s: a suite this young may not have reached its peak yet, so its estimate still counts
 # /tmp, which every suite shares (on the Mac a 2 GB tmpfs, tools/mac/q2env). Each suite runs with TMPDIR a folder of
-# its own under it, removed when the suite ends. While /tmp has less than TMP_LOW of its size free, each poll
+# its own in it (short_dir), removed when the suite ends. While /tmp has less than TMP_LOW of its size free, each poll
 # measures every running suite's folder, so a suite that fails with /tmp full is reported with who held it.
 TMP = pathlib.Path('/tmp')
 TMP_LOW = 0.10
@@ -517,6 +517,19 @@ def tree_bytes(path):
     return n
 
 
+def short_dir(parent=TMP):
+    """A new folder parent/gN, N the lowest free: a suite's TMPDIR. Short, as suites build paths under it into
+    fixtures sized for the Q2's (test/coverflow.py's card root, test/peq.py's Tidal folder) and sockets'
+    108-byte addresses; mkdir is atomic, so two gates sharing /tmp never share one."""
+    for n in itertools.count():
+        try:
+            (d := pathlib.Path(parent)/f'g{n}').mkdir()
+            return d
+        except FileExistsError:
+            continue
+    raise AssertionError('unreachable')
+
+
 def holders(sizes, used):
     """'s1 1400 MB, s2 80 MB, elsewhere 20 MB': who held /tmp, largest first, from {suite: bytes} and /tmp's use."""
     mb = 1 << 20
@@ -534,11 +547,9 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
     ran on the same tree_state; after a change it fails with rc 'changed' and the first try's log. A retried
     result names the tests the first try's log failed ('first_tests'). tree (the
     hash tree_key gives): a suite recorded as passed on it is not run ('cached'), and each pass is recorded.
-    Each suite's TMPDIR is a folder of its own under tmp_dir, gone when it ends; a failed suite that saw tmp_dir
+    Each suite's TMPDIR is a folder of its own in tmp_dir (short_dir), gone when it ends; a failed suite that saw tmp_dir
     full, or whose log says so, has 'tmp_full' (who held it) and the line '/tmp full: <who>'."""
     logs.mkdir(parents=True, exist_ok=True)
-    tmp_root = pathlib.Path(tempfile.mkdtemp(prefix='q2g', dir=tmp_dir))  # short: sockets go under it
-    launched = 0
     done: dict = {}
     if tree:
         for s in list(suites.values()):
@@ -555,10 +566,8 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
         pending.insert(0, builder)
 
     def launch(s):
-        nonlocal launched
         s.log = logs/f'{s.name.replace("/", "_")}.log'
-        s.tmp, s.tmp_low, launched = tmp_root/str(launched), None, launched + 1
-        s.tmp.mkdir()
+        s.tmp, s.tmp_low = short_dir(tmp_dir), None
         s.states.append(tree_state(build))  # what this try runs against, before it starts
         s.start = clock()
         cmd = s.command(build or '')
@@ -674,7 +683,7 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
         for s in running:  # stopped early: end each suite with what it started (q2-heavy ends its job on TERM)
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(s.proc.pid, signal.SIGTERM)
-        shutil.rmtree(tmp_root, ignore_errors=True)
+            shutil.rmtree(s.tmp, ignore_errors=True)
     return done
 
 
