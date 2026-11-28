@@ -66,7 +66,7 @@ With audio the gadget is another device to Windows, which keys its drivers on ve
 ```sh
 q2adb-gadget audio try 120   # on for 120 s under a watchdog, not remembered
 q2adb-gadget audio keep      # within the 120 s, over the adb that came back: stays on, and remembered
-q2adb-gadget audio rehearse 120   # the gadget made again as it was (no audio), same watchdog; keep only stands it down
+q2adb-gadget audio rehearse 120   # the gadget made again as it was (no audio), same watchdog
 q2adb-gadget audio on        # on, remembered for every boot (/mnt/data/q2adb.audio)
 q2adb-gadget audio off       # adb alone, forgotten
 ```
@@ -98,13 +98,15 @@ Each makes the gadget again: USB adb drops for the seconds adbd takes to come ba
 
 **The seventh (2026-11-28): a line connector keeps the tone.** Three tries, the same two captures in each. Shanling's microphone (`c_terminal_type` 513 on `1d6b:0104`): jack subtype `KSNODETYPE_MICROPHONE`, form factor 4, the tone held through exclusive mode and cut to 0.05 s through the shared path, as before. `c_terminal_type` 1539 (0x0603) on the same `1d6b:0104`: read back 1539, jack subtype `KSNODETYPE_LINE_CONNECTOR`, form factor 2 (line level), the endpoint renamed "Line (Source/Sink)", and the tone held its level for the whole 10 s of both plays through both paths. The same on `1d6b:0107`, a product the laptop had not seen ("Line (Q2 Output)"): the same. So `c_terminal_type` is the terminal the computer records from, and Windows takes a new type for a device it knew as a microphone: the endpoint is a new one (a new endpoint ID), not the cached one, so the product stays `0x0104`. What marks Voice Clarity on an endpoint is its property `{9e6136e0-57ab-4949-b57a-3627be142855},100` (the effect pack's mode CLSID, naming the `VocaEffectPack` device): the microphone endpoint has it and both line endpoints do not. `{C18E2F7E-933D-4965-B7D1-1EEF228D2AF3}`, the stream and mode effect on all three, is another processing object, not registered globally on that laptop; the tone survives it, and the one-step noise of the shared path (23% of samples) is there on the line endpoints too. Windows gave each new line endpoint 44.1 kHz as its shared-mode format (the first rate the device lists), where the microphone endpoint had 48 kHz from before, and opened each new endpoint first at 192 kHz for a moment (a START and STOP at 192,000) before the rate its client asked for; the tone script followed each (it played the 44.1 kHz tone at 44.1 kHz, and the recording holds 1 kHz). The default is now the line connector.
 
+**The eighth (2026-11-28): the default, and the watchdog's token.** `rehearse 120` made the gadget again as it was (`1d6b:0105`, `ffs.adb` alone), USB adb back in 6 s; `try 200` 7 s later made the default (`1d6b:0104`, `c_terminal_type` 1539), and Windows showed it as a line connector without Voice Clarity before and after the captures; the tone held its level for both whole plays through exclusive mode (at 48 kHz) and the shared path (at 44.1 kHz, the endpoint's format). `off` 83 s into the try brought adb alone back, and the log says the try's watchdog was told to stand down (at 1,138.55 s of uptime). The rehearsal's watchdog came due at 1,165.46, its token replaced by the try's, and stood down; the try's at 1,251.88, its token taken by the `off`, and stood down. Neither went back to adb alone (no "no keep" line), the gadget stayed `1d6b:0105`, nothing was remembered, and no watchdog was left waiting.
+
 ### Listening on Windows
 
-1. With audio on and the cable in, Windows lists a new recording device, "Q2 Output" (Settings > System > Sound > Input, or `mmsys.cpl` > Recording).
-2. Its Properties > Advanced > Default Format is the rate the Q2 is asked for (48 kHz unless changed; the player resamples to it).
+1. With audio on and the cable in, Windows lists a new recording device, "Line (Q2 Output)" (Settings > System > Sound > Input, or `mmsys.cpl` > Recording).
+2. Its Properties > Advanced > Default Format is the rate the Q2 is asked for: 44.1 kHz on a new line endpoint (the eighth desk run), the first rate the device lists; any other in the list works, and the player resamples to it.
 3. Properties > Listen > **Listen to this device**, playback through the computer's speakers or headphones. Or record it in any program that records an input.
 
-macOS lists it in Audio MIDI Setup as an input, and Linux as an ALSA capture card (`arecord -l`).
+On macOS it should be an input in Audio MIDI Setup, and on Linux an ALSA capture card (`arecord -l`); neither has been tried.
 
 <a id="the-player-s-output-in-the-gadget"></a>
 ## The player's output in the gadget
@@ -122,9 +124,14 @@ On a host build the card is a file (`Q2PLAYER_UAC`, `Q2PLAYER_UAC_RATE`), paced 
 
 - `python3 test/player/run.py -k test_tap` and `-k test_uac`: the tap bit for bit, its take-backs, a slow reader, a second reader, off without the gate; the card given the song exactly, resampled, and nothing without the flag. The tap's first four fail on the player before it (no stream); the slow reader fails on a tap that waits for room.
 - `python3 -m pytest test/unit/test_q2tap.py`: the reader on streams built as `tap.c` writes them (a record cut anywhere, take-backs inside and past the hold, drops, formats, WAVs), and `vamp audio` over the fake adbd and through Google's adb.
-- `python3 test/adb.py`: `q2adb-gadget audio` on a stand-in configfs: the composite gadget's IDs, class and attributes, setup, park and unpark with audio remembered, off, the USB adbd stopped and adb over Wi-Fi not, a try through its shell's `SIGHUP`, its watchdog's revert, keep, rehearse, and the restart when USB adb does not come back.
+- `python3 test/adb.py`: `q2adb-gadget audio` on a stand-in configfs: the composite gadget's IDs, class and attributes, setup, park and unpark with audio remembered, off, the USB adbd stopped and adb over Wi-Fi not, a try through its shell's `SIGHUP`, its watchdog's revert, keep, rehearse, the restart when USB adb does not come back, the line connector by default and the terminal type, product and release a desk test sets, and a watchdog standing down for an `on` after its try and for a later try (both fail with the token check taken out); `uac_tone_checks`, the desk test's script on a stand-in `/proc` (it plays only while the computer streams, with the kernel's ring buffer full).
 
 ## What is missing
 
-- On a Q2: the sound clean at the computer's rate ([the desk test](#the-desk-test)), and whether the card has the `Playback Rate` control `player/uac.c` follows (without it the sink opens at 48 kHz). The gadget binds and Windows takes it (above). The tap has not run on a Q2.
-- A setting in the UI: audio is a command (`q2adb-gadget audio`), from adb.
+USB audio is off unless asked for: with no `/mnt/data/q2adb.audio` the gadget is adb alone, `1d6b:0105`, as without this feature, and only `q2adb-gadget audio on` (remembered in `/mnt/data/q2adb.audio`) or `audio keep` after a `try` turns it on. Before it ships:
+
+- **A setting in the UI**, with its copy: today it is a command over adb.
+- **The player on a Q2**: every desk run played with `aplay`. `player/uac.c` (the tap into the card, its `Playback Rate` control, the resampling and the two clocks) and the tap behind it (`vamp audio`) have run only on the host (`test/player/run.py`).
+- **A computer that knew the Q2 as a microphone**: Windows made a new line endpoint for the same device and dropped the microphone one (the seventh run), so a recording app set to the old one has to be pointed at the new; seen on one Windows 11 laptop only.
+- **macOS and Linux hosts**: not tried. What they show and whether they process a line input is not known.
+- **Two requests** (`Q2ADB_UAC_REQ=2`): Windows started the stream and delivered nothing (the fifth run); eight, the default, is what ran clean.
