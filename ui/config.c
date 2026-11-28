@@ -2,7 +2,8 @@
  * and writes while it owns the settings pages: read here, never written. [IPOD] LIGHT (0 dark, 1
  * Light Mode, 2 Auto: light from 7:00 to 19:00, patch/theme_engine.c light_day; Auto when absent), REDUCEMOTION
  * (1 on), and the song rows' SONGARTIST (0 Inline, 1 Selected Row, 2 Right, 3 Off) and SONGLENGTH (0 Albums, 1 All
- * Lists, 2 Off), a value outside its range read as its default, 0, as demo reads them (theme_engine.c settings_read). Read at the start and whenever demo writes the file (a watch of its folder), and Auto
+ * Lists, 2 Off), a value outside its range read as its default, 0, as demo reads them (theme_engine.c settings_read), and the accent,
+ * UI_ACCENT_KEY (absent, or a value the theme does not offer, reads as UI_ACCENT_DEFAULT: Arterial). Read at the start and whenever demo writes the file (a watch of its folder), and Auto
  * again when the minute turns (status.c). --light and --reduce-motion on the command line hold
  * their setting on whatever the file says. */
 #include <stdio.h>
@@ -76,6 +77,7 @@ void config_read(void) {
     song_artist_setting = song_artist_setting >= 0 && song_artist_setting <= SONG_ARTIST_OFF ? song_artist_setting : 0;
     song_length_setting = config_int("IPOD", "SONGLENGTH", 0);
     song_length_setting = song_length_setting >= 0 && song_length_setting <= SONG_LENGTH_OFF ? song_length_setting : 0;
+    if (accent_set_value(config_int("IPOD", UI_ACCENT_KEY, UI_ACCENT_DEFAULT))) ui_mark_all();
     list_rows_changed(); /* a page may show a setting (page_display.c), and song rows are drawn by two */
     int reduce = config_motion_forced || motion_setting;
     if (reduce != ui_reduce_motion) ui_reduce_motion = reduce, ui_mark_all();

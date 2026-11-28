@@ -298,8 +298,11 @@ void ui_stats_reset(void);
 #include "../patch/tokens.h"
 extern int ui_light;         /* Light Mode */
 uint32_t tok(int token);     /* the token's colour in the half in use */
-#define RGB_ACCENT 0x2160d8
-#define RGB_ACCENT_PRESSED 0x4080f0
+/* the accent chosen: { selection, pressed, text on black, text on white, caption on it } */
+extern const uint32_t *ui_accent;
+int accent_set_value(int v); /* [IPOD] UI_ACCENT_KEY's value; 1 when the accent changed */
+#define RGB_ACCENT (ui_accent[0])
+#define RGB_ACCENT_PRESSED (ui_accent[1])
 /* A size in em px as the design states it (docs/oled-design.md#type) to the line height text.c
  * takes: Inter's line is 1.21 em. */
 #define TYPE(px) ((int)((px) * 1.21f + 0.5f))

@@ -455,7 +455,7 @@ static void n_draw(void *st, rect_t r) {
             image_draw(im[k],
                        (rectf_t){ cx - (float)im[k]->w / 2, MODE_Y - (float)im[k]->h / 2,
                                   (float)im[k]->w, (float)im[k]->h },
-                       0, 0, 256, -1);
+                       0, 0, 256, lit[k] ? (long)RGB_ACCENT : -1); /* a lit glyph's file is in the default accent */
         if (lit[k])
             fill_round((rectf_t){ cx - DOT / 2, MODE_Y + DOT_DY - DOT / 2, DOT, DOT }, DOT / 2, 0,
                        RGB_ACCENT, 1, 0);
