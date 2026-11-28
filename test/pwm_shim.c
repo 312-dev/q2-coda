@@ -64,7 +64,9 @@ int ioctl(int fd, unsigned long req, ...) {
             const char *refuse = getenv("Q2PWM_REFUSE");
             r = refuse && ++configs == atoi(refuse) ? -1 : 0;
             if (!refuse) ++configs;
-            if (f) fprintf(f, "%lld config %u %u%s\n", ms, c[3], c[5], r ? " refused" : "");
+            /* the step count only where it is not the jingle's 100: the backlight's 111 (sysd/q2sysd.c bl_take) */
+            if (f && c[4] != 100) fprintf(f, "%lld config %u %u steps %u%s\n", ms, c[3], c[5], c[4], r ? " refused" : "");
+            else if (f) fprintf(f, "%lld config %u %u%s\n", ms, c[3], c[5], r ? " refused" : "");
         } else if (req == 0xc004502cUL) {
             const unsigned *l = arg;
             if (f) fprintf(f, "%lld level %u %u\n", ms, l[0], l[1]);

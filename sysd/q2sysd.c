@@ -5,10 +5,12 @@
  *     double tap, which hyn_touch reports as KEY_POWER while its gesture mode is on): a press shorter than HOLD_MS
  *     turns the screen off or on; held HOLD_MS it powers the Q2 off (POWEROFF, init's shutdown: the services stopped,
  *     the file systems unmounted).
- *   - The screen: off is the backlight's bl_power 4 (FB_BLANK_POWERDOWN) and the touchscreen's gesture mode on, as
- *     stock's screen_action does (docs/internals.md#screen-off-and-wake); on is bl_power 0 and gestures off. q2ui
- *     reads the same bl_power and drops input while it is dark (ui/ui.c dark). Lit, it goes off once nothing has
- *     used the Q2 for stock's Screen Off Time ([SYSSET] LIGHTTIME, docs/sysd.md#the-screen-off-time): any input
+ *   - The screen: off is the light out and the touchscreen's gesture mode on, as stock's screen_action does
+ *     (docs/internals.md#screen-off-and-wake); on is the light back and gestures off. The light is a backlight
+ *     device's bl_power (4, FB_BLANK_POWERDOWN, then 0) where the kernel has one, else stock's PWM on PC00 through
+ *     /dev/jz_pwm, which is what the Q2 has (docs/sysd.md#the-backlight). q2ui reads bl_power and drops input while
+ *     it is dark (ui/ui.c dark); with the PWM there is none, and the screen events say it. Lit, it goes off once
+ *     nothing has used the Q2 for stock's Screen Off Time ([SYSSET] LIGHTTIME, docs/sysd.md#the-screen-off-time): any input
  *     device's key, touch or wheel, or Q2SYS/1 awake.
  *   - The battery: the CW2015's level and voltage, the charger's state, read every BATTERY_S and at each change of
  *     the screen, written to /run/vamp/battery and told to watchers.
@@ -148,6 +150,25 @@ static struct guard guard;
 static int heat_cancel, heat_slept, heat_on;
 static int jack_in[2]; /* the jacks' (below) */
 
+/* The backlight. A /sys/class/backlight device where the kernel has one (bl_power, brightness over max_brightness).
+ * The Q2 has none: stock's toolSetBackLight, for the model its demo is built for (23, the constant main passes to
+ * initToolsModule), drives the panel's light from PWM pin PC00 through /dev/jz_pwm, as libhardware2.so's pwm_request,
+ * pwm_config and pwm_set_level send it: 10 kHz over BL_STEPS steps, lit at [SYSSET] LIGHTNESS (0 to 100) + 1 + 10, dark
+ * at 0 (docs/sysd.md#the-backlight). The channel is taken at its first use, not at the start, so a card boot leaves
+ * the light today's Vamp's demo set until it is asked to change it. */
+static int config_int(const char *section, const char *key, int fallback);
+#define BL_PIN "PC00"
+#define BL_STEPS 111 /* pwm_config's fifth word: LIGHTNESS 100 + 1 + 10 is the whole period */
+#define BL_HZ 10000
+#define BL_LIT(l) ((l) + 1 + 10)
+#define BL_CH_STOCK 0 /* the channel stock's demo holds PC00 on (read from its handle on the owner's Q2) */
+#define FB_BLANK 0x4611 /* FBIOBLANK */
+#define BL_PWM_RELEASE 0x80045016 /* soc_pwm.ko's ioctls, as findmy_tune.h names them */
+#define BL_PWM_REQUEST 0x8001500b
+#define BL_PWM_CONFIG 0x80185021
+#define BL_PWM_LEVEL 0xc004502c
+static int bl_fd = -1, bl_ch = -1, bl_lightness = -1; /* the PWM's: its fd and channel once taken; LIGHTNESS in use */
+
 static void find_backlight(void) {
     DIR *d = opendir(path("/sys/class/backlight"));
     backlight[0] = 0;
@@ -160,14 +181,54 @@ static void find_backlight(void) {
     if (backlight[0] && !read_int(p, &v)) screen_on = v == 0;
 }
 
+/* PC00's channel taken and configured, once: 0, or -1 with no PWM driver or a channel it will not give. A request
+ * refused (the pin still held as demo left it) lets stock's channel go and asks again, and the level goes to 0
+ * before CONFIG, which the driver refuses while a channel runs (findmy_tune.h). */
+static int bl_take(void) {
+    if (bl_ch >= 0) return 0;
+    if (bl_fd < 0 && (bl_fd = open(path("/dev/jz_pwm"), O_RDWR | O_CLOEXEC)) < 0) return -1;
+    char pin[12] = BL_PIN;
+    int ch = ioctl(bl_fd, BL_PWM_REQUEST, pin);
+    if (ch < 0) ioctl(bl_fd, BL_PWM_RELEASE, BL_CH_STOCK), ch = ioctl(bl_fd, BL_PWM_REQUEST, pin);
+    if (ch < 0) return say("backlight: %s refused (%s)", BL_PIN, strerror(errno)), -1;
+    unsigned zero[2] = {(unsigned)ch, 0}, c[6] = {1, 0, 0, BL_HZ, BL_STEPS, (unsigned)ch};
+    ioctl(bl_fd, BL_PWM_LEVEL, zero);
+    if (ioctl(bl_fd, BL_PWM_CONFIG, c) < 0) return say("backlight: config refused (%s)", strerror(errno)), ioctl(bl_fd, BL_PWM_RELEASE, ch), -1;
+    bl_ch = ch;
+    say("backlight: %s on channel %d", BL_PIN, ch);
+    return 0;
+}
+
+static int bl_level(unsigned level) {
+    if (bl_take()) return -1;
+    unsigned a[2] = {(unsigned)bl_ch, level};
+    return ioctl(bl_fd, BL_PWM_LEVEL, a) < 0 ? -1 : 0;
+}
+
+/* the framebuffer blanked while dark (FB_BLANK_POWERDOWN), as stock's disable_fb, and unblanked to light it */
+static void fb_blank(int blank) {
+    int fd = open(path("/dev/fb0"), O_RDWR | O_CLOEXEC);
+    if (fd >= 0) ioctl(fd, FB_BLANK, blank ? 4 : 0), close(fd);
+}
+
 static void tell(const char *fmt, ...);
 static void charge_poll(void);
 
 static int set_screen(int on) {
     char p[340];
-    if (!backlight[0]) return -1;
-    snprintf(p, sizeof p, "%s/bl_power", backlight);
-    if (write_text(p, on ? "0" : "4")) return say("cannot write %s", p), -1;
+    if (backlight[0]) {
+        snprintf(p, sizeof p, "%s/bl_power", backlight);
+        if (write_text(p, on ? "0" : "4")) return say("cannot write %s", p), -1;
+    } else if (on) { /* stock's screen_action(1): toolSetBackLight(LIGHTNESS + 1) */
+        if (bl_lightness < 0) bl_lightness = config_int("SYSSET", "LIGHTNESS", 100);
+        if (bl_lightness > 100) bl_lightness = 100;
+        fb_blank(0);
+        if (bl_level(BL_LIT(bl_lightness))) return -1;
+    } else { /* screen_action(0): toolSetBackLight(0), 50 ms, disable_fb */
+        if (bl_level(0)) return -1;
+        usleep(50000);
+        fb_blank(1);
+    }
     /* the touchscreen's gestures (a double tap as KEY_POWER) while dark, as stock's double_onclick_wake */
     write_text(path("/sys/hynitron_debug/hyngescontrol"), on ? "0" : "1");
     screen_on = on;
@@ -177,11 +238,17 @@ static int set_screen(int on) {
     return 0;
 }
 
-/* brightness 0 to 100 over the device's max_brightness, linearly (stock's own scale is not read yet: docs/sysd.md) */
+/* brightness 0 to 100: over a sysfs device's max_brightness, linearly; on the PWM, stock's LIGHTNESS itself (its own
+ * 0 to 100 scale, so P is what Settings saves), shown at once while the screen is lit */
 static int set_brightness(int pct) {
     char p[340], v[16];
     int max;
-    if (!backlight[0] || pct < 0 || pct > 100) return -1;
+    if (pct < 0 || pct > 100) return -1;
+    if (!backlight[0]) {
+        if (bl_take()) return -1;
+        bl_lightness = pct;
+        return screen_on ? bl_level(BL_LIT(pct)) : 0;
+    }
     snprintf(p, sizeof p, "%s/max_brightness", backlight);
     if (read_int(p, &max) || max <= 0) return -1;
     snprintf(v, sizeof v, "%d", (pct * max + 50) / 100);

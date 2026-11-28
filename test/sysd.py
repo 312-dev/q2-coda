@@ -4,6 +4,7 @@ short press turning the screen off and on (the backlight's bl_power and the touc
 powering off, other keys left alone, the battery's file, and Q2SYS/1. Run it as python3 test/sysd.py (pytest).
 Q2SYSD_SOURCE builds another copy of q2sysd.c, to show a broken one fails here."""
 import os
+import shutil
 import pathlib
 import socket
 import struct
@@ -1310,6 +1311,33 @@ def test_find_plays_the_jingle_with_the_screen_lit_and_the_toast(binary, tree, t
     assert calls[-2:] == ['level 1 0', 'release 1'], 'the pin low and the channel given back, for the next click'
     assert not (tree/'run/vamp/finding').exists() and 'find off' in w.lines
     assert f.end()[0] == 0
+
+
+def test_with_no_backlight_device_the_screen_is_stock_s_pwm_on_pc00(binary, tree, tools, pwm_shim):
+    """The Q2 has no /sys/class/backlight: stock's toolSetBackLight (model 23) on /dev/jz_pwm, read on the owner's Q2
+    (docs/sysd.md#the-backlight): PC00 taken at the first use, level 0 then CONFIG at 10 kHz over 111 steps; off is
+    level 0, on is LIGHTNESS + 11, brightness P is LIGHTNESS P"""
+    shutil.rmtree(tree/'sys/class/backlight/lcd')
+    put(tree, '/mnt/data/config.ini', '[SYSSET]\nLIGHTNESS=40\n')
+    f = Pwm(binary, tree, pwm_shim)
+    assert f.calls() == [], 'nothing touched at the start: a card boot keeps the light demo left'
+    assert ask_sys(tree, 'screen off') == 'ok' and ask_sys(tree, 'screen') == 'screen off'
+    assert f.calls() == ['request PC00', 'level 1 0', 'config 10000 1 steps 111', 'level 1 0'], f.calls()
+    assert read(tree, '/sys/hynitron_debug/hyngescontrol') == '1', 'double-tap wake while dark'
+    assert ask_sys(tree, 'screen on') == 'ok' and f.calls()[-1] == 'level 1 51', f.calls()
+    assert ask_sys(tree, 'brightness 100') == 'ok' and f.calls()[-1] == 'level 1 111'
+    assert ask_sys(tree, 'screen off') == 'ok' and ask_sys(tree, 'brightness 0') == 'ok' and f.calls()[-1] == 'level 1 0', 'dark stays dark'
+    assert ask_sys(tree, 'screen on') == 'ok' and f.calls()[-1] == 'level 1 11'
+    assert f.calls().count('request PC00') == 1, 'the channel taken once'
+    assert f.end()[0] == 0
+
+
+def test_a_pwm_backlight_refused_is_err_screen_and_no_level(binary, tree, tools, pwm_shim):
+    shutil.rmtree(tree/'sys/class/backlight/lcd')
+    f = Pwm(binary, tree, pwm_shim, env={'Q2PWM_REFUSE': '1'})
+    assert ask_sys(tree, 'screen off') == 'err screen'
+    assert not [c for c in f.calls() if c.startswith('level') and c != 'level 1 0'], f.calls()
+    f.end()
 
 
 def test_any_key_or_the_wheel_stops_it_within_a_slice(binary, tree, tools, pwm_shim):
