@@ -30,7 +30,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark), `carrd-off` (no q2carrd), `carrd-card` (with --card-boot: q2carrd's run script not waiting on a card boot). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark), `accent-blue` (with --card-boot: the accent saved Blue), `carrd-off` (no q2carrd), `carrd-card` (with --card-boot: q2carrd's run script not waiting on a card boot). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -372,6 +372,21 @@ def light_check(fb):
     data = fb.read_bytes()
     px = [data[o:o + 3] for o in ((50 * 320 + 5) * 4, 320 * 375 * 4 + (50 * 320 + 5) * 4)]
     check(all(min(p) >= 0xe0 for p in px), f"q2ui: Light Mode never chosen is Auto, light at midday (pixel (5, 50): {[p.hex() for p in px]})")
+
+
+# Arterial, #B8141C, and Blue, #2160D8, at the panel's 6 bits a channel (#2060D8), as q2ui's frame stores them
+# (0xffRRGGBB, little-endian)
+ARTERIAL, BLUE = b'\x1c\x14\xb8', b'\xd8\x60\x20'
+
+
+def accent_check(fb):
+    """q2ui's accent with no [IPOD] OLED_ACCENT saved is Arterial, #B8141C on the 6-bit panel (the owner's #B8121B;
+    feat/render-engine 350316ac, ui/theme.c): the home list's selected row is filled with it. q2ui before 62f1468b fills
+    it Blue (#2060D8 on the panel) whatever is saved. Counted over both pages of the framebuffer, as the row's place turns with it."""
+    data = fb.read_bytes()
+    px = [data[o:o + 3] for o in range(0, len(data) - 3, 4)]
+    red, blue = px.count(ARTERIAL), px.count(BLUE)
+    check(red >= 1000 and blue < 100, f"q2ui: the accent never chosen is Arterial (#B8141C: {red} px, Blue #2060D8: {blue} px)")
 
 
 def sysd_checks(fs, power_key, log):
@@ -754,9 +769,11 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         (emu/'data').mkdir(exist_ok=True)
         (emu/'data/database.db').write_bytes((fs/'mnt/data/database.db').read_bytes())
         (emu/'data/wpa_supplicant.conf').write_text('network={\n\tssid="Home"\n\tpsk="secret123"\n}\n')  # networks saved
-        # a zone chosen and Light Mode never: the zone's clock at midday, so Auto is light (light_check)
+        # a zone chosen, Light Mode and the accent never: the zone's clock at midday, so Auto is light (light_check), and
+        # the accent the default (accent_check)
         zone_index, zone_want = day_zone(fs)
-        (emu/'data/config.ini').write_text(f'[SYSSET]\nTIMEZONE={zone_index}\n' + ('[IPOD]\nLIGHT=0\n' if perturb == 'light-dark' else '')
+        ipod = ('LIGHT=0\n' if perturb == 'light-dark' else '') + ('OLED_ACCENT=10\n' if perturb == 'accent-blue' else '')
+        (emu/'data/config.ini').write_text(f'[SYSSET]\nTIMEZONE={zone_index}\n' + ('[IPOD]\n' + ipod if ipod else '')
                                            + '[Q2POD]\nCARREMOTE=1\n')  # on: the image's own must still not start
         (emu/'modules').write_text(''.join(f'{ko[:-3]} 16384 0 - Live 0x00000000\n' for ko, _ in want))
         extra = ['--bind', emu/'data', '/mnt/data', '--ro-bind', emu/'modules', '/proc/modules']
@@ -800,6 +817,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             got = sys_heat(fs)
             check(got == 'heat off', f"q2sysd: no heat of its own on a card boot, today's Vamp's q2guard's ({got})")
             light_check(fb)
+            accent_check(fb)
             time.sleep(3)  # q2carrd's run script, had it not waited, would have started coda-rc by now (config.ini: on)
             check(not adb_open(7720), "card boot: Car Remote is today's Vamp's (nothing of the image's on 7720)")
             if not outer_adbd:
@@ -897,7 +915,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark', 'carrd-off', 'carrd-card'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark', 'accent-blue', 'carrd-off', 'carrd-card'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()
