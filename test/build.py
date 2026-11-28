@@ -553,7 +553,7 @@ def validate_assets(directory):
         try: settings_icon(name, old[:-1] + b'x')
         except ValueError: pass
         else: raise AssertionError(f'{name}: accepted a changed icon')
-        for bg in ('#000000', '#2160d8'):  # the list, and OLED's selection bar (its Blue scheme's accent)
+        for bg in ('#000000', '#b8141c', '#2160d8'):  # the list, and OLED's selection bar (Arterial, and Blue when chosen)
             assert max(abs(a - b) for a, b in zip(mean(old, bg), mean(new, bg))) < 0.02, (name, bg)
         px = bytearray(imagemagick('png:-', '-depth', '8', 'rgba:-', data=new))
         sat = lambda i: max(px[i:i+3]) - min(px[i:i+3])

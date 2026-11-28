@@ -1015,9 +1015,9 @@ assert not m.rounded and not m.strokes and m.global_alpha==0
 # corner pixels the band's colour at their coverage (corner_cover.c, tools/art.py corner_cover) as alpha.
 OLED_T=theme_builtins()[0]  # assets/themes/oled/theme.xml, the one theme
 OLED_G=built_geometry(theme_builtins()); assert OLED_G==OLED_T['geom']  # its grid, baked into the build
-OLED_SCHEME=OLED_T['schemes'][next(o['def'] for o in OLED_T['opts'] if o['setting']=='SETTING_ACCENT')]  # Accent's default, oled-blue
+OLED_SCHEME=OLED_T['schemes'][next(o['def'] for o in OLED_T['opts'] if o['setting']=='SETTING_ACCENT')]  # Accent's default, oled-arterial
 OLED_TONES=OLED_SCHEME['tones']
-assert len(set(OLED_TONES))==1  # Accent Blue, one value for every tone: the bar is solid
+assert len(set(OLED_TONES))==1  # the Accent, one value for every tone: the bar is solid
 OLED_BLUE,inset,radius=color_t(OLED_TONES[0]),OLED_T['sel_inset'],OLED_T['sel_radius']
 def corner_mask_bands(x,y,w,h,R,color):
     """corner_mask's fills (nav/row_paint.c) rounding the box x, y, w, h by R into color (a color_t, opaque): each

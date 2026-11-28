@@ -11,7 +11,7 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 from build import ROOT, check, need
 from ipod import inc
-from theme import CHOICES, token
+from theme import CHOICES, accent_default, token
 
 SUB = 8  # sub-rows per pixel; columns are exact within a sub-row
 
@@ -773,7 +773,9 @@ def images(t):
     out, prefix = {}, t['art_id'].replace('-', '_')
     # Songs' Sort bars, unprefixed: not the theme's final art, so Light Mode flips them as stock's glyphs
     out['sort_bars'] = png(*SORT_BOX[2:], compose(SORT_BOX, [(path(SORT), lambda x, y: (0xffffff, 1))]))
-    on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]  # the theme's own accent's top tone
+    # the default accent's top tone. ponytail: the art is drawn once, in it, so demo's accent-inked glyphs stay
+    # Arterial when Blue is chosen; a set of them per offered scheme (ringnav_image_add picking by accent()) lifts it
+    on = t['schemes'][accent_default(t)]['tones'][0]
     # every drill row's caret (list_marks.c chevron_icon), the spinner in its place while Cover Flow opens, and the
     # status row's play state
     out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in (CHEVRON_INKS | CHEVRON_MUTED_INKS).items()}
@@ -876,13 +878,13 @@ def images(t):
             for k, c in BT_SPIN_INKS.items() for f in range(SPIN_SPOKES)}
     out |= {f'{prefix}_bttoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in BT_TOASTS.items()}
     out |= {f'{prefix}_bttoast_{n}_off': phosphor(g, USB_TOAST_PX, 0xababab) for n, (g, _) in BT_TOASTS.items() if n != 'low'}
-    # Guest Play (guest_ui.c, status_row.c): the guest's phone in the accent, beside "Playing from" and in the status row,
+    # Guest Play (guest_ui.c, status_row.c): the guest's phone in the accent beside "Playing from", Status Blue in the status row,
     # and the status row's relay mark (phone › car) in Text Secondary per half
     out[f'{prefix}_guestphone_a'] = phosphor('device-mobile-fill', USB_TOAST_PX, on)
     out[f'{prefix}_pairing_phone'] = phosphor('device-mobile', PAIR_GLYPH_PX, on)  # pair_prompt.c's card
     out |= {f'{prefix}_adb{n}_{k}': phosphor('laptop', px, c) for n, px in (('card', ADB_CARD_PX), ('pill', ADB_PILL_PX))
             for k, c in inks('primary', 'd', 'l').items()}
-    out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, on, STATUS_INK)
+    out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, token('status_blue'), STATUS_INK)  # the blue, whatever the accent
     out |= {f'{prefix}_status_relay_{k}': phosphor('caret-right-bold', 8, c) for k, c in STATUS_SECONDARY.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}

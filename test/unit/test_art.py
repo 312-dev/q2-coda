@@ -101,29 +101,29 @@ def test_a_theme_drawing_anothers_art_shares_its_images(monkeypatch):
     assert set(art.images({**other, 'art_id': 'other'})) == {n.replace('oled_', 'other_') for n in mine}
     assert art.theme_images([oled, other]) == mine  # its art_id, OLED's: the same names and bytes
     with pytest.raises(ValueError, match="other: oled_mode_shuffle_on differs from oled's, whose art it draws by name"):
-        art.theme_images([oled, {**other, 'schemes': [*oled['schemes'][:9], {**oled['schemes'][9], 'tones': (0x123456,) * 5}]}])
+        art.theme_images([oled, {**other, 'schemes': [*oled['schemes'][:11], {**oled['schemes'][11], 'tones': (0x123456,) * 5}]}])
 
 
 def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     """OLED's own images: the caret in Chevron grey (each half's) and white for the selection, the play state in each
-    half's ink, Now Playing's shuffle and repeat in Text Secondary (each half's) and Accent Blue when on, the Shuffle row's
-    glyph (regular) in Accent Blue and white for the selection, Folder view's folder (regular) in Text Secondary (each
+    half's ink, Now Playing's shuffle and repeat in Text Secondary (each half's) and the accent when on, the Shuffle row's
+    glyph (regular) in the accent and white for the selection, Folder view's folder (regular) in Text Secondary (each
     half's) and white for the selection, a disabled row's caret in Text Tertiary (each half's), the pickers' check
-    (bold) in Accent Blue and white for the selection, the Wi-Fi page's signal and lock (regular) in Text Primary
-    (each half's) and its failed join's warning-circle in Negative (each half's) and white, the shuffle confirmation's glyph (bold) in Accent Blue, Now Playing's heart and More (regular) in
+    (bold) in the accent and white for the selection, the Wi-Fi page's signal and lock (regular) in Text Primary
+    (each half's) and its failed join's warning-circle in Negative (each half's) and white, the shuffle confirmation's glyph (bold) in the accent, Now Playing's heart and More (regular) in
     Text Primary (each half's), the heart 34 px and its full one (fill) in Text Primary too, More pressed in Text Secondary, and the
     Ratings rows' filled and outlined stars (14 px, and white on the bar), Now Playing's rating page's stars (filled and outlined, 44 px and the
     wheel's 52 px target) in Text Primary (each half's), and Streaming's service marks in the folder's inks, all from the vendored
     Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the menu sheet's symbols
-    (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in Accent Blue,
+    (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in the accent,
     Unfavorite's heart (fill, 19 px) in Favorite pink-red (both halves) and white for the selection,
     the volume's two speakers (fill, 16 px) in Text Secondary (each half's), an artist page's Shuffle and Radio
-    (regular, 16 px) in Accent Blue and white for the lit one, About's quality badge's waveform (bold, 12 px) in Text
+    (regular, 16 px) in the accent and white for the lit one, About's quality badge's waveform (bold, 12 px) in Text
     Primary (each half's), Buttons Lock's padlock and its card's padlock in each half's ink, the playlist pages' tiles
-    (fill, 20 px) in Text Tertiary (each half's) and white, their action glyphs (regular, 18 px) in Accent Blue and
+    (fill, 20 px) in Text Tertiary (each half's) and white, their action glyphs (regular, 18 px) in the accent and
     white, Add Songs' marks (fill, 20 px) in Text Secondary, green and red (each half's) and white, the song rows' cloud
     and arrow (regular, 18 px) in Text Tertiary (each half's) and white for the selection, and Downloads' picked arrow
-    in Accent Blue and white and its kept-by-the-app arrows in Text Secondary (each half's) and white, and a card app's
+    in the accent and white and its kept-by-the-app arrows in Text Secondary (each half's) and white, and a card app's
     sign-in steps (fill, the done check bold, 44 px) in white for their solid circles, Control Center's glyphs (fill,
     white, its sliders' in the block's grey), the USB pages' rows, mode glyphs and toasts, and Up Next's bump arrow and
     Now Playing's queue and radio glyphs, charging's toasts and a card app's server error's (fill, 15 px, each in its
@@ -413,7 +413,7 @@ def test_phosphor_fills_nonzero_so_an_inner_contour_is_a_hole():
 
 
 def test_oleds_search_pop_is_one_bubble_and_a_strip_of_every_character():
-    """Search's key pop (search_strip.c): the bubble, 30 px wide to the key's foot 66 px down, in Accent Blue, a
+    """Search's key pop (search_strip.c): the bubble, 30 px wide to the key's foot 66 px down, in the accent, a
     rounded head over a neck narrowing to the 18 px key, clear beside the key; the characters' strip, a head's cell per
     character of the strip's sets, white; each glyph's ink centred on its cell's middle within a tenth of a pixel, read
     from the edge columns' coverage (H: two upright stems)."""

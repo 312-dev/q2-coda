@@ -36,7 +36,8 @@ import fixture  # noqa: E402
 import shot  # noqa: E402
 import ui  # noqa: E402
 
-ACCENT = (0x21, 0x60, 0xd8)
+ACCENT = (0xb8, 0x14, 0x1c)  # the default accent, Arterial (theme.xml oled-arterial; patch/tokens.h UI_ACCENTS)
+BLUE = (0x21, 0x60, 0xd8)  # OLED's other accent, Blue, and Status Blue (the sync ring, Guest Play's phone)
 W, H = 375, 320
 BAR_H, ROW_H, ROWS = 58, 32, 7
 EV_SYN, EV_KEY, EV_ABS, ABS_X, ABS_PRESSURE, BTN_TOUCH, KEY_RETURN, KEY_CENTRE = 0, 1, 3, 0, 0x18, 0x14a, 103, 116
@@ -83,10 +84,10 @@ class Picture:
     def at(self, x, y):
         return tuple(self.rgb[(y * W + x) * 3:(y * W + x) * 3 + 3])
 
-    def blue(self, x, y):
-        """Whether (x, y) is the platter's blue, whatever its gleam."""
+    def platter(self, x, y):
+        """Whether (x, y) is the platter's accent (Arterial red), whatever its gleam."""
         r, g, b = self.at(x, y)
-        return b > 150 and b - r > 60
+        return r > 140 and r - g > 60 and r - b > 60
 
     def ink_y(self, x0, x1, y0, y1):
         """The middle row, by weight, of the white ink (text on the platter) in a box, and its weight."""
@@ -99,9 +100,9 @@ class Picture:
                 moment += w * (y + 0.5)
         return (moment / total if total else 0), total
 
-    def blue_y(self, x0, x1, y0, y1):
-        """The middle row of the platter's blue in a box."""
-        rows = [y + 0.5 for y in range(y0, y1) for x in range(x0, x1) if self.blue(x, y)]
+    def platter_y(self, x0, x1, y0, y1):
+        """The middle row of the platter's accent in a box."""
+        rows = [y + 0.5 for y in range(y0, y1) for x in range(x0, x1) if self.platter(x, y)]
         return sum(rows) / len(rows) if rows else 0
 
 
@@ -300,7 +301,7 @@ def scripts(binary, work):
     good &= check('at places between pixels', sum(1 for s in moving if abs(s - round(s)) > 0.05) >= 6, str(moving))
     good &= check('the platter stays on the last row while the list moves under it',
                   all(abs(t['bar'] - (BAR_H + 6 * ROW_H)) < 0.01 for t in trace[at:]), str([t['bar'] for t in trace[at:at + 5]]))
-    good &= check('the glided list shows the next song on the platter', pics['glided'].blue(200, BAR_H + 6 * ROW_H + 3)
+    good &= check('the glided list shows the next song on the platter', pics['glided'].platter(200, BAR_H + 6 * ROW_H + 3)
                   and pics['glided'].rgb != pics['foot'].rgb)
 
     # a tick mid-glide goes on from where the list is
@@ -339,20 +340,20 @@ def scripts(binary, work):
     lines = ['rest', 'shot @rest.ppm', 'tug -1', 'run 500', 'shot @up.ppm', 'tug 0', 'rest'] + \
             ['tick 1', 'rest'] * 5 + ['tug 1', 'run 500', 'shot @down.ppm']
     trace, pics, _ = script(binary, work, 300, lines)
-    good &= check('at rest the platter keeps to its row', not pics['rest'].blue(200, BAR_H + ROW_H - 3))
-    good &= check('leaning up from the first song it is drawn over the pinned row', pics['up'].blue(200, BAR_H + ROW_H - 3),
+    good &= check('at rest the platter keeps to its row', not pics['rest'].platter(200, BAR_H + ROW_H - 3))
+    good &= check('leaning up from the first song it is drawn over the pinned row', pics['up'].platter(200, BAR_H + ROW_H - 3),
                   str(pics['up'].at(200, BAR_H + ROW_H - 3)))
     good &= check('and the pinned row still shows above it', pics['up'].at(40, BAR_H + 14) != (0, 0, 0) or pics['up'].at(60, BAR_H + 14) != (0, 0, 0) or
                   any(pics['up'].at(x, BAR_H + 14) != (0, 0, 0) for x in range(26, 100)))
     foot = BAR_H + 7 * ROW_H
     good &= check('leaning down from the last row it is drawn over the fade, as bright as ever',
-                  pics['down'].blue(200, foot + 1) and pics['down'].at(355, foot + 1)[2] >= 0xd0, str(pics['down'].at(355, foot + 1)))
+                  pics['down'].platter(200, foot + 1) and pics['down'].at(355, foot + 1)[0] >= ACCENT[0] - 8, str(pics['down'].at(355, foot + 1)))
 
     # what is on the platter moves with it, and further
     y1 = BAR_H + ROW_H
     rest_ink, weight = pics['rest'].ink_y(26, 200, y1 - 8, y1 + ROW_H + 8)
     up_ink, _ = pics['up'].ink_y(26, 200, y1 - 8, y1 + ROW_H + 8)
-    rest_bar, up_bar = pics['rest'].blue_y(350, 358, y1 - 10, y1 + ROW_H + 10), pics['up'].blue_y(350, 358, y1 - 10, y1 + ROW_H + 10)
+    rest_bar, up_bar = pics['rest'].platter_y(350, 358, y1 - 10, y1 + ROW_H + 10), pics['up'].platter_y(350, 358, y1 - 10, y1 + ROW_H + 10)
     good &= check('the platter leans up about 3 px', 2.2 < rest_bar - up_bar < 3.8, f'{rest_bar - up_bar:.2f}')
     good &= check('its text moves with it, further than it does', weight > 1000 and rest_ink - up_ink > (rest_bar - up_bar) * 1.2,
                   f'text {rest_ink - up_ink:.2f} px, platter {rest_bar - up_bar:.2f} px')
@@ -371,6 +372,13 @@ def scripts(binary, work):
     ini.write_text('[SYSSET]\nVOLUME=20\n[IPOD]\nACCENT=0\nREDUCEMOTION=1\n')
     trace, _, _ = script(binary, work, 300, to_foot + ['tug 1', 'run 300', 'tick 1', 'run 600'], '--config', ini)
     good &= check("demo's Reduce Motion setting leans nothing", all(t['lean'] == 0 for t in trace))
+    # the accent follows [IPOD] OLED_ACCENT (ui/theme.c): absent, Arterial; 10, Blue; 9 (the ACCENTS row Arterial, which
+    # OLED does not offer) and 12 (past the schemes), the default
+    for stored, want in ((None, ACCENT), ('10', BLUE), ('9', ACCENT), ('12', ACCENT)):
+        ini.write_text('[IPOD]\n' + (f'OLED_ACCENT={stored}\n' if stored else ''))
+        _, pics, _ = script(binary, work, 300, ['rest', 'shot @bar.ppm'], '--config', ini)
+        bars = [pics['bar'].at(200, BAR_H + k * ROW_H + 16) for k in range(ROWS)]
+        good &= check(f'OLED_ACCENT {stored} selects in {want}', bars.count(want) == 1, str(bars))
     trace, _, _ = script(binary, work, 300, to_foot + ['tick 1', 'run 100'], '--motion', '0')
     good &= check('--motion 0 is at its end at once', all(t['scroll'] in (0, ROW_H) for t in trace) and trace[-1]['scroll'] == ROW_H)
 
@@ -419,7 +427,7 @@ def scripts(binary, work):
 
     # Light Mode: paper under the same list
     _, pics, _ = script(binary, work, 30, ['rest', 'shot @light.ppm'], '--light')
-    good &= check('Light Mode is black on white, the platter still blue', pics['light'].at(5, 200) == (255, 255, 255) and pics['light'].blue(200, BAR_H + ROW_H + 3))
+    good &= check('Light Mode is black on white, the platter still the accent', pics['light'].at(5, 200) == (255, 255, 255) and pics['light'].platter(200, BAR_H + ROW_H + 3))
     foot = [pics['light'].at(5, y) for y in (290, 300, 310)]
     good &= check("in Light Mode the list's foot fades to the paper, not to black", all(p == (255, 255, 255) for p in foot), str(foot))
     ini = pathlib.Path(tempfile.mkdtemp(dir=work))/'config.ini'
@@ -442,9 +450,9 @@ def pages(binary, work):
     trace, pics2, _ = script(binary, work, 60, ['rest', 'shot @playing.ppm', 'tick 9', 'rest'], *home, now=NOW)
     good &= check('Home has one row more while something plays', (idle_rows, trace[-1]['sel'] + 1) == (8, 9), f"{idle_rows} and {trace[-1]['sel'] + 1}")
     good &= check("Home's platter keeps to the list's side and the pane is drawn beside it",
-                  pics['idle'].blue(100, 40 + 3) and not pics['idle'].blue(250, 40 + 3) and pics['idle'].at(280, 160) != (0, 0, 0))
+                  pics['idle'].platter(100, 40 + 3) and not pics['idle'].platter(250, 40 + 3) and pics['idle'].at(280, 160) != (0, 0, 0))
     p = pics['idle']
-    blue = [x for x in range(W) if p.blue(x, 56)]
+    blue = [x for x in range(W) if p.platter(x, 56)]
     good &= check("Home's rows run to x 204 as demo's (the bar 16 to 188 at rest, raised 2%) and the art from x 196 "
                   '(docs/oled-design.md, Screens: Home)', blue and 13 <= blue[0] <= 16 and 187 <= blue[-1] <= 190 and
                   p.at(194, 160) == (0, 0, 0) and p.at(198, 160) != (0, 0, 0), f'{blue[:1]} {blue[-1:]} {p.at(194, 160)} {p.at(198, 160)}')
@@ -488,7 +496,7 @@ def pages(binary, work):
                           ('mode_repeat_on', (0, 0, 250)), ('mode_repeat1_on', (0, 250, 0)), ('mode_radio_d', (90, 90, 90)),
                           ('mode_queue_d', (90, 90, 90)), ('np_fav_d', (250, 0, 0)), ('np_unfav_d', (90, 90, 90)),
                           ('np_more_d', (0, 250, 250)), ('vol_lo_d', (250, 250, 0)), ('vol_hi_d', (250, 0, 250))):
-            png(d/f'oled_{name}.png', 16, 16, rgb)
+            png(d/f'oled_{name}.png', 16, 8 if name == 'mode_repeat1_on' else 16, rgb)  # Repeat One's own glyph is told by its shape
     icons = pathlib.Path(tempfile.mkdtemp(dir=work))
     glyphs(icons)
     marks, dots = {}, {}
@@ -497,13 +505,14 @@ def pages(binary, work):
                        ('one', NOW.replace('id=5', 'id=5\nshuffle=1\nrepeat=1\nliked=1')),
                        ('all', NOW.replace('id=5', 'id=5\nrepeat=2'))):
         _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'run 600', 'shot @np.ppm'], *home, '--icons', icons, now=text)
-        marks[what] = [pics['np'].at(64, 286), pics['np'].at(228, 286), pics['np'].at(200, 160)]
+        marks[what] = [pics['np'].at(64, 286), pics['np'].at(228, 286), pics['np'].at(200, 160), pics['np'].at(228, 280)]
         # the on dot: 4 px, its centre 15 px under the glyph's (patch/np_bar.c NP_DOT, NP_DOT_DY), in the accent
         dots[what] = [pics['np'].at(x, y) for x in (64, 228) for y in (300, 301)] + [pics['np'].at(x, 304) for x in (64, 228)]
     good &= check("Now Playing's shuffle, repeat and heart are drawn by what is set: Repeat One its own glyph, All the lit one, "
-                  "the heart full by the song's like (liked=1) and empty for five stars without it",
-                  marks['off'] == [(90, 90, 90)] * 3 and marks['one'] == [(0, 0, 250), (0, 250, 0), (250, 0, 0)]
-                  and marks['all'][1] == (0, 0, 250), str(marks))
+                  "the heart full by the song's like (liked=1) and empty for five stars without it; a lit glyph in the accent "
+                  "chosen, whatever its file's colour",
+                  marks['off'] == [(90, 90, 90)] * 4 and marks['one'] == [ACCENT, ACCENT, (250, 0, 0), (0, 0, 0)]
+                  and marks['all'][1] == marks['all'][3] == ACCENT, str(marks))
     good &= check('a lit shuffle or repeat has the accent dot under it, an unlit one none',
                   dots['off'] == [(0, 0, 0)] * 6 and dots['one'] == [ACCENT] * 4 + [(0, 0, 0)] * 2
                   and dots['all'] == [(0, 0, 0)] * 2 + [ACCENT] * 2 + [(0, 0, 0)] * 2, str(dots))
@@ -513,7 +522,7 @@ def pages(binary, work):
                         *home, '--icons', icons, now=NOW)
     later = [pics['np'].at(x, y) for y in (286, 301) for x in (64, 228)]
     good &= check('shuffle and repeat turned on while Now Playing is open light there, each with its dot',
-                  later == [(0, 0, 250)] * 2 + [ACCENT] * 2, str(later))
+                  later == [ACCENT] * 4, str(later))
     # More (demo's dots at the right of the art's foot, tools/ipod.py img_more): Centre held opens demo's More page
     _, pics, _ = script(binary, work, 60, ['rest', 'key centre', 'run 600', 'shot @np.ppm'], *home, '--icons', icons, now=NOW)
     good &= check("Now Playing's More is drawn at the right of the art's foot", pics['np'].at(340, 203) == (0, 250, 250),
@@ -1023,10 +1032,10 @@ def captions(binary, work, home):
     caps = [t.get('cap', -1) for t in trace]
     good &= check('Reduce Motion grows by one line (22 px) when selected, over frames between, and back to 0 as the selection '
                   'leaves', max(caps) == 22 and caps[-1] == 0 and sum(1 for c in caps if 0 < c < 22) >= 3, str(sorted(set(caps))))
-    ink = sum(1 for y in range(124 + D, 140 + D) for x in range(24, 340) if (lambda c: c[0] > 150 and c[2] - c[0] > 20)(pics['grown'].at(x, y)))
-    gone = sum(1 for y in range(124 + D, 140 + D) for x in range(24, 340) if pics['before'].blue(x, y))
+    ink = sum(1 for y in range(124 + D, 140 + D) for x in range(24, 340) if (lambda c: c[1] > 120 and c[0] - c[1] > 12)(pics['grown'].at(x, y)))  # Caption on accent's tint
+    gone = sum(1 for y in range(124 + D, 140 + D) for x in range(24, 340) if pics['before'].platter(x, y))
     good &= check("its caption is drawn in the bar under the title, the bar grown to hold it",
-                  ink > 60 and pics['grown'].blue(30, 141 + D) and gone == 0, f'{ink} ink px, blue at 141 {pics["grown"].blue(30, 141 + D)}')
+                  ink > 60 and pics['grown'].platter(30, 141 + D) and gone == 0, f'{ink} ink px, platter at 141 {pics["grown"].platter(30, 141 + D)}')
     below = [pics['before'].ink_y(24, 300, 120 + D, 156 + D)[0], pics['grown'].ink_y(24, 300, 142 + D, 178 + D)[0]]
     good &= check('the row below moves down by the caption', 20.5 < below[1] - below[0] < 23.5, str(below))
     back = pics['shut'].ink_y(24, 300, 116 + D, 164 + D)[0]
@@ -1069,7 +1078,7 @@ def edit_library(binary, work, home):
     good &= check("each row's check circle at x 34 (the accent's disc; white on the selection) and its grip at the "
                   'right column in Text Tertiary, the hint under the rows',
                   near(e.at(28, 106), ACCENT) and near(e.at(28, 74), (255, 255, 255)) and near(e.at(342, 106), (0x85, 0x85, 0x85))
-                  and any(e.at(x, y)[0] > 60 for x in range(240, 330) for y in range(293, 304)) and not e.blue(340, 74 + 36),
+                  and any(e.at(x, y)[0] > 60 for x in range(240, 330) for y in range(293, 304)) and not e.platter(340, 74 + 36),
                   f'{e.at(28, 106)} {e.at(28, 74)} {e.at(342, 106)}')
     trace, pics, saved, rows, _ = run(enter + ['key centre', 'run 40', 'shot @lifted.ppm', 'tick 1', 'run 50', 'shot @mid.ppm', 'rest',
                                             'key centre', 'rest', 'rows @rows.txt'])
@@ -1846,7 +1855,7 @@ def edit_home(binary, work, home):
     rows, _, full, _ = run(['rest', 'shot @home.ppm', 'rows @rows.txt'], ini='HOME=1\n')
     s, f = split['home'], full['home']
     good &= check('Full: the selection across the screen from y 58, no pane; Split: from y 40 beside the pane',
-                  f.blue(300, 74) and f.blue(30, 74) and not f.blue(30, 52) and s.blue(30, 52) and not s.blue(300, 56) and
+                  f.platter(300, 74) and f.platter(30, 74) and not f.platter(30, 52) and s.platter(30, 52) and not s.platter(300, 56) and
                   rows == every, f'{f.at(300, 74)} {f.at(30, 52)} {s.at(30, 52)}')
     return good
 

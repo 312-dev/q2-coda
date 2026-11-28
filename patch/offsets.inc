@@ -101,7 +101,7 @@
  * top edge: the light tone, except Graphite's restrained #555555 over its flat bar. The red tone is what stock red #FF1448 becomes (switches, ticks, red text and
  * buttons): Graphite's is silver, so a lit switch reads against the grey off state; the others
  * reuse the light tone, 3:1 or more under white.
- * Crimson keeps every stock color. */
+ * Crimson keeps every stock color. Arterial's tones are each at the level a 6-bit panel shows (a multiple of 4). */
 #define ACCENTS { 0x424242, 0x424242, 0x6e6e6e, 0xd8d8d8, 0x555555 }, /* Graphite */ \
                 { 0xe8123f, 0xe8123f, 0xeb2f56, 0xff1448, 0xeb2f56 }, /* Crimson */ \
                 { 0x13838d, 0x13838d, 0x30929b, 0x30929b, 0x30929b }, /* Tidal */ \
@@ -110,7 +110,8 @@
                 { 0xc45400, 0xc45400, 0xcb681e, 0xcb681e, 0xcb681e }, /* Tangerine, the orange Q2 */ \
                 { 0x903868, 0x903868, 0x9d4f7a, 0x9d4f7a, 0x9d4f7a }, /* Plum, the purple Q2 */ \
                 { 0x424242, 0x424242, 0x6e6e6e, 0xd8d8d8, 0x555555 }, /* Ivory: Graphite, MINIMAL_FILL fills */ \
-                { 0x647f34, 0x647f34, 0x778e4c, 0x778e4c, 0x778e4c }  /* Green, the green Q2 (#119: the shell's sage, darkened for white text); after Ivory so saved values keep */
+                { 0x647f34, 0x647f34, 0x778e4c, 0x778e4c, 0x778e4c }, /* Green, the green Q2 (#119: the shell's sage, darkened for white text); after Ivory so saved values keep */ \
+                { 0xb8141c, 0xb8141c, 0xc03038, 0xc03038, 0xc03038 }  /* Arterial, the default (the owner's #B8121B at the 6-bit panel's level, docs/oled-design.md#color); last so saved values keep */
 #define CRIMSON 1
 #define MINIMAL_ACCENT 7 /* Ivory, last in the Accent picker's order (setting_click accent_next) */
 /* The confirm pop-up's stock red discs (confirm_ok, confirm_cancel and their pressed images) take

@@ -1,5 +1,5 @@
 <!-- Theme: OLED (docs/ipod.md#theme), built to docs/oled-design.md: the one built-in theme. A black screen, white
-     Inter in sentence case, one blue accent. It states its own grid (its <geometry>) and draws its own art
+     Inter in sentence case, one accent (Arterial red unless Blue is chosen). It states its own grid (its <geometry>) and draws its own art
      (tools/art.py oled_*: Phosphor's glyphs). Sizes here are AWTK's, which scales a face so that its ascent less its
      descent is the size: Inter's line is 1.21 em, so the design's 20 px type is 24 here, its 15 px 18, its 22 px 27.
      Its numbers that track patch/offsets.inc (Home's Full label end, the scheme colours, Cover Flow's CF_* and the
@@ -30,14 +30,18 @@
             search_row="52" search_body="52" search_art="0" search_title_y="4" search_title24_y="4" search_title_h="28"
             search_meta_y="31" search_meta_h="20" np_art="150" np_bar_y="228"
             split_row="204" split_art="196" split_art_up="58" split_inset="2"/>
-  <!-- Colour (oled-design.md Colour): Accent Blue, one value for the bar, the progress fill and every mapped red, as
-       its own scheme's five tones; white text on it in both halves; second lines in Text Tertiary (stock's #aaaaaa secondary text
-       turns muted); the light half on white paper with black ink. -->
+  <!-- Colour (oled-design.md Colour): the accent, one value for the bar, the progress fill and every mapped red, as
+       its own scheme's five tones: Arterial by default (the owner's #B8121B at the 6-bit panel's level), Blue, the
+       accent before it, still offered; white text on it in both halves; second lines in Text Tertiary (stock's #aaaaaa
+       secondary text turns muted); the light half on white paper with black ink. OLED_ACCENT indexes the ACCENTS rows,
+       then these in order (Blue 10, Arterial 11); the 9 a Q2 stored while Blue was the one value now names the
+       ACCENTS row Arterial, which this theme does not offer, so it reads as the default. -->
   <colorScheme name="oled-blue" base="cobalt" label="Blue" tones="#2160d8 #2160d8 #2160d8 #2160d8 #2160d8"/>
-  <colorSchemes accents="oled-blue"/>
+  <colorScheme name="oled-arterial" base="arterial" label="Arterial" tones="#b8141c #b8141c #b8141c #b8141c #b8141c"/>
+  <colorSchemes accents="oled-blue oled-arterial"/>
   <colorScheme sel.text="#ffffff" light.sel.text="#ffffff" muted="#858585" light.paper="#ffffff" light.ink="#000000"/>
   <option setting="light" preset="off" keep="auto"/>
-  <option setting="accent" key="OLED_ACCENT" default="oled-blue" preset="oled-blue"/>
+  <option setting="accent" key="OLED_ACCENT" default="oled-arterial" preset="oled-arterial"/>
   <option setting="home" preset="split"/>
   <option setting="battery" values="icon percent" default="icon"/>
   <!-- Song rows (oled-design.md Song rows, patch/song_rows.c): where a mixed list's artist stands, and which lists
@@ -68,7 +72,7 @@
     <!-- A scrolling text's ends fade into what is behind it (oled-design.md Motion, list_marks.c marquee_fade): rows,
          the status row's title and Now Playing's lines -->
     <element name="marquee" fade="1"/>
-    <!-- Songs', an album's and a playlist's action row reads Shuffle after Phosphor's shuffle, Accent Blue (white on the
+    <!-- Songs', an album's and a playlist's action row reads Shuffle after Phosphor's shuffle, in the accent (white on the
          selection); the wheel steps onto it above the first song and Centre shuffles the list (navigation.c shuffle_key) -->
     <element name="shuffle" row="1"/>
     <!-- Text entry the iPod's way: Search opens an iPod classic's letter strip over the songs it matches, filtered

@@ -23,12 +23,15 @@ STRINGS = dict(re.findall(r'^#define (\w+) +"([^"]*)"', OFFSETS, re.M))
 ACCENTS = [[int(v, 16) for v in re.findall(r'0x[0-9a-f]+', row)] for row in re.findall(r'\{ (0x[^}]*)\}', OFFSETS)][:9]
 LIGHT, RED = 2, 3  # a scheme's tones: the light tone, the red tone
 OLED = '3'  # IPOD/THEME, which theme_boot keeps at OLED's
-# OLED's theme.xml: its one scheme's five tones (Accent Blue), its light half's paper and ink (greys: one channel)
+# OLED's theme.xml: its default scheme's five tones (the accent, Arterial), its light half's paper and ink (greys: one
+# channel)
 _OLED_XML = (host.ROOT/'assets/themes/oled/theme.xml').read_text()
-_tones = re.search(r'<colorScheme name="oled-blue"[^>]* tones="([^"]*)"', _OLED_XML)
+_default = re.search(r'<option setting="accent" key="OLED_ACCENT" default="([^"]*)"', _OLED_XML)
+assert _default
+_tones = re.search(r'<colorScheme name="%s"[^>]* tones="([^"]*)"' % _default[1], _OLED_XML)
 _paper, _ink = re.search(r'light\.paper="#(\w+)"', _OLED_XML), re.search(r'light\.ink="#(\w+)"', _OLED_XML)
 assert _tones and _paper and _ink
-BLUE = [int(t[1:], 16) for t in _tones[1].split()]
+ACCENT = [int(t[1:], 16) for t in _tones[1].split()]
 PAPER, INK = int(_paper[1], 16) & 255, int(_ink[1], 16) & 255
 # bitmap_t's formats (u16 @0xe) and where each keeps r, g, b and a (docs/internals.md#accent)
 AT = {1: (0, 1, 2, 3), 2: (3, 2, 1, 0), 3: (2, 1, 0, 3), 4: (1, 2, 3, 0)}
@@ -202,7 +205,7 @@ def test_a_theme_image_s_red_takes_the_accent_s_red_tone_in_any_byte_order(fw, b
     theme(fw)
     bm = bitmaps(fw, [[RED_PX, px(0x808080), px(0x123456)]], fmt=fmt)
     image_add(fw, PLAIN, bm)
-    assert bm.rows() == [[px(BLUE[RED]), px(0x808080), px(0x123456)]]  # greys and other hues stay
+    assert bm.rows() == [[px(ACCENT[RED]), px(0x808080), px(0x123456)]]  # greys and other hues stay
     assert bm.padding() == {b'\x5a' * 8}
 
 
@@ -240,13 +243,13 @@ def test_the_confirm_discs_take_the_dark_surface(fw, bitmaps):
 
 
 def test_an_active_quick_control_keeps_its_white_glyph_on_accent_blue(fw, bitmaps):
-    """Accent Blue is no brighter than GLYPH_LIGHT_MAX, so the glyph stays white; drop_ images are mono: the disc
+    """The accent is no brighter than GLYPH_LIGHT_MAX, so the glyph stays white; drop_ images are mono: the disc
     is then its tone's grey."""
     theme(fw)
-    assert luma(BLUE[RED]) <= O['GLYPH_LIGHT_MAX']
+    assert luma(ACCENT[RED]) <= O['GLYPH_LIGHT_MAX']
     bm = bitmaps(fw, [[RED_PX, WHITE]])
     image_add(fw, STRINGS['DROPDOWN_IMAGE'].encode() + b'wifi_on', bm)
-    assert bm.rows() == [[(luma(BLUE[RED]),) * 3 + (255,), WHITE]]
+    assert bm.rows() == [[(luma(ACCENT[RED]),) * 3 + (255,), WHITE]]
 
 
 def test_an_inactive_quick_control_keeps_its_white_glyph(fw, bitmaps):
@@ -304,7 +307,7 @@ def test_the_navigation_icons_are_grey_after_the_accent(fw, bitmaps):
     theme(fw)
     bm = bitmaps(fw, [[RED_PX, px(0x2040c0)]])
     image_add(fw, b'navbar_back', bm)
-    tone = luma(BLUE[RED])
+    tone = luma(ACCENT[RED])
     assert bm.rows() == [[(tone,) * 3 + (255,), (luma(0x2040c0),) * 3 + (255,)]]
 
 
@@ -322,7 +325,7 @@ def test_the_codec_badges_take_the_muted_grey(fw, bitmaps, scheme):
     image_add(fw, b'img_flac', badge)
     image_add(fw, b'img_delete', delete)
     assert badge.rows() == [[px(scheme('muted')), CLEAR]]
-    assert delete.get(0, 0) == (luma(BLUE[RED]),) * 3 + (255,)  # an action, not a badge
+    assert delete.get(0, 0) == (luma(ACCENT[RED]),) * 3 + (255,)  # an action, not a badge
 
 
 def test_a_card_app_s_streaming_icon_greys(fw, bitmaps):
@@ -532,7 +535,7 @@ def style_color(fw, stock, name, fallback=0, inner=None):
 @pytest.mark.parametrize('alpha', [0xff, 0x40])
 def test_stock_red_takes_the_light_tone_and_text_the_red_one(fw, name, tone, alpha):
     theme(fw)
-    assert style_color(fw, rgba(STOCK_RED, alpha), name) == rgba(BLUE[tone], alpha)
+    assert style_color(fw, rgba(STOCK_RED, alpha), name) == rgba(ACCENT[tone], alpha)
 
 
 @pytest.mark.parametrize('color', [rgba(0x808080), rgba(0x2050c0), rgba(0xffffff, 0x80)])
@@ -784,14 +787,14 @@ def gradient_hook(fw, colors, name=b'bg_color', own=False):
 def test_a_gradient_s_stops_take_the_light_tone(fw):
     theme(fw)
     stops, got, keep = gradient_hook(fw, [rgba(STOCK_RED), rgba(0x808080), rgba(STOCK_RED, 0x40)])
-    assert stops == [rgba(BLUE[LIGHT]), rgba(0x808080), rgba(BLUE[LIGHT], 0x40)]
+    assert stops == [rgba(ACCENT[LIGHT]), rgba(0x808080), rgba(ACCENT[LIGHT], 0x40)]
     assert got == keep[0]
 
 
 def test_a_gradient_maps_its_eight_stops_and_nothing_past_them(fw):
     theme(fw)
     stops, _, _ = gradient_hook(fw, [rgba(STOCK_RED)] * 10)  # a count past what gradient_t holds
-    assert stops == [rgba(BLUE[LIGHT])] * 8 + [rgba(STOCK_RED)] * 2
+    assert stops == [rgba(ACCENT[LIGHT])] * 8 + [rgba(STOCK_RED)] * 2
 
 
 def test_a_style_s_own_cached_gradient_is_left(fw):
@@ -822,7 +825,7 @@ def test_a_gradient_asked_for_a_colour_is_left_to_the_colour_hook(fw):
     out = C.c_uint(0)
     fw.fn('ringnav_style_color', C.c_void_p, C.c_void_p, C.c_void_p, C.c_char_p, C.c_uint)(
         C.addressof(out), 0x7000, b'text_color', 0)
-    assert seen == [[rgba(STOCK_RED)]] and out.value == rgba(BLUE[RED])
+    assert seen == [[rgba(STOCK_RED)]] and out.value == rgba(ACCENT[RED])
 
 
 # The background hook: what it paints, under what it leaves to stock.
@@ -2016,7 +2019,7 @@ def test_the_scan_s_ending_says_how_it_ended(fw, world, st, whole, done, stop, w
     assert [(n, x, y) for n, x, y in arts if n.startswith('oled_scan_')] == [(figure, 187 - 30, SCAN_FIG_Y)]
     assert (title, 187, SCAN_TITLE_CY) in [w[:3] for w in words] and (line, 187, SCAN_LINE_CY) in [w[:3] for w in words]
     assert 'Done' in said(words) and not world[named(world, win, 'msg_folder')].visible
-    assert [c for r, c, _ in canvas.rounded if r[1] == SCAN_BTN_CY - 19] == [rgba(0x2160d8)]  # the primary button
+    assert [c for r, c, _ in canvas.rounded if r[1] == SCAN_BTN_CY - 19] == [rgba(ACCENT[0])]  # the primary button
 
 
 def test_an_ending_a_paint_read_first_still_repaints_the_whole_stack(fw, world, st, whole, done):
@@ -2083,7 +2086,7 @@ def test_control_center_is_v4_s_tightened_layout(fw, world):
     screen's foot (test below); the
     wheel's white ring on Wi-Fi. No tiles. Every name set, Smart Wi-Fi's whole."""
     canvas = control_center(fw, world)
-    accent, block, off = rgba(0x2160d8), rgba(0x1c1c1e), rgba(0x3a3a3c)
+    accent, block, off = rgba(ACCENT[0]), rgba(0x1c1c1e), rgba(0x3a3a3c)
     boxes = [(r, c) for r, c, _ in canvas.rounded]
     assert ((20, 38, 158, 210), block) in boxes and ((188, 38, 167, 114), block) in boxes
     circles = [r for r, c, radius in canvas.rounded if radius == 20 and r[2] == 40]
@@ -2139,7 +2142,7 @@ def test_the_wheel_on_the_usb_row_rings_it_as_the_mock(fw, world):
 
 def test_a_slider_with_the_wheel_takes_the_accent_s_ring(fw, world):
     ring = (185, 159, 173, 44)  # Brightness's, 3 px out
-    assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT, adjust=1).rounded if r == ring] == [rgba(0x2160d8)]
+    assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT, adjust=1).rounded if r == ring] == [rgba(ACCENT[0])]
     assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT).rounded if r == ring] == [rgba(0xffffff)]
 
 
@@ -2275,7 +2278,7 @@ def test_the_wi_fi_circle_shows_the_link_as_the_status_row_reads_it(fw, world, s
 @pytest.mark.parametrize('light', [False, True])
 def test_light_mode_inks_the_glyphs_on_light_ground_and_keeps_a_lit_circle_s_white(fw, world, light):
     """Light Mode (tools/art.py CC_LIGHT): an off circle's glyph, the transport and the sliders' sun and speaker take
-    their _l art; a lit circle (Wi-Fi here) keeps its white glyph on Accent Blue."""
+    their _l art; a lit circle (Wi-Fi here) keeps its white glyph on the accent."""
     names = [n for n in control_center(fw, world, light=light).names if '_cc_' in n]
     lit = [n for n in names if 'cc_wifi' in n]
     off = [n for n in names if n.split('_cc_')[1].split('_l')[0] in ('bluetooth', 'airplay', 'car', 'leaf', 'eq', 'sun',

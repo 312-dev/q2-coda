@@ -277,8 +277,8 @@ static void art(const char *stem, float x, float y) {
     if (im) image_draw(im, (rectf_t){ x, y, (float)im->w, (float)im->h }, 0, 0, 256, -1);
 }
 
-/* The download's ring: a 14 px ring (1.6 px) in #333333 filling clockwise from 12 o'clock in the
- * accent to permille, its arrow in it (demo's sync_paint) */
+/* The download's ring: a 14 px ring (1.6 px) in #333333 filling clockwise from 12 o'clock in
+ * Status Blue (the blue whatever the accent) to permille, its arrow in it (demo's sync_paint) */
 static void ring(float left, int permille) {
     float cx = left + 8, cy = 23, share = (float)permille / 1000;
     rect_t c, box = { (int)left, 14, 17, 18 };
@@ -291,7 +291,7 @@ static void ring(float left, int permille) {
             float turn = atan2f(dx, -dy) / 6.2831853f; /* 0 at 12 o'clock, clockwise */
             if (turn < 0) turn += 1;
             uint32_t *p = canvas + y * SCREEN_W + x;
-            *p = 0xff000000 | rgb_mix(*p & 0xffffff, turn < share ? RGB_ACCENT : 0x333333, cov);
+            *p = 0xff000000 | rgb_mix(*p & 0xffffff, turn < share ? tok(TOK_STATUS_BLUE) : 0x333333, cov);
         }
     const image_t *down = icon(ui_light ? "status_down_l." : "status_down_d.");
     if (down) image_draw(down, (rectf_t){ cx - (float)down->w / 2, cy - (float)down->h / 2, (float)down->w, (float)down->h }, 0, 0, 256, -1);
@@ -358,7 +358,7 @@ static void glyphs(void) {
         slim(x - HS_BATT_W - HS_NUB, S.btbatt);
         art("status_headphones", x - HS_BATT_W - HS_NUB - BT_GAP - GLYPH, 16);
         x -= GLYPH + BT_GAP + HS_BATT_W + HS_NUB + GAP;
-    } else if (!strcmp(S.bt, "guest")) { /* a guest's phone in the accent, then › and where it plays */
+    } else if (!strcmp(S.bt, "guest")) { /* a guest's phone in Status Blue, then › and where it plays */
         float w = !strcmp(S.relay, "car") ? CAR_W : !strcmp(S.relay, "headphones") ? GLYPH : 0;
         if (w) {
             art(w == CAR_W ? "status_car" : "status_headphones", x - w, 16);
@@ -376,7 +376,7 @@ static void glyphs(void) {
  * one ink for the whole row, white or black, whichever has the higher WCAG contrast against the art's mean
  * luminance under all of their inked pixels together, each weighed by its share (its greatest channel: an
  * antialiased edge, the battery's dim outline, a part), held 0.03 past the bound against flicker. A status colour
- * (the charging green, the low red, the accent's ring) keeps its hue, laid over the art as it was drawn. */
+ * (the charging green, the low red, the download's blue ring) keeps its hue, laid over the art as it was drawn. */
 #define STRIP_Y0 12
 #define STRIP_Y1 34
 #define STRIP_W (SCREEN_W - HOME_PANE_X)
