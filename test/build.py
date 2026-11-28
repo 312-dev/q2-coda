@@ -36,7 +36,7 @@ assert re.fullmatch(r'V\d{4}', TAG), TAG  # a release's V1800, its beta 2's V180
 print('Dev build tag checks passed.')
 
 def vampos_check():
-    """--dev's card boot in S90play (build.py VAMPOS_HOOK) under the host sh: only q2vampos's exit 2 (Vamp OS ran and
+    """--dev's card boot in S90play (build.py VAMPOS_HOOK) under the host sh: only q2vampos's exit 2 (VampOS ran and
     ended) reboots, before demo; 1 (normal Vamp), any other status and a missing q2vampos go on as a release does."""
     import subprocess
     from build import BOOT_HOOK, VAMPOS_HOOK
@@ -48,7 +48,7 @@ def vampos_check():
         script = line.replace('/usr/bin/q2vampos', cmd, 1).replace('reboot; sleep 60', 'echo reboot') + '\necho demo\n'
         out = subprocess.run(['sh', '-c', script], capture_output=True, text=True).stdout.split()
         assert out == (['reboot', 'demo'] if rebooted else ['demo']), (q2vampos, out)
-    print('Card boot hook: only a Vamp OS that ran and ended reboots; any other end of q2vampos is the usual boot, passed.')
+    print('Card boot hook: only a VampOS that ran and ended reboots; any other end of q2vampos is the usual boot, passed.')
 
 
 def boot_check():
@@ -411,7 +411,7 @@ def validate_assets(directory):
     at, old, new = ID_PULL_UP
     assert struct.unpack_from('<I', stock, fileoff(stock, at))[0] == old and struct.unpack_from('<I', demo, fileoff(demo, at))[0] == new
     from build import patch_timezones, TIMEZONES, CJK, english_ui
-    from build import ADB_HOOK, ADBD, ADB_GADGET, Q2UPDATE, USB_SCRIPTS, adb_wrapper, USBTRACE, USBTRACE_HOOK, VAMPOS, VAMPOS_HOOK
+    from build import ADB_HOOK, ADBD, ADB_GADGET, Q2UPDATE, USB_SCRIPTS, adb_wrapper, USBTRACE, USBTRACE_HOOK, VAMPOS, VAMPOS_FUSE, VAMPOS_HOOK
     zones = bytearray(stock)
     patch_timezones(zones)
     start = fileoff(stock, 0x77efb0)
@@ -637,7 +637,16 @@ def validate_assets(directory):
         assert read('rootfs.squashfs', ADB_GADGET) == (ROOT/'patch/adb_gadget.sh').read_bytes()
         assert read('rootfs.squashfs', Q2UPDATE) == (ROOT/'patch/q2update.sh').read_bytes()
         assert read('rootfs.squashfs', VAMPOS) == (ROOT/'patch/q2vampos.sh').read_bytes()
-        assert expected_start.count(b'/usr/bin/q2vampos;') == 1  # the card boot (docs/vamp-os-base.md#card-boot)
+        assert expected_start.count(b'/usr/bin/q2vampos;') == 1  # the card boot (docs/boot.md#vampos-card-boot)
+        # its squashfuse_ll: the manifest's, static (no interpreter, nothing NEEDED), stock's ELF flags
+        fuse = read('rootfs.squashfs', VAMPOS_FUSE)
+        record = manifest['squashfuse_ll']
+        assert sha(fuse) == record['sha256'] and len(fuse) == record['bytes'] and fuse[36:40] == helper[36:40]
+        (directory/'squashfuse-check').write_bytes(fuse)
+        dynamic = subprocess.run(['readelf', '-dl', str(directory/'squashfuse-check')], capture_output=True, text=True,
+                                 check=True).stdout
+        (directory/'squashfuse-check').unlink()
+        assert 'program interpreter' not in dynamic and '(NEEDED)' not in dynamic, dynamic
         for n in USB_SCRIPTS:
             assert read('rootfs.squashfs', 'usr/bin/' + n) == adb_wrapper(n)
             assert read('rootfs.squashfs', 'usr/bin/' + n.replace('.sh', '_stock.sh')) == read('stock.squashfs', 'usr/bin/' + n)
@@ -657,7 +666,9 @@ def validate_assets(directory):
         assert 'adbd' not in manifest and not (directory/'adbd').exists()
         assert b'q2update.req' not in demo  # q2update_poll is compiled out
         assert b'q2vampos' not in expected_start  # the card boot is --dev only
-        for path in (ADBD, ADB_GADGET, Q2UPDATE, VAMPOS, *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):
+        assert 'squashfuse_ll' not in manifest
+        for path in (ADBD, ADB_GADGET, Q2UPDATE, VAMPOS, VAMPOS_FUSE,
+                     *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):
             absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), path],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             assert absent.returncode != 0, f'release rootfs contains {path}'

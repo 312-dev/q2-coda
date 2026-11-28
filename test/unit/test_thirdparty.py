@@ -985,7 +985,9 @@ def test_replacements_strips_every_install_entry(tmp_path, monkeypatch):
     assert files == {path: dst for path, (_, dst) in expected.items()} and sorted(stripped) == sorted(expected.values())
     assert files['usr/lib/libz.so.1.2.11'] == out/'thirdparty/usr/lib/libz.so.1.2.11'
     # mbedtls and libnl among them; adbd is no replacement (a --dev build's program, docs/adb.md)
-    assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items() if name != 'adbd'}
+    # adbd and squashfuse_ll (with the static libraries it links) are --dev builds' additions, not replacements
+    added = ('adbd', 'squashfuse', 'libfuse', 'lzo')
+    assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items() if name not in added}
 
 
 @pytest.fixture

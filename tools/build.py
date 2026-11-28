@@ -555,12 +555,13 @@ LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.er
             b'        while :; do\n            /release/bin/demo 2>>/tmp/q2-demo.err\n',
             b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.log); [ "${n:-0}" -gt 2000000 ] && cp /tmp/q2-demo.log /tmp/q2-demo.log.1 && : >/tmp/q2-demo.log; done) &\n'
             b'        while :; do\n            /release/bin/demo >>/tmp/q2-demo.log 2>&1\n')
-# --dev only (docs/vamp-os-base.md#card-boot, patch/q2vampos.sh): a Vamp OS image on the card, loop-mounted and run
-# in a chroot before demo when the card's .vamp/os asks for it (boot-once, removed first, or boot-always) and the
-# image's SHA-256 matches; any other case, or a failure, goes on to Rockbox's choice and demo as before. q2vampos
-# exits 2 only once Vamp OS has run and ended, and the Q2 then reboots; any other status (1, its normal Vamp, or a
-# q2vampos that is missing or broken) goes on as before. Before Rockbox's choice, in BOOT_HOOK's start path.
-VAMPOS = 'usr/bin/q2vampos'
+# --dev only (docs/boot.md#vampos-card-boot, patch/q2vampos.sh): a VampOS image on the card, mounted (a loop device,
+# or squashfuse_ll over FUSE on a kernel with none: VAMPOS_FUSE) and run in a chroot before demo when the card's
+# .vamp/os asks for it (boot-once, removed first, or boot-always) and the image's SHA-256 matches; any other case, or
+# a failure, goes on to Rockbox's choice and demo as before. q2vampos exits 2 only once VampOS has run and ended, and
+# the Q2 then reboots; any other status (1, its normal Vamp, or a q2vampos that is missing or broken) goes on as
+# before. Before Rockbox's choice, in BOOT_HOOK's start path.
+VAMPOS, VAMPOS_FUSE = 'usr/bin/q2vampos', 'usr/bin/squashfuse_ll'
 VAMPOS_HOOK = (b'        if [ "$(cat /mnt/data/boot-target 2>/dev/null)" != q2pod ] && ! /usr/bin/q2boot; then\n',
                b'        /usr/bin/q2vampos; [ $? = 2 ] && { reboot; sleep 60; }\n'
                b'        if [ "$(cat /mnt/data/boot-target 2>/dev/null)" != q2pod ] && ! /usr/bin/q2boot; then\n')
@@ -2504,12 +2505,13 @@ def s90play_script(s90play, dev):
 
 def adb_files(out, cat):
     """A --dev build's ADB files ({rootfs path: (path whose inode metadata it takes, bytes)}): adbd, its gadget
-    script, q2update, q2vampos (VAMPOS_HOOK, not ADB's but --dev's too), and stock's USB scripts wrapped (adb_wrapper),
-    each stock copy before its wrapper, which takes the inode the copy's metadata comes from."""
+    script, q2update, q2vampos and squashfuse_ll (VAMPOS_HOOK, not ADB's but --dev's too), and stock's USB scripts
+    wrapped (adb_wrapper), each stock copy before its wrapper, which takes the inode the copy's metadata comes from."""
     return {ADBD: (HELPER_LIKE, adbd_binary(out)),
             ADB_GADGET: (HELPER_LIKE, (ROOT/'patch/adb_gadget.sh').read_bytes()),
             Q2UPDATE: (HELPER_LIKE, (ROOT/'patch/q2update.sh').read_bytes()),
             VAMPOS: (HELPER_LIKE, (ROOT/'patch/q2vampos.sh').read_bytes()),
+            VAMPOS_FUSE: (HELPER_LIKE, squashfuse_binary(out)),
             **{f'usr/bin/{n.replace(".sh", "_stock.sh")}': (f'usr/bin/{n}', cat(f'usr/bin/{n}')) for n in USB_SCRIPTS},
             **{f'usr/bin/{n}': (f'usr/bin/{n}', adb_wrapper(n)) for n in USB_SCRIPTS}}
 
@@ -2519,6 +2521,19 @@ def adbd_record(out):
     import thirdparty
     data = (out/'adbd').read_bytes()
     return dict(version=thirdparty.SOURCES['adbd'][0], sha256=sha(data), bytes=len(data))
+
+
+def squashfuse_binary(out):
+    """--dev builds' squashfuse_ll (VAMPOS_FUSE), built static by tools/thirdparty.py, stripped into out."""
+    import thirdparty
+    return thirdparty.stripped(thirdparty.build('squashfuse')/VAMPOS_FUSE, out/'squashfuse_ll').read_bytes()
+
+
+def squashfuse_record(out):
+    """The manifest's squashfuse_ll: squashfuse's version, SHA-256 and size."""
+    import thirdparty
+    data = (out/'squashfuse_ll').read_bytes()
+    return dict(version=thirdparty.SOURCES['squashfuse'][0], sha256=sha(data), bytes=len(data))
 
 
 def append_payload(image, payload, base, memsz, label):
@@ -3347,7 +3362,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes()), 'q2_usbtrace_sha256': sha((out/'q2-usbtrace').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
-        **({'adbd': adbd_record(out)} if dev else {}),
+        **({'adbd': adbd_record(out), 'squashfuse_ll': squashfuse_record(out)} if dev else {}),
         q2player_sha256=sha(q2player.read_bytes()),
         bundled_apps=bundled, rootfs_squashfs_bytes=len(blobs['recovery-update/rootfs.squashfs']),
         **({'pwm_clock': pwm} if pwm else {}),
