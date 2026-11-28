@@ -131,8 +131,8 @@ def test_reduce_motion_puts_the_clock_back_at_once(fw, st, pill):
 
 @pytest.mark.parametrize('slots, box', [
     ('lock', BOX),  # bars, Wi-Fi and the padlock, 57 px: room for all of it
-    ('sync', (50, 8, 185, 30)),  # and a download's ring, 79 px: narrower, ending VP_CLEAR short of the leftmost
-    ('crowd', (35, 8, 141, 30)),  # every slot, 138 px: VP_MIN_W, ending there, so it leaves the clock's place
+    ('sync', (50, 8, 187, 30)),  # and a download, 77 px: narrower, ending VP_CLEAR short of the leftmost
+    ('crowd', (37, 8, 141, 30)),  # every slot, 136 px: VP_MIN_W, ending there, so it leaves the clock's place
 ])
 def test_it_narrows_from_its_right_end_as_the_slots_reach_left(fw, pill, slots, box):
     """The pill keeps the clock's place and ends VP_CLEAR short of the leftmost slot, VP_W at most; at VP_MIN_W (141)

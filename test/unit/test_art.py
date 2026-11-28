@@ -167,9 +167,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
               'srvtoast': 0xff9f0a}  # addon.c's server error: cloud-slash in Warning
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
-    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'wired', 'car', 'down',
-                                          'vol', 'mute', 'offline',
-                                          *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
+    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'wired', 'car',
+                                          'vol', 'mute', 'offline', *(f'sync_{f}' for f in range(art.STATUS_SPIN)),
+                                          *(f'drop_{f}' for f in range(art.STATUS_SPIN)))
               for k in ('d', 'l')]  # status_row.c's other glyphs: their own test
     # bt_ui.c's device kinds, its scan spinner and the connection toasts (a drop's in Text Secondary)
     btdev = {f'btdev_{n}_{k}': c for n in art.BT_ROW_GLYPHS for k, c in (('d', 0xababab), ('l', 0x5c5c5c), ('w', 0xffffff))}
@@ -296,6 +296,18 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
     frames = [got[f'oled_status_sync_{f}_{half}'] for f in range(art.STATUS_SPIN)]
     assert art.STATUS_SPIN == 30
     assert len(set(frames)) == art.STATUS_SPIN and all(ink(f'sync_{f}')[2] == {rgb(primary)} for f in range(art.STATUS_SPIN))
+    # a download (Download option A): its arrow falls 4 px a second onto the tray drawn under it on rows 11 and 12,
+    # eased in, whole until the last 30% of the second and fading out over it; no arrow-in-a-ring art is left
+    assert f'oled_status_down_{half}' not in got
+    drops = [pixels(got[f'oled_status_drop_{f}_{half}']) for f in range(art.STATUS_SPIN)]
+    top = lambda w, h, at: min(y for y in range(h) for x in range(w) if at(x, y)[3] > 128)  # noqa: E731
+    most = lambda w, h, at: max(at(x, y)[3] for y in range(h) for x in range(w))  # noqa: E731
+    assert all((w, h) == (art.STATUS_PX, art.STATUS_PX) for w, h, _ in drops)
+    assert {at(x, y)[:3] for w, h, at in drops[:21] for y in range(h) for x in range(w) if at(x, y)[3]} == {rgb(primary)}
+    tops = [top(*d) for d in drops[:21]]
+    assert tops[0] == 0 and tops == sorted(tops) and tops[20] >= 2  # it falls, faster as it goes
+    assert all(most(*d) >= 250 for d in drops[:21]) and most(*drops[29]) < 40  # whole, then fading out
+    assert all(at(x, y)[3] < 128 for w, h, at in drops[:15] for y in range(11, h) for x in range(w))  # clear of the tray
 
 
 @pytest.mark.parametrize('half, primary, dim', [('d', 0xffffff, 0x858585), ('l', 0, 0x6e6e6e)])

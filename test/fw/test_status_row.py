@@ -70,9 +70,10 @@ class Row(StatusRow):
             return load(w, name, bitmap)
         self.fw.mock('widget_load_image', loaded)
         canvas.art = {n: (WIFI_W, 14) for n in ('oled_status_wifi_3_d', 'oled_status_wifi_2_d', 'oled_status_wifi_1_d', 'oled_status_wifi_x_d')}
-        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (RUNE_W, 14), 'oled_status_down_d': (14, 14), 'oled_status_wired_d': (14, 14),
+        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (RUNE_W, 14), 'oled_status_wired_d': (14, 14),
                        'oled_status_offline_d': (14, 14)}
         canvas.art |= {f'oled_status_sync_{f}_d': (14, 14) for f in range(30)}
+        canvas.art |= {f'oled_status_drop_{f}_d': (14, 14) for f in range(30)}
         self.fw.fn('status_slots_paint', None, C.c_void_p, C.c_void_p)(self.bar.addr, canvas.addr)
         return canvas, names
 
@@ -100,9 +101,9 @@ def test_the_slots_lay_out_right_to_left_from_the_battery(fw, row):
     row.app(1)
     assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 12
     row.app(2, 500)
-    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 16
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 14  # a download's box
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
-    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 16 - GAP - 13
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 14 - GAP - 13
 
 
 @pytest.mark.parametrize('status, wifi, left', [(1, None, BODY), (0, 3, BODY - GAP - WIFI_W), (3, 0, BODY - GAP - 10),
@@ -428,10 +429,11 @@ def test_wifi_lights_arcs_by_its_bars_and_crosses_out_with_no_internet(fw, row, 
     assert names == [art] and canvas.images == [(x, CY - 7, WIFI_W, 14)]
 
 
-def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_ring(fw, row):
+def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_tray(fw, row):
     """The user's (2026-11-20): the arrows at 30 fps, a half turn a second as before. They ride ui_kit's one 33 ms loop
     timer (no timer of their own), their frame the clock's place in the half turn's second (SR_TURN_MS over SR_SPIN
-    frames), and each new frame repaints only their art's box; a download's ring does not turn."""
+    frames), and each new frame repaints only their art's box. A download (Download option A) is a 2 px tray, Text
+    Primary at 30% filled in Status Blue to its share, under an arrow falling onto it on the same loop and clock."""
     now = [10_000]
     fw.mock('time_now_ms', lambda *_: now[0])
     row.status = 0
@@ -455,9 +457,14 @@ def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_ring(fw, row):
     row.app(2, 250)
     fw.mock('canvas_get_vgcanvas', lambda *_: 1)
     canvas, names = row.paint()
-    assert names == ['oled_status_down_d'] and canvas.images == [(BODY - GAP - 16 + 4, CY - 4, 14, 14)]
-    assert len(fw.calls('vgcanvas_arc')) == 2 and len(fw.calls('vgcanvas_stroke')) == 2  # the track, then the fill
-    assert tick(None) == 7  # a download does not turn: the loop drops the arrows and, the last, ends
+    assert names == ['oled_status_drop_0_d'] and canvas.images == [(BODY - GAP - 14, CY - 7, 14, 14)]
+    assert not fw.calls('vgcanvas_arc') and len(fw.calls('vgcanvas_stroke')) == 2  # the tray, then its filled part
+    row.dirty.clear()
+    now[0] += 34
+    assert tick(None) == 8 and row.dirty == [(BODY - GAP - 14, 0, 14, 26)]  # the arrow's next frame, its box alone
+    assert row.paint()[1] == ['oled_status_drop_1_d']
+    row.app(0)
+    assert tick(None) == 7  # nothing to move: the loop drops the sync and, the last, ends
 
 
 def test_the_padlock_sits_where_buttons_lock_put_it(fw, row):
@@ -511,13 +518,13 @@ def test_a_tap_on_the_bars_opens_now_playing_after_the_dispatch(fw, row):
 
 CLOCK_W = 38  # test_nav_painters.StatusRow's widest clock, "00:00"
 LEFT_ROOM = 62 + CLOCK_W + 7  # the strip's left edge: CLOCK_BESIDE past the widest clock at the row's left
-ROOM = 214  # a room narrower than the crowd below, for the marquee's tests: 30 px short
+ROOM = 216  # a room narrower than the crowd below, for the marquee's tests: 30 px short
 OFFLINE_W = 14  # SR_OFFLINE: cloud-slash's 13.6 px of ink at 11 tall
 
 
 def crowd(fw, row, room=ROOM):
-    """Every slot shown: bars 10, Wi-Fi 16, a download's ring 16, a headset 33, the padlock 13 and the offline cloud
-    14, with their six gaps: 138 px left of the battery's body, 30 more than ROOM leaves; the strip's room then set
+    """Every slot shown: bars 10, Wi-Fi 16, a download 14, a headset 33, the padlock 13 and the offline cloud
+    14, with their six gaps: 136 px left of the battery's body, 30 more than ROOM leaves; the strip's room then set
     to room."""
     row.wifi(3)
     row.app(2, 500)
@@ -526,7 +533,7 @@ def crowd(fw, row, room=ROOM):
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
     row.place()
     fw.fn('status_strip_room', None, C.c_int)(room)
-    return 10 + WIFI_W + 16 + 33 + 13 + OFFLINE_W + 6 * GAP
+    return 10 + WIFI_W + 14 + 33 + 13 + OFFLINE_W + 6 * GAP
 
 
 def test_the_clock_at_the_row_s_left_leaves_every_glyph_room(fw, row):

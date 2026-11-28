@@ -32,11 +32,9 @@
 #define SR_CAR_W 19    /* tools/art.py STATUS_CAR_W: car-profile 11 px tall is 18.5 wide */
 #define SR_RUNE_W 9    /* tools/art.py STATUS_TALL_FIT: the Bluetooth rune 12 px tall is 8.4 wide */
 #define SR_LOCK 13     /* the padlock's box, tools/art.py STATE_PX */
-#define SR_RING 16     /* the download ring's box: a 14 px ring and its stroke */
+#define SR_DROP_W 14   /* a download's box: its arrow over its tray (tools/art.py status_drop) */
 #define SR_SPIN_W 12   /* the turning arrows' box: frame 0's ink, 12 of its SR_GLYPH art's 14 */
-#define SR_RING_R 7.0f /* its centre line's radius */
-#define SR_RING_LINE 1.6f
-#define SR_DOWN 8       /* the arrow inside it */
+#define SR_UNLIT 77     /* the tray's unfilled part: its ink's alpha, tools/art.py STATUS_UNLIT 0.3 */
 #define SR_BT_GAP 2     /* the headphones glyph's box, then the headset's battery */
 #define SR_HS_BATT_W 15 /* the headset's battery: a 15x8 body (list_marks.c battery_slim) */
 #define SR_HS_BATT_H 8
@@ -139,7 +137,7 @@ static int wifi_shown(void) { return wifi_level() ? SR_WIFI_W : 0; }
  * into it (tools/art.py status_turn: 10 to 14 px of ink across the frames). */
 static int sync_shown(void) {
     int kind = addon_sync((int *)0);
-    return kind == 2 ? SR_RING : kind ? SR_SPIN_W : 0;
+    return kind == 2 ? SR_DROP_W : kind ? SR_SPIN_W : 0;
 }
 /* The Bluetooth slot (docs/oled-design.md#status-row, P9): what the link is, BT_SLOT_*. Stock's
  * link list's last item is the device it links (status 3 connected, as its rows read it); a link
@@ -310,37 +308,43 @@ static void wifi_paint(void *bar, void *canvas, int x, int cy) {
     status_art(bar, canvas, stem, x, cy);
 }
 
-/* A card app's sync: checking, the arrows turning in Text Secondary; downloading, a ring that fills
- * in Status Blue (the blue whatever the accent) from 12 o'clock clockwise with its arrow in it. */
+/* A card app's sync: checking, the arrows turning in Text Secondary; downloading (the review sheet's option A, a
+ * default the owner may revisit; docs/oled-design.md#status-row), a 12 x 2 tray on the box's rows 11 and 12 in Text
+ * Primary at SR_UNLIT, filled from the left in Status Blue (the blue whatever the accent) to the share downloaded, and
+ * over it the arrow falling onto it once a second (tools/art.py status_drop, frame sr.spin), as q2ui's ui/status.c
+ * drop. */
 static void sync_paint(void *bar, void *canvas, int x, int cy) {
     int permille = 0;
+    char stem[24];
     if (addon_sync(&permille) != 2) {
-        char stem[24];
         tk_snprintf(stem, sizeof stem, "status_sync_%d", sr.spin % SR_SPIN);
         glyph(bar, canvas, stem, x, SR_SPIN_W, cy, SR_GLYPH);
         return;
     }
     void *vg = canvas_get_vgcanvas(canvas);
     if (vg) {
-        int light = ipod_light();
-        float cx = (float)x + SR_RING / 2.0f, fy = (float)cy;
+        unsigned ink = ipod_light() ? RGB_PRIMARY_L : RGB_PRIMARY;
+        float done = 12 * (float)(permille < 0 ? 0 : permille > 1000 ? 1000 : permille) / 1000, fy = (float)cy + 5;
         vgcanvas_save(vg);
         vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
-        vgcanvas_set_line_width(vg, SR_RING_LINE);
+        vgcanvas_set_line_width(vg, 2);
+        vgcanvas_set_line_cap(vg, "round"); /* the caps make its 1 px corners */
         vgcanvas_begin_path(vg);
-        vgcanvas_arc(vg, cx, fy, SR_RING_R, 0, 6.2831853f, 0);
-        vgcanvas_set_stroke_color(vg, RGBA(light ? RGB_TRACK_L : RGB_TRACK));
+        vgcanvas_move_to(vg, (float)x + 2, fy);
+        vgcanvas_line_to(vg, (float)x + 12, fy);
+        vgcanvas_set_stroke_color(vg, (RGBA(ink) & 0x00ffffffu) | (unsigned)SR_UNLIT << 24);
         vgcanvas_stroke(vg);
         if (permille > 0) {
             vgcanvas_begin_path(vg);
-            vgcanvas_arc(vg, cx, fy, SR_RING_R, -1.5707963f,
-                         -1.5707963f + 6.2831853f * (float)permille / 1000, 0);
+            vgcanvas_move_to(vg, (float)x + 2, fy);
+            vgcanvas_line_to(vg, (float)x + 2 + (done > 2 ? done - 2 : 0.01f), fy);
             vgcanvas_set_stroke_color(vg, RGBA(RGB_STATUS_BLUE));
             vgcanvas_stroke(vg);
         }
         vgcanvas_restore(vg);
     }
-    glyph(bar, canvas, "status_down", x, SR_RING, cy, SR_DOWN);
+    tk_snprintf(stem, sizeof stem, "status_drop_%d", sr.spin % SR_SPIN);
+    status_art(bar, canvas, stem, x, cy);
 }
 
 /* The Bluetooth slot: a guest playing (Guest Play), its phone in Status Blue, and relayed to a car
@@ -561,13 +565,13 @@ void status_touch(unsigned type, int x, int y) {
         sr.nav = timer_add(np_due, (void *)0, 0);
 }
 
-/* Whether the arrows turn: an app checks. */
-static int moving(void) { return addon_sync((int *)0) == 1; }
-/* The shared loop's (ui_kit.c motion_loop), MO_LOOP_MS apart while lit and the arrows turn, as the
- * level bars' frames: their frame the clock's place in SR_TURN_MS, and only their art's box
- * repainted when it changed, a px either side of the slot's (ringnav_paint_bg paints it with the
- * bar's background under it); 0 (dropped) once they stop. A report of what the app does, so they
- * turn under Reduce Motion too. */
+/* Whether the sync's art moves: an app checks (the arrows turn) or downloads (its arrow falls). */
+static int moving(void) { return addon_sync((int *)0) != 0; }
+/* The shared loop's (ui_kit.c motion_loop), MO_LOOP_MS apart while lit and the sync's art moves, as
+ * the level bars' frames: their frame the clock's place in SR_TURN_MS, and only their art's box
+ * repainted when it changed, the arrows' a px either side of the slot's, a download's its own
+ * (ringnav_paint_bg paints it with the bar's background under it); 0 (dropped) once they stop. A
+ * report of what the app does, so they move under Reduce Motion too. */
 static int sr_spin_frame(void) {
     void *bar = *(void *const *)system_bar;
     if (!g_backlight_status || !bar || !moving()) return 0;
@@ -576,6 +580,7 @@ static int sr_spin_frame(void) {
     if (sr.w[SLOT_SYNC] && spin != sr.spin) {
         sr.spin = spin;
         rect_t r = { sr.x[SLOT_SYNC] - (SR_GLYPH - SR_SPIN_W) / 2, 0, SR_GLYPH, I(bar, W_H) };
+        if (sr.w[SLOT_SYNC] == SR_DROP_W) r.x = sr.x[SLOT_SYNC], r.w = SR_DROP_W;
         widget_invalidate_force(bar, &r);
     }
     return 1;

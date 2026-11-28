@@ -198,7 +198,7 @@ static void read_told(void) {
 #define RUNE_W 9   /* the Bluetooth rune */
 #define CAR_W 19
 #define LOCK_W 13
-#define RING_W 16  /* the download's ring */
+#define DROP_W 14  /* a download's box: its arrow over its tray (tools/art.py status_drop) */
 #define SPIN_W 12  /* the turning arrows */
 #define BT_GAP 2   /* between headphones and the headset's battery, and round a guest's relay */
 #define HS_BATT_W 15
@@ -210,7 +210,7 @@ static float after_battery(void) { return S.level >= 0 ? floorf(RIGHT - 2.5f - B
 /* ... and demo's slots, past the play state and Wi-Fi */
 static float sync_right(void) { return after_battery() - (S.play ? 10 + GAP : 0) - (S.wifi ? WIFI_W + GAP : 0); }
 
-#define SPIN_FRAMES 30 /* tools/art.py STATUS_SPIN: the arrows' frames a half turn, a half turn a second */
+#define SPIN_FRAMES 30 /* tools/art.py STATUS_SPIN: the arrows' frames a half turn, a half turn a second; a download's a second */
 #define SPIN_US (1000000u / SPIN_FRAMES)
 
 void status_step(void) {
@@ -230,10 +230,10 @@ void status_step(void) {
     if (S.volume_at && ui_time() - S.volume_at >= VOLUME_SHOW_US) S.volume_at = 0, ui_mark(volume_rect());
     if (!read_once) read_once = 1, read_glyphs();
     if (S.told) S.told = 0, read_told();
-    if (S.sync == 1) { /* the arrows turn: their box alone again at each frame of theirs, 30 a second */
+    if (S.sync) { /* the arrows turn, or a download's falls: their box alone again at each frame of theirs, 30 a second */
         uint64_t t = ui_time();
-        int frame = (int)(t / SPIN_US % SPIN_FRAMES);
-        if (frame != S.spin) S.spin = frame, ui_mark((rect_t){ (int)sync_right() - SPIN_W - 2, CLOCK_Y, SPIN_W + 4, 18 });
+        int frame = (int)(t / SPIN_US % SPIN_FRAMES), w = S.sync == 2 ? DROP_W : SPIN_W;
+        if (frame != S.spin) S.spin = frame, ui_mark((rect_t){ (int)sync_right() - w - 2, CLOCK_Y, w + 4, 18 });
         ui_wake_ms((unsigned)((SPIN_US - t % SPIN_US + 999) / 1000));
     }
     if (S.fixed) return;
@@ -283,24 +283,16 @@ static void art(const char *stem, float x, float y) {
     if (im) image_draw(im, (rectf_t){ x, y, (float)im->w, (float)im->h }, 0, 0, 256, -1);
 }
 
-/* The download's ring: a 14 px ring (1.6 px) in #333333 filling clockwise from 12 o'clock in
- * Status Blue (the blue whatever the accent) to permille, its arrow in it (demo's sync_paint) */
-static void ring(float left, int permille) {
-    float cx = left + 8, cy = 23, share = (float)permille / 1000;
-    rect_t c, box = { (int)left, 14, 17, 18 };
-    if (!rect_meet(box, clip_get(), &c)) return;
-    for (int y = c.y; y < c.y + c.h; ++y)
-        for (int x = c.x; x < c.x + c.w; ++x) {
-            float dx = (float)x + 0.5f - cx, dy = (float)y + 0.5f - cy, r = sqrtf(dx * dx + dy * dy);
-            float cov = clampf(0.8f + 0.5f - fabsf(r - 7.0f), 0, 1);
-            if (cov <= 0) continue;
-            float turn = atan2f(dx, -dy) / 6.2831853f; /* 0 at 12 o'clock, clockwise */
-            if (turn < 0) turn += 1;
-            uint32_t *p = canvas + y * SCREEN_W + x;
-            *p = 0xff000000 | rgb_mix(*p & 0xffffff, turn < share ? tok(TOK_STATUS_BLUE) : 0x333333, cov);
-        }
-    const image_t *down = icon(ui_light ? "status_down_l." : "status_down_d.");
-    if (down) image_draw(down, (rectf_t){ cx - (float)down->w / 2, cy - (float)down->h / 2, (float)down->w, (float)down->h }, 0, 0, 256, -1);
+/* A download (the review sheet's option A, a default the owner may revisit; docs/oled-design.md#status-row): a 12 x 2
+ * tray on the box's rows 11 and 12 in ink at STATUS_UNLIT, filled from the left in Status Blue (the blue whatever the
+ * accent) to permille, and over it the arrow falling onto it once a second (tools/art.py status_drop, frame S.spin) */
+static void drop(float left, int permille, uint32_t ink) {
+    float done = 12 * clampf((float)permille / 1000, 0, 1);
+    fill_round((rectf_t){ left + 1, 27, 12, 2 }, 1, 0, ink, UNLIT, 0);
+    if (permille > 0) fill_round((rectf_t){ left + 1, 27, done < 2 ? 2 : done, 2 }, 1, 0, tok(TOK_STATUS_BLUE), 1, 0);
+    char stem[24];
+    snprintf(stem, sizeof stem, "status_drop_%d", S.spin);
+    art(stem, left, 16);
 }
 
 /* A headset's own battery: a 15 x 8 body with a 1 px outline, filled 2 px inside it to the level,
@@ -348,7 +340,7 @@ static void glyphs(void) {
     /* demo's word from here (status_told), right to left, GAP between */
     x = sync_right();
     if (S.sync == 2)
-        ring(x - RING_W, S.syncpm), x -= RING_W + GAP;
+        drop(x - DROP_W, S.syncpm, ink), x -= DROP_W + GAP;
     else if (S.sync == 1) {
         char stem[24];
         snprintf(stem, sizeof stem, "status_sync_%d", S.spin);
@@ -382,7 +374,7 @@ static void glyphs(void) {
  * one ink for the whole row, white or black, whichever has the higher WCAG contrast against the art's mean
  * luminance under all of their inked pixels together, each weighed by its share (its greatest channel: an
  * antialiased edge, the battery's dim outline, a part), held 0.03 past the bound against flicker. A status colour
- * (the charging green, the low red, the download's blue ring) keeps its hue, laid over the art as it was drawn. */
+ * (the charging green, the low red, a download's blue tray) keeps its hue, laid over the art as it was drawn. */
 #define STRIP_Y0 12
 #define STRIP_Y1 34
 #define STRIP_W (SCREEN_W - HOME_PANE_X)
