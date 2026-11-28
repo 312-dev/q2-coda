@@ -285,7 +285,7 @@ extern void (*ui_clicker)(int button);
 void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message); sixteen at most */
 void ui_unwatch(int fd);                 /* fd is no longer waited on (a connection that ended) */
 extern const char *ui_backlight;         /* the folder of backlights whose state says the screen is dark */
-int ui_dark(void);                       /* the screen is dark (demo's backlight is off) */
+int ui_dark(void);                       /* the screen is dark: Q2SYS/1's word, demo's dark=, else the backlight's */
 /* One pass by hand, for the bench and a script: events, the step at the frame's time, the draw,
  * the frame. Returns whether a frame went out. */
 int ui_frame(const input_t *in, int n);
@@ -541,6 +541,8 @@ int api_play_list(const char *head, const int *ids, int n); /* play or queue and
 int api_now_overlay(ui_now *n);                       /* Q2PLAY/1's now over the file's; 1 when it said one */
 int api_play_live(void);                              /* connected to Q2PLAY/1 */
 void api_wait(unsigned ms);                           /* a script's wait for every answer, up to ms */
+int api_screen_dark(void);            /* Q2SYS/1's screen: 1 dark, 0 lit, -1 no word (off Vamp OS) */
+int api_sys_send(const char *verb);   /* a command to Q2SYS/1 (`screen on`); 0 sent */
 int api_told(char *out, size_t room); /* the status row's states from Q2SYS/1, Q2BT/1 and Q2NET/1 as /tmp/q2ui.status has them; 0 off Vamp OS */
 
 /* ---- player.c: the player, through demo while demo owns it ---- */

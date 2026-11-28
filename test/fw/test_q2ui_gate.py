@@ -324,6 +324,31 @@ def test_while_q2ui_runs_demo_tells_it_the_status_rows_states_when_they_change(f
     assert len(writes) == 2
 
 
+def test_q2ui_is_told_the_screen_dark_and_lit_on_the_pass_it_changes(fw):
+    """The Q2 has no backlight device for q2ui to read (its light is stock's PWM), so demo says dark= in
+    /tmp/q2ui.status (ui/ui.c ui_dark drops a press that arrives dark), and a change of it is written on the pass it
+    happens, not at the next 500 ms look: the press that wakes the screen comes a moment after it went dark."""
+    from conftest import Files
+    files = Files(fw)
+    g = Gate(fw)
+    lit = fw.var('g_backlight_status', C.c_ubyte)
+    lit.value = 1
+    g.poll()  # started
+    g.poll()
+
+    def dark():
+        return dict(line.split('=', 1) for line in files.files['/tmp/q2ui.status'].decode().splitlines()).get('dark')
+    assert dark() == '0'
+    lit.value = 0  # the screen off time
+    g.ms += 10
+    g.poll()
+    assert dark() == '1'
+    lit.value = 1  # a press lit it
+    g.ms += 10
+    g.poll()
+    assert dark() == '0'
+
+
 def test_controls_is_opened_as_homes_controls_row_opens_it(fw):
     """Settings > Controls is the Display page opened on its Controls part (settings_display.c display_open), not a
     page of its own name."""

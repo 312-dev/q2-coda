@@ -2874,6 +2874,70 @@ def api_status(binary, work):
     return good
 
 
+def screen_dark(binary, work):
+    """The Q2 has no backlight device (its light is stock's PWM), so the screen's state is its owner's word: Q2SYS/1's
+    screen on Vamp OS, demo's dark= in its status file otherwise. Dark, a press only wakes: no tick moves, Centre plays
+    nothing, and on Vamp OS a key other than Centre (the power key, q2sysd's own) asks Q2SYS/1 for `screen on`; lit
+    again, the same press acts."""
+    good = True
+
+    def start(before):
+        d = folder(work, 40)
+        (d/'input').mkdir()
+        for k in (1, 2, 3):
+            os.mkfifo(d/'input'/f'event{k}')
+        os.mkfifo(d/'cmdq')
+        return before(d), d
+
+    # Vamp OS: q2sysd says the screen is off; its answer to `screen on` is its watchers' event
+    def vamp(d):
+        (d/'vamp').mkdir()
+        return Service(d/'vamp/sys.sock', 'Q2SYS/1', {'caps': [SYS_CAPS], 'battery': [SYS_BATTERY], 'jack': ['jack po=0 bal=0'],
+                                                       'screen': ['screen off'], 'screen on': ['ok', 'screen on']})
+    sys_svc, d = start(vamp)
+    r = Run(binary, work, 40, '--api-dir', d/'vamp', '--api', 'auto', at=d)
+    try:
+        r.rest()
+        r.ticks(2)
+        r.key(KEY_CENTRE)
+        time.sleep(0.6)
+        quiet, played, asked = r.rest()['ticks'], r.sent(), [x for x in sys_svc.lines if x == 'screen on']
+        r.key(KEY_RETURN)
+        time.sleep(0.8)
+        woke = [x for x in sys_svc.lines if x == 'screen on']
+        r.ticks(2)
+        r.key(KEY_CENTRE)
+        time.sleep(0.6)
+        lit, played_lit = r.rest()['ticks'], r.sent()
+        good &= check('On Vamp OS with Q2SYS/1 saying the screen is off, the wheel and Centre do nothing and Centre asks '
+                      'nothing (the power key is q2sysd\'s)', quiet == 0 and played == [] and asked == [], f'{quiet} ticks, {played}, {asked}')
+        good &= check('Return pressed dark asks Q2SYS/1 for screen on, once', woke == ['screen on'], sys_svc.lines)
+        good &= check('Lit again by its event, the wheel moves and Centre plays', lit == 2 and len(played_lit) == 1, f'{lit} ticks, {played_lit}')
+    finally:
+        r.proc.kill(), r.proc.wait(timeout=5), os.close(r.queue), sys_svc.close()
+
+    # demo: dark= in its status file (patch/q2ui_gate.c tell)
+    _, d = start(lambda d: (d/'told').write_text('dark=1\n'))
+    r = Run(binary, work, 40, at=d)
+    try:
+        r.rest()
+        r.ticks(2)
+        r.key(KEY_CENTRE)
+        time.sleep(0.6)
+        quiet, played = r.rest()['ticks'], r.sent()
+        (d/'told').write_text('dark=0\n')
+        time.sleep(0.6)
+        r.ticks(2)
+        r.key(KEY_CENTRE)
+        time.sleep(0.6)
+        lit, played_lit = r.rest()['ticks'], r.sent()
+        good &= check("With demo's dark=1 the wheel and Centre do nothing; at dark=0 they act",
+                      quiet == 0 and played == [] and lit == 2 and len(played_lit) == 1, f'{quiet}/{played} then {lit}/{played_lit}')
+    finally:
+        r.proc.kill(), r.proc.wait(timeout=5), os.close(r.queue)
+    return good
+
+
 def live_stats(binary, work):
     """The stats file while the list moves, not only at rest (the coordinator's, 2026-11-28: a device read during a scroll
     saw no update): written at most once a second as the loop runs, whole each time."""
@@ -3247,6 +3311,8 @@ def main():
             good &= light_default(binary, work, ('--page', 'home'))
         if not only or 'api' in only:
             good &= api_play(binary, work) & api_status(binary, work)
+        if not only or 'dark' in only:
+            good &= screen_dark(binary, work)
         if not only or 'notices' in only:
             good &= notices(binary, work)
         if not only or 'genres' in only:

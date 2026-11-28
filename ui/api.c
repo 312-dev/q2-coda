@@ -11,7 +11,10 @@
  *
  * Q2SYS/1 (the battery's cable and the jacks), Q2BT/1 and Q2NET/1 (their `status`) are watched for the status row's
  * and Control Center's states, which demo and q2gate write to /tmp/q2ui.status: api_told composes the same text from
- * them and config.ini, by q2gate's rules, and ui/status.c reads it in that file's place.
+ * them and config.ini, by q2gate's rules, and ui/status.c reads it in that file's place. Q2SYS/1's `screen` and its
+ * `screen on`/`screen off` events say whether the screen is dark (api_screen_dark, for ui/ui.c ui_dark): the Q2 has
+ * no backlight device to read, q2sysd lights it through stock's PWM. A key pressed dark is sent on as `screen on`
+ * (api_sys_send), as q2sysd itself wakes only at the power key.
  *
  * A service that goes away (runsv restarts it) is connected to again at the next verb or the next change of the now
  * file, at most once a second. Everything runs in the loop's thread: the socket is ui_watch'd. */
@@ -53,6 +56,7 @@ static service *const services[] = { &play, &sys, &bt, &net };
 
 /* the status lines the system, Bluetooth and network services last said (their `battery`, `jack` and `status`) */
 static char sys_battery[240], sys_jack[64], bt_status[600], net_status[400];
+static int sys_lit = -1; /* Q2SYS/1's screen: 1 on, 0 off, -1 not said (no q2sysd, or one with no `screen`) */
 
 /* what Q2PLAY/1 said plays: its own fields of ui_now, and whether a now line has come since the connection */
 static struct {
@@ -90,7 +94,7 @@ static void drop(service *s) {
     s->fd = -1, s->len = 0, s->outstanding = s->now_wait = 0, *s->caps = 0;
     s->tried_us = mono_us(); /* not again within the second: now_read below asks for it */
     if (s == &play) pl.live = pl.rated = 0, now_read();
-    if (s == &sys) *sys_battery = *sys_jack = 0;
+    if (s == &sys) *sys_battery = *sys_jack = 0, sys_lit = -1;
     if (s == &bt) *bt_status = 0;
     if (s == &net) *net_status = 0;
     if (s != &play) status_told_changed();
@@ -158,9 +162,9 @@ static int connect_to(service *s) {
     if (connect(s->fd, (struct sockaddr *)&a, sizeof a)) return close(s->fd), s->fd = -1, -1;
     /* the hello, caps and the first state, all answered before the first page is drawn, so it starts as with demo */
     char hello[64];
-    snprintf(hello, sizeof hello, "%s\ncaps\n%s", s->proto, s == &play ? "now\n" : s == &sys ? "battery\njack\n" : "status\n");
+    snprintf(hello, sizeof hello, "%s\ncaps\n%s", s->proto, s == &play ? "now\n" : s == &sys ? "battery\njack\nscreen\n" : "status\n");
     if (send_raw(s, hello, strlen(hello))) return -1;
-    s->outstanding = s == &sys ? 4 : 3, s->now_wait = s == &play;
+    s->outstanding = s == &sys ? 5 : 3, s->now_wait = s == &play;
     for (uint64_t end = t + 500000u; s->fd >= 0 && s->outstanding && mono_us() < end;) {
         struct pollfd p = { s->fd, POLLIN, 0 };
         if (poll(&p, 1, (int)((end - mono_us()) / 1000u) + 1) > 0) take(s);
@@ -209,9 +213,14 @@ static void play_line(char *line) {
     }
 }
 
-/* Q2SYS/1: the battery's line (an answer or a watch event alike) and the jacks' (asked again at a plug or an unplug) */
+/* Q2SYS/1: the battery's line (an answer or a watch event alike), the jacks' (asked again at a plug or an unplug) and
+ * the screen's (`screen`'s answer and the watch's events have the same words) */
 static void sys_line(char *line) {
     if (common(&sys, line)) return;
+    if (!strcmp(line, "screen on") || !strcmp(line, "screen off")) {
+        sys_lit = line[8] == 'n';
+        return;
+    }
     if (!strncmp(line, "battery ", 8)) snprintf(sys_battery, sizeof sys_battery, "%s", line);
     else if (!strncmp(line, "jack po=", 8)) snprintf(sys_jack, sizeof sys_jack, "%s", line);
     else if (!strncmp(line, "jack ", 5)) command(&sys, "jack");
@@ -256,6 +265,15 @@ int api_told(char *out, size_t room) {
              picks[pick >= 0 && pick < 6 ? pick : 0], num(sys_battery, "cable", 0) == 1, config_int("SYSSET", "LIGHTNESS", 50),
              pl.live ? pl.volume : 0, config_int("PLAYSET", "MAXVOLUME", 100));
     return 1;
+}
+
+/* whether Q2SYS/1 says the screen is dark: 1 dark, 0 lit, -1 no word from it (off Vamp OS, or not connected) */
+int api_screen_dark(void) { return api_vamp && sys.fd >= 0 && sys_lit >= 0 ? !sys_lit : -1; }
+
+/* a command to Q2SYS/1 (connected first if it is not); 0 sent */
+int api_sys_send(const char *verb) {
+    if (!api_vamp || (sys.fd < 0 && connect_to(&sys))) return -1;
+    return command(&sys, verb);
 }
 
 void api_open(void) {
