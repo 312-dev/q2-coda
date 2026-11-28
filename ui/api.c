@@ -13,8 +13,9 @@
  * and Control Center's states, which demo and q2gate write to /tmp/q2ui.status: api_told composes the same text from
  * them and config.ini, by q2gate's rules, and ui/status.c reads it in that file's place. Q2SYS/1's `screen` and its
  * `screen on`/`screen off` events say whether the screen is dark (api_screen_dark, for ui/ui.c ui_dark): the Q2 has
- * no backlight device to read, q2sysd lights it through stock's PWM. A key pressed dark is sent on as `screen on`
- * (api_sys_send), as q2sysd itself wakes only at the power key.
+ * no backlight device to read, q2sysd lights it through stock's PWM. Centre is the power key (116 on md-gpio-keys):
+ * q2sysd lights a dark screen at its release and powers off at a 3 s hold, and leaves a lit press to q2ui; any other
+ * key pressed dark is sent on as `screen on`, and Now Playing's screen off as `screen off` (api_screen).
  *
  * A service that goes away (runsv restarts it) is connected to again at the next verb or the next change of the now
  * file, at most once a second. Everything runs in the loop's thread: the socket is ui_watch'd. */
@@ -269,6 +270,10 @@ int api_told(char *out, size_t room) {
 
 /* whether Q2SYS/1 says the screen is dark: 1 dark, 0 lit, -1 no word from it (off Vamp OS, or not connected) */
 int api_screen_dark(void) { return api_vamp && sys.fd >= 0 && sys_lit >= 0 ? !sys_lit : -1; }
+
+/* the screen lit (on 1) or dark (on 0) by Q2SYS/1: a question's wake (ui/notice.c), Now Playing's screen off; 0 sent,
+ * -1 off Vamp OS (demo's pipe is the caller's then) */
+int api_screen(int on) { return api_sys_send(on ? "screen on" : "screen off"); }
 
 /* a command to Q2SYS/1 (connected first if it is not); 0 sent */
 int api_sys_send(const char *verb) {

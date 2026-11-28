@@ -631,6 +631,7 @@ def pages(binary, work):
     good &= wireless(binary, work, home)
     good &= wifi_networks(binary, work, home)
     good &= bt_devices(binary, work, home)
+    good &= danger_card(binary, work, home)
     good &= clicks(binary, work)
     good &= comebacks(binary, work, home)
     good &= general(binary, work, home)
@@ -972,7 +973,7 @@ def bt_devices(binary, work, home):
     # Phones' page: Disconnect; the found one; Car's page: Forget; then the found one selected as demo's new list comes
     lines = to + ['rows @rows.txt', 'tick 1', 'rest', 'key centre', 'rest', 'rows @phones.txt', 'key centre', 'rest',
                   'tick 2', 'rest', 'key centre', 'rest', 'tick -1', 'rest', 'key centre', 'rest', 'rows @car.txt',
-                  'tick 1', 'rest', 'key centre', 'rest', 'tick 1', 'rest',
+                  'tick 1', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest', 'tick 1', 'rest',
                   f'btdevices {d/"later"}', 'rest', 'rows @later.txt', 'key centre', 'rest', 'rows @again.txt']
     _, _, _, (_, _, out), said = script(binary, work, 60, lines, *home, '--told', d/'told', '--bt-devices', d/'devs',
                                         queue=True, ctl=True)
@@ -986,12 +987,69 @@ def bt_devices(binary, work, home):
     good &= check("a connected device's page offers Disconnect and Forget, a paired one's Connect",
                   rows('phones.txt') == ['Disconnect', 'Forget This Device'] and
                   rows('car.txt') == ['Connect', 'Forget This Device'], f"{rows('phones.txt')} {rows('car.txt')}")
-    good &= check('the page scans as it opens; Disconnect, a found device and Forget go down the pipe by MAC',
+    good &= check('the page scans as it opens; Disconnect, a found device and Forget (asked, then Forget Device) go down '
+                  'the pipe by MAC',
                   said[:4] == ['btscan', 'btlink AA:BB:CC:DD:EE:01', 'btlink AA:BB:CC:DD:EE:03',
                                'btforget AA:BB:CC:DD:EE:02'], repr(said))
     good &= check('a new list from demo is shown and keeps the selection on its device (moved up into My Devices)',
                   rows('later.txt')[:4] == ['Bluetooth', 'My Devices', 'Fixture Phones\tNot Connected', 'Fixture Back\\sl']
                   and rows('again.txt') == ['Disconnect', 'Forget This Device'], f"{rows('later.txt')} {rows('again.txt')}")
+    return good
+
+
+TRASH = (0x12, 0x34, 0x56)  # the card's trash glyph, made up here as one colour (tools/art.py cardtrash_d and _l)
+
+
+def danger_card(binary, work, home):
+    """Forget This Device asks first (ui/page_bluetooth.c, demo's bt_detail.c forget_ask), on the confirmation card's
+    destructive kind (ui/notice.c, docs/oled-design.md#confirmation-card, the owner's ruling 2026-11-28): it opens on
+    Cancel, so Centre at once forgets nothing; the verb has the trash before it whether lit or not and does not move;
+    unlit the verb is Negative (#FF453A, #D70015 on Light's white card), lit it sits on a gray platter (#3A3A3C, Light
+    #E5E5EA) in Text Primary, never the accent. Before/after PNGs with Q2UI_KEEP."""
+    good = True
+    car = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest',  # Settings > Bluetooth
+           'tick 2', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest']  # Car's page, Forget This Device
+    for half, light, negative, platter, primary in (('dark', 0, (0xff, 0x45, 0x3a), (0x3a, 0x3a, 0x3c), (255, 255, 255)),
+                                                     ('light', 1, (0xd7, 0x00, 0x15), (0xe5, 0xe5, 0xea), (0, 0, 0))):
+        def before(d, light=light):
+            (d/'told').write_text('bton=1\n')
+            (d/'devs').write_text(DEVICES)
+            (d/'config.ini').write_text(f'[IPOD]\nLIGHT={light}\n')
+            for k in 'dl':
+                png(d/f'oled_cardtrash_{k}.png', 18, 18, TRASH)
+        lines = car + ['shot @ask.ppm', 'tick 1', 'rest', 'shot @lit.ppm', 'tick -1', 'rest', 'key centre', 'rest', 'rows @after.txt']
+        _, pics, _, (_, _, out), said = script(binary, work, 60, lines, *home, '--told', '@told', '--bt-devices', '@devs',
+                                               queue=True, ctl=True, before=before)
+        ask, lit = pics['ask'], pics['lit']
+        if os.environ.get('Q2UI_KEEP'):
+            for name, pic in (('ask', ask), ('lit', lit)):
+                pathlib.Path(f"{os.environ['Q2UI_KEEP']}/danger-{half}-{name}.ppm").write_bytes(b'P6\n%d %d\n255\n' % (W, H) + pic.rgb)
+        cancel = [y for y in range(44, 302) if ask.at(55, y) == ACCENT]
+        top = cancel[-1] + 1 if cancel else 0  # the verb's row is the 32 px under Cancel's bar
+
+        def row(pic):
+            return {pic.at(x, y) for y in range(top + 2, top + 30) for x in range(60, 316)}
+
+        def inked(colours, ink):  # a glyph's core in ink: text's edges blend into the ground, its cores do not
+            return any(sum(abs(a - b) for a, b in zip(c, ink)) <= 24 for c in colours)
+
+        def trash_x(pic):
+            xs = [x for x in range(60, 316) if sum(abs(a - b) for a, b in zip(pic.at(x, top + 16), TRASH)) <= 3]  # blend rounding
+            return (xs[0], xs[-1]) if xs else None
+        unlit, lit_row = row(ask), row(lit)
+        good &= check(f'({half}) the card opens on Cancel, lit in the accent, the verb under it unlit',
+                      len(cancel) >= 28 and ACCENT not in unlit, f'{len(cancel)} accent rows')
+        good &= check(f'({half}) unlit, the verb is Negative {negative} after the trash', inked(unlit, negative) and trash_x(ask) is not None,
+                      f'negative {inked(unlit, negative)}, trash {trash_x(ask)}')
+        good &= check(f'({half}) lit, a gray platter {platter} and the verb in Text Primary, no accent and no Negative ink',
+                      lit.at(55, top + 16) == platter and inked(lit_row, primary) and ACCENT not in lit_row
+                      and not inked(lit_row, negative),
+                      f'platter {lit.at(55, top + 16)}, primary {inked(lit_row, primary)}, accent {ACCENT in lit_row}')
+        good &= check(f'({half}) the trash shows lit and unlit in the same place', trash_x(ask) == trash_x(lit) and trash_x(lit) is not None,
+                      f'{trash_x(ask)} {trash_x(lit)}')
+        after = (out/'after.txt').read_text().splitlines() if (out/'after.txt').exists() else []
+        good &= check(f'({half}) Cancel forgets nothing and the device page stays', not any('btforget' in x for x in said)
+                      and after == ['Connect', 'Forget This Device'], f'{said} {after}')
     return good
 
 
@@ -2877,14 +2935,16 @@ def api_status(binary, work):
 def screen_dark(binary, work):
     """The Q2 has no backlight device (its light is stock's PWM), so the screen's state is its owner's word: Q2SYS/1's
     screen on Vamp OS, demo's dark= in its status file otherwise. Dark, a press only wakes: no tick moves, Centre plays
-    nothing, and on Vamp OS a key other than Centre (the power key, q2sysd's own) asks Q2SYS/1 for `screen on`; lit
-    again, the same press acts."""
+    nothing, and on Vamp OS a key other than Centre (116, the power key: q2sysd lights at its release dark) asks Q2SYS/1
+    for `screen on`; lit again, the same press acts. Lit on Vamp OS, Now Playing's Centre hold asks `screen off`, a Centre
+    held toward q2sysd's 3 s power off selects nothing at its release, and 116 from the other two devices that send it
+    (event0 the PMIC's key, event2 the touch panel's dark double tap) does nothing: Centre is read from event1 alone."""
     good = True
 
     def start(before):
         d = folder(work, 40)
         (d/'input').mkdir()
-        for k in (1, 2, 3):
+        for k in (0, 1, 2, 3):
             os.mkfifo(d/'input'/f'event{k}')
         os.mkfifo(d/'cmdq')
         return before(d), d
@@ -2893,7 +2953,7 @@ def screen_dark(binary, work):
     def vamp(d):
         (d/'vamp').mkdir()
         return Service(d/'vamp/sys.sock', 'Q2SYS/1', {'caps': [SYS_CAPS], 'battery': [SYS_BATTERY], 'jack': ['jack po=0 bal=0'],
-                                                       'screen': ['screen off'], 'screen on': ['ok', 'screen on']})
+                                                       'screen': ['screen off'], 'screen on': [['ok'], ['ok', 'screen on']]})
     sys_svc, d = start(vamp)
     r = Run(binary, work, 40, '--api-dir', d/'vamp', '--api', 'auto', at=d)
     try:
@@ -2902,6 +2962,13 @@ def screen_dark(binary, work):
         r.key(KEY_CENTRE)
         time.sleep(0.6)
         quiet, played, asked = r.rest()['ticks'], r.sent(), [x for x in sys_svc.lines if x == 'screen on']
+        # a question asked dark lights the screen through Q2SYS/1 (q2sysd answers ok and, this once, stays dark)
+        c = Client(d/'ui.sock')
+        c.ask('ask q-1 Title Body Yes')
+        time.sleep(0.5)
+        question = [x for x in sys_svc.lines if x == 'screen on']
+        c.ask('withdraw q-1'), c.line()
+        c.close()
         r.key(KEY_RETURN)
         time.sleep(0.8)
         woke = [x for x in sys_svc.lines if x == 'screen on']
@@ -2911,8 +2978,32 @@ def screen_dark(binary, work):
         lit, played_lit = r.rest()['ticks'], r.sent()
         good &= check('On Vamp OS with Q2SYS/1 saying the screen is off, the wheel and Centre do nothing and Centre asks '
                       'nothing (the power key is q2sysd\'s)', quiet == 0 and played == [] and asked == [], f'{quiet} ticks, {played}, {asked}')
-        good &= check('Return pressed dark asks Q2SYS/1 for screen on, once', woke == ['screen on'], sys_svc.lines)
+        good &= check('A question asked dark asks Q2SYS/1 for screen on', question == ['screen on'], sys_svc.lines)
+        good &= check('Return pressed dark asks Q2SYS/1 for screen on, once', woke == ['screen on'] * 2, sys_svc.lines)
         good &= check('Lit again by its event, the wheel moves and Centre plays', lit == 2 and len(played_lit) == 1, f'{lit} ticks, {played_lit}')
+        # Now Playing (the play opened it). Centre held toward the power off (q2sysd's, at 3 s): nothing at its release,
+        # where a release taken would be Now Playing's hold, the screen off. Then held 450 ms: Q2SYS/1's screen off
+        r.hold(KEY_CENTRE, 3.2)
+        time.sleep(0.4)
+        held = r.sent() + [x for x in sys_svc.lines if x == 'screen off']
+        r.hold(KEY_CENTRE, 0.45)
+        time.sleep(0.4)
+        good &= check("Now Playing's Centre hold asks Q2SYS/1 for screen off", 'screen off' in sys_svc.lines, sys_svc.lines[-3:])
+        r.key(KEY_RETURN)
+        time.sleep(0.8)
+        r.sent()
+        # 116 from the PMIC's key (event0, axp2101-pek) and the touch panel's dark double tap (event2, hyn_ts): q2ui reads
+        # Centre from md-gpio-keys (event1) alone, so neither selects, and one press seen on both counts once
+        other = [os.open(d/'input/event0', os.O_RDWR), os.open(d/'input/event2', os.O_RDWR)]
+        for fd in other:
+            os.write(fd, event(EV_KEY, KEY_CENTRE, 1) + event(EV_SYN, 0, 0) + event(EV_KEY, KEY_CENTRE, 0) + event(EV_SYN, 0, 0))
+        time.sleep(0.6)
+        others = r.sent()
+        for fd in other:
+            os.close(fd)
+        good &= check('Lit, Centre held 3.2 s on Now Playing does nothing at its release (no screen off, no seek), and 116 on '
+                      'event0 (axp2101-pek) or event2 (hyn_ts) plays nothing on Songs', held == [] and
+                      not any(' play ' in f' {x} ' for x in others), f'{held} {others}')
     finally:
         r.proc.kill(), r.proc.wait(timeout=5), os.close(r.queue), sys_svc.close()
 
@@ -3311,6 +3402,8 @@ def main():
             good &= light_default(binary, work, ('--page', 'home'))
         if not only or 'api' in only:
             good &= api_play(binary, work) & api_status(binary, work)
+        if 'danger' in only:  # the danger card alone ('pages' runs it too)
+            good &= danger_card(binary, work, ('--page', 'home'))
         if not only or 'dark' in only:
             good &= screen_dark(binary, work)
         if not only or 'notices' in only:

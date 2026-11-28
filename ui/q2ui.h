@@ -331,6 +331,8 @@ int notice_event(const input_t *e); /* 1: the card took it */
 void notice_step(void);
 void notice_draw(rect_t r);         /* over the page and the status row */
 void notice_toast(const char *text); /* q2ui's own toast, queued as a connection's */
+int notice_ask_local(const char *title, const char *body, const char *const *choices, int n, int initial, int danger,
+                     void (*done)(int n)); /* q2ui's own question: done told the choice from 1, 0 none; -1 full */
 int notice_up(void);                /* a question is on the card */
 int notice_trace(char *out, size_t room); /* "notice card=ID lit=N level=X toast=on|leaving|- waiting=N"; 0 with none up */
 void notice_stats(char *out, size_t room); /* the stats file's "card", "card_from", "toast", "toasts_waiting" */
@@ -543,6 +545,7 @@ int api_play_live(void);                              /* connected to Q2PLAY/1 *
 void api_wait(unsigned ms);                           /* a script's wait for every answer, up to ms */
 int api_screen_dark(void);            /* Q2SYS/1's screen: 1 dark, 0 lit, -1 no word (off Vamp OS) */
 int api_sys_send(const char *verb);   /* a command to Q2SYS/1 (`screen on`); 0 sent */
+int api_screen(int on);               /* Q2SYS/1 `screen on` or `screen off`; 0 sent, -1 off Vamp OS */
 int api_told(char *out, size_t room); /* the status row's states from Q2SYS/1, Q2BT/1 and Q2NET/1 as /tmp/q2ui.status has them; 0 off Vamp OS */
 
 /* ---- player.c: the player, through demo while demo owns it ---- */

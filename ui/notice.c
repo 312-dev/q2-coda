@@ -19,8 +19,13 @@
  * sent while a question is on the card waits for it to go. The
  * card names who asked: the app whose package user the caller's uid is (the apps file q2pkgd
  * keeps, the app's own q2app name=), or "Vamp" for the system's own uids, so an app cannot pose as
- * the system. An ask while the screen is dark lights it (ui_wake: today down demo's pipe, "wake");
+ * the system. An ask while the screen is dark lights it (notice_wake: Q2SYS/1 `screen on` on Vamp
+ * OS, else "wake" down demo's pipe);
  * a toast never does.
+ *
+ * q2ui asks its own questions on the same card (notice_ask_local: Forget This Device), queued with the
+ * rest; one may be destructive (docs/oled-design.md#confirmation-card): it opens on Cancel, and its verb
+ * has the trash before it in Negative, lit on a gray platter with the verb in Text Primary.
  *
  * Everything here runs in the loop's one thread: the socket and its connections are ui_watch'd,
  * read without waiting, and a command changes state like an input does (the card's motion is
@@ -70,6 +75,9 @@
 #define ANSWER_H 32
 #define PAD_FOOT 8
 #define BAR_INSET 8
+#define DANGER_TRASH 18         /* the destructive verb's trash (tools/art.py CARD_TRASH_PX, oled_cardtrash_d/_l) */
+#define DANGER_GAP 8            /* its right to the verb */
+#define DANGER_SEL_L 0xe5e5ea   /* the lit platter in Light (Dark's is Off, RGB_OFF) */
 #define IN_MS 200
 #define OUT_MS 120
 /* the toast (docs/oled-design.md#dialogs-and-toasts) */
@@ -104,6 +112,8 @@ typedef struct {
     unsigned gen, serial;
     char id[ID_MAX + 1], title[TITLE_MAX + 1], body[BODY_MAX + 1], choice[3][CHOICE_MAX + 1], from[48];
     int n;
+    int initial, danger;   /* the answer lit as it opens; the destructive one, -1 none (q2ui's own asks) */
+    void (*done)(int n);   /* q2ui's own ask's answer: the choice from 1, or 0 (Return, dark, the timeout, gone) */
 } ask_t;
 static ask_t asks[ASKS];
 static int n_asks;
@@ -272,7 +282,7 @@ static float card_y(void) {
 
 static void card_show(void) {
     card.a = asks[0];
-    card.on = 1, card.leaving = 0, card.sel = 0, card.made = 0, card.lit_seen = 0, card.pressed = 0, card.told = 0;
+    card.on = 1, card.leaving = 0, card.sel = card.a.initial, card.made = 0, card.lit_seen = 0, card.pressed = 0, card.told = 0;
     card.changed_at = ui_stats.frames;
     card.t0 = ui_time();
     card.until = card.t0 + (uint64_t)TIMEOUT_S * 1000000u;
@@ -293,10 +303,12 @@ static void ask_drop(int i) {
 /* the question i is over: told its answer (when its connection is still the one that asked), off the card */
 static void ask_end(int i, const char *answer) {
     ask_t *a = &asks[i];
-    if (answer && (a->client < 0 || (cl[a->client].fd >= 0 && cl[a->client].gen == a->gen)))
+    void (*done)(int) = a->done;
+    if (!done && answer && (a->client < 0 || (cl[a->client].fd >= 0 && cl[a->client].gen == a->gen)))
         say(a->client, "answer %s %s", a->id, answer);
     int shown = card.on && !card.leaving && card.a.serial == a->serial;
     ask_drop(i);
+    if (done) done(answer ? atoi(answer) : 0); /* "gone" reads 0 */
     if (shown) card.leaving = 1, card.t0 = ui_time(), ui_mark_all(), ui_again();
     changed();
 }
@@ -356,7 +368,7 @@ static void command(int c, char *line) {
         for (int i = 0; i < n_asks; ++i)
             if (asks[i].client == c && (c < 0 || asks[i].gen == cl[c].gen) && !strcmp(asks[i].id, w[1])) REPLY(c, "err id");
         if (n_asks == ASKS) REPLY(c, "err busy");
-        ask_t a = { .client = c, .gen = c < 0 ? 0 : cl[c].gen, .serial = ++serials, .n = n - 4 };
+        ask_t a = { .client = c, .gen = c < 0 ? 0 : cl[c].gen, .serial = ++serials, .n = n - 4, .danger = -1 };
         snprintf(a.id, sizeof a.id, "%s", w[1]);
         snprintf(a.from, sizeof a.from, "%s", c < 0 ? "Vamp" : cl[c].from);
         if (decode(w[2], a.title, sizeof a.title) || decode(w[3], a.body, sizeof a.body)) REPLY(c, "err text");
@@ -383,6 +395,25 @@ static void command(int c, char *line) {
         REPLY(c, "front %s", front);
     }
     say(c, "err %s", w[0]);
+}
+
+/* q2ui's own question, on the card as a connection's would be (queued, its card naming "Vamp"): title,
+ * body and n answers as they read, the one lit as it opens, the destructive one (-1 none), and done
+ * told the answer. 0 asked, -1 with ASKS waiting. */
+int notice_ask_local(const char *title, const char *body, const char *const *choices, int n, int initial, int danger,
+                     void (*done)(int n)) {
+    if (n_asks == ASKS || n < 1 || n > 3) return -1;
+    ask_t a = { .client = -1, .serial = ++serials, .n = n, .initial = initial >= 0 && initial < n ? initial : 0,
+                .danger = danger, .done = done };
+    snprintf(a.id, sizeof a.id, "q2ui-%u", a.serial);
+    snprintf(a.from, sizeof a.from, "Vamp");
+    snprintf(a.title, sizeof a.title, "%s", title);
+    snprintf(a.body, sizeof a.body, "%s", body);
+    for (int k = 0; k < n; ++k) snprintf(a.choice[k], sizeof a.choice[k], "%s", choices[k]);
+    asks[n_asks++] = a;
+    if (!card.on) card_show();
+    else changed();
+    return 0;
 }
 
 void notice_line(const char *text) {
@@ -606,10 +637,23 @@ static void card_draw_in(rect_t r) {
         run_draw(&card.body[k], SCREEN_W / 2.0f - card.body[k].w / 2, at, tok(TOK_SECONDARY), ink);
     at += ANSWER_GAP;
     for (int k = 0; k < card.a.n; ++k, at += ANSWER_H) {
-        int lit = k == card.sel;
-        if (lit) fill_round((rectf_t){ CARD_X + BAR_INSET, at, CARD_W - 2 * BAR_INSET, ANSWER_H }, 8, 0, RGB_ACCENT, a, 0);
-        run_draw(&card.answer[k], SCREEN_W / 2.0f - card.answer[k].w / 2, at + (ANSWER_H - TYPE(20)) / 2.0f,
-                 lit ? 0xffffff : tok(TOK_PRIMARY), ink);
+        int lit = k == card.sel, danger = k == card.a.danger;
+        rectf_t bar = { CARD_X + BAR_INSET, at, CARD_W - 2 * BAR_INSET, ANSWER_H };
+        float ty = at + (ANSWER_H - TYPE(20)) / 2.0f;
+        if (!danger) {
+            if (lit) fill_round(bar, 8, 0, RGB_ACCENT, a, 0);
+            run_draw(&card.answer[k], SCREEN_W / 2.0f - card.answer[k].w / 2, ty, lit ? 0xffffff : tok(TOK_PRIMARY), ink);
+            continue;
+        }
+        /* the destructive verb (demo's feedback.c danger_row): the trash and the verb centred together, unmoved as the
+         * selection moves; lit, a gray platter (Off, DANGER_SEL_L in Light) and the verb in Text Primary, else Negative */
+        if (lit) fill_round(bar, 8, 0, ui_light ? DANGER_SEL_L : RGB_OFF, a, 0);
+        float left = SCREEN_W / 2.0f - (DANGER_TRASH + DANGER_GAP + card.answer[k].w) / 2;
+        const image_t *trash = icon(ui_light ? "cardtrash_l." : "cardtrash_d.");
+        if (trash)
+            image_draw(trash, (rectf_t){ roundf(left), roundf(at + (ANSWER_H - (float)trash->h) / 2), (float)trash->w, (float)trash->h },
+                       0, 0, ink, -1);
+        run_draw(&card.answer[k], left + DANGER_TRASH + DANGER_GAP, ty, lit ? tok(TOK_PRIMARY) : tok(TOK_NEGATIVE), ink);
     }
 }
 
