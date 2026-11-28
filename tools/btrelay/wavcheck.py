@@ -45,7 +45,7 @@ def encode(channels, rate, bits, floating=False):
             body = array.array('i', ints)
         else:
             body = bytearray().join((v & 0xffffff).to_bytes(3, 'little') for v in ints)
-    if isinstance(body, array.array) and sys.byteorder == 'big':
+    if isinstance(body, array.array) and sys.byteorder == 'big':  # pragma: no cover
         body.byteswap()
     data = bytes(body)
     align = count * bits // 8
@@ -83,7 +83,7 @@ def read(data):
         flat = [v / 8388608 for v in ints]
     else:
         raw = array.array('f' if floating else 'h' if bits == 16 else 'i', body)
-        if sys.byteorder == 'big':
+        if sys.byteorder == 'big':  # pragma: no cover
             raw.byteswap()
         if floating:
             flat = list(raw)
@@ -105,6 +105,8 @@ def bits_used(w):
         if not mixed:
             return 0
         return w['bits'] - ((mixed & -mixed).bit_length() - 1)
+    if not any(v for ch in w['channels'] for v in ch):
+        return 0
     for bits in (16, 24):
         scale = float(1 << (bits - 1))
         if all((v * scale).is_integer() for ch in w['channels'] for v in ch):
@@ -153,7 +155,7 @@ def _tone(ch, rate):
     lobe = range(max(low, peak - 8), min(len(power), peak + 9))
     tone = sum(power[k] for k in lobe)
     rest = sum(power[low:]) - tone
-    if tone <= 0:
+    if tone <= 0:  # pragma: no cover  (check() only measures a window it found sound in)
         return 0.0, -200.0, 0.0
     hz = sum(k * power[k] for k in lobe) / tone * rate / n
     amplitude = math.sqrt(4 * tone / (n * sum(w * w for w in window)))
@@ -175,11 +177,11 @@ def _bandwidth(ch, rate):
     reference = middle[len(middle) // 2] / segments
     if reference < 1e-9:   # under -100 dBFS a bin: the section is silence
         return 0.0
-    for k in range(len(total) - 1, 0, -1):
+    def level(k):
         near = total[max(0, k - 4):k + 5]
-        if sum(near) / len(near) / segments >= reference / 16:
-            return k * hz
-    return 0.0
+        return sum(near) / len(near) / segments
+
+    return next((k * hz for k in range(len(total) - 1, 0, -1) if level(k) >= reference / 16), 0.0)
 
 
 def _rms(ch, start, size):

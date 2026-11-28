@@ -214,3 +214,90 @@ def test_the_command_line_checks_the_codec(tmp_path, capsys):
     assert out.stat().st_size == 100 * 5 * 119
     assert btsnoop.main([str(path), '--expect-codec', 'LDAC']) == 1
     assert 'expected LDAC' in capsys.readouterr().out
+
+
+def test_packets_that_are_not_part_of_any_stream_are_passed_over():
+    cap = Capture(2001)
+    cap.records.append(struct.pack('>IIIIQ', 2, 2, 12 << 16, 0, EPOCH + cap.us) + b'\0\0')   # btmon's own note
+    cap.record(False, 4, bytes([0x13, 5, 1, HANDLE, 0, 1, 0]))                               # an HCI event
+    cap.record(True, 2, struct.pack('<HH', HANDLE | 0x1000, 3) + b'abc')                     # a continuation of nothing
+    cap.acl(True, 1, struct.pack('<BBHHHHH', 4, 1, 8, 0x50, 0, 1, 0x02a0))                   # a Configure Request
+    cap.channel(True, 0x01, 0x44, 0x54)                                                      # SDP's channel
+    cap.acl(True, 0x54, bytes([6, 0, 1, 0, 0]))
+    cap.acl(True, 1, struct.pack('<BBHHH', 2, 2, 4, 0x19, 0x45))                             # AVDTP asked for, refused
+    cap.acl(False, 1, struct.pack('<BBHHHHH', 3, 2, 8, 0, 0x45, 4, 0))
+    cap.acl(True, 0x55, bytes([0x10, 1]))
+    r = btsnoop.report(cap.bytes())
+    assert (r['avdtp'], r['media'], r['avrcp'], r['hfp']) == ([], None, [], [])
+    h4 = Capture(1002)
+    h4.records.append(struct.pack('>IIIIQ', 0, 0, 0, 0, EPOCH + h4.us))                       # an empty record
+    assert btsnoop.report(h4.bytes())['media'] is None
+    with pytest.raises(ValueError, match='datalink 1003'):
+        btsnoop.report(b'btsnoop\0' + struct.pack('>II', 1, 1003))
+
+
+def test_other_avrcp_frames_and_rfcomms_other_shapes():
+    cap = Capture()
+    cap.channel(False, 0x17, 0x42, 0x52)
+    avc(cap, True, 0xd, vendor(0x31, bytes([0x0d, 50])), response=True)
+    avc(cap, False, 1, vendor(0x30, b''))
+    avc(cap, False, 0, bytes([0x48, 0x30, 0, 0]))        # a unit info command: not a key, not AVRCP's vendor PDU
+    avc(cap, True, 0xd, vendor(0x31, bytes([0x02]) + bytes(8)), response=True)
+    cap.acl(False, 0x42, bytes([0x04, 0x11]))            # the start of a fragmented message: not read
+    cap.channel(False, 0x03, 0x43, 0x53)
+    cap.acl(False, 0x43, bytes([0x0b, 0x3f, 0x01, 0x59]))                                    # SABM, no text
+    long_line = 'AT+CIND=' + '9' * 130
+    body = (long_line + '\r').encode()
+    cap.acl(False, 0x43, bytes([0x0b, 0xef, len(body) << 1 & 0xfe, len(body) >> 7]) + body + b'\x9a')
+    cap.acl(True, 0x53, bytes([0x09, 0xff, 4 << 1 | 1, 7]) + b'OK\r\n' + b'\x9a')           # with a credit octet
+    r = btsnoop.report(cap.bytes())
+    assert [e['what'] for e in r['avrcp']] == ['changed volume 50', 'status get play status', 'changed track']
+    assert r['hfp'] == [{'sent': False, 'line': long_line}, {'sent': True, 'line': 'OK'}]
+
+
+def test_each_codecs_frames_for_a_decoder():
+    def stream(kind, info, packet):
+        cap = Capture()
+        cap.channel(True, 0x19, 0x40, 0x50)
+        avdtp(cap, True, 1, 0, 3, bytes([1 << 2, 5 << 2, 1, 0]) + codec(kind, info))
+        avdtp(cap, False, 1, 2, 3)
+        cap.channel(True, 0x19, 0x41, 0x51)
+        for _ in range(2):
+            cap.us += 10_000
+            cap.acl(True, 0x51, packet)
+        return cap.bytes()
+
+    aptx = bytes(range(40))                                 # aptX has no RTP header: the packet is the frames
+    assert btsnoop.extract(stream(0xff, struct.pack('<IH', 0x4f, 1) + b'\x12', aptx)) == aptx * 2
+    assert btsnoop.report(stream(0xff, struct.pack('<IH', 0x4f, 1) + b'\x12', aptx))['media']['lost'] == 0
+    assert btsnoop.extract(stream(0xff, APTX_HD, rtp(0, b'hdframes'))) == b'hdframes' * 2
+    latm = bytes(300)
+    loas = btsnoop.extract(stream(2, bytes([0x80, 0x01, 0x04, 0x83, 0xe8, 0x00]), rtp(0, latm)))
+    assert loas == (bytes([0x56, 0xe1, 0x2c]) + latm) * 2   # the sync word 0x2b7 and a 13-bit length of 300
+    assert btsnoop.report(stream(1, b'\0\0\0\0', rtp(0, b'x' * 30)))['configured']['codec'] == 'MPEG-1,2 audio'
+
+
+def test_the_command_lines_other_outputs(tmp_path, capsys):
+    cap = Capture()
+    cap.channel(False, 0x19, 0x40, 0x50)
+    avdtp(cap, False, 1, 0, 3, bytes([1 << 2, 5 << 2, 1, 0]) + codec(2, bytes([0x80, 0x01, 0x04, 0x03, 0xe8, 0x00])))
+    avdtp(cap, True, 1, 2, 3)
+    cap.channel(False, 0x17, 0x42, 0x52)
+    avc(cap, False, 0, bytes([0x48, 0x7c, 0x44, 0]))
+    cap.channel(False, 0x03, 0x43, 0x53)
+    cap.acl(False, 0x43, bytes([0x0b, 0xef, 3 << 1 | 1]) + b'AT\r' + b'\x9a')
+    path = tmp_path / 'aac.snoop'
+    path.write_bytes(cap.bytes())
+    assert btsnoop.main([str(path)]) == 0
+    text = capsys.readouterr().out
+    assert 'configured: AAC 44100 Hz stereo, MPEG-2 LC, CBR up to 256000 bit/s (set by the peer)' in text
+    assert 'media: none' in text and 'peer key play pressed' in text and 'hfp   peer AT' in text
+    assert btsnoop.main([str(path), '--json']) == 0
+    assert '"codec": "AAC"' in capsys.readouterr().out
+    empty = tmp_path / 'empty.snoop'
+    empty.write_bytes(Capture().bytes())
+    assert btsnoop.main([str(empty), '--expect-codec', 'SBC']) == 1
+    out = capsys.readouterr().out
+    assert 'configured: none seen' in out and 'expected SBC, configured nothing' in out
+    with pytest.raises(ValueError, match='usage:'):
+        btsnoop.main([])

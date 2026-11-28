@@ -24,8 +24,8 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
   test/patch.py and test/fw; for a module whose only output is a pinned file in the image (`IMAGE_INPUTS`:
   iroh.py, uac1.py), test/build.py;
 - a file in a tools/ folder a rule knows (`TOOL_DIRS`) runs the tests that read that folder: tools/uac1_module/
-  the module's pin, build and tests, tools/iap_probe/ the probe's; a file in any other tools/ folder runs
-  everything, and tools/ci/ runs the CI tools' own tests;
+  the module's pin, build and tests, tools/iap_probe/ the probe's, tools/btrelay/ the Bluetooth relay's; a file
+  in any other tools/ folder runs everything, and tools/ci/ runs the CI tools' own tests;
 - a remote/ file a rule knows (`REMOTE`) runs the tests that read it: remote/iroh-sidecar/ the sidecar's pin and
   the build, remote/coda-rc.proto the protocol's tables; any other remote/ file runs everything;
 - a test file runs itself;
@@ -99,6 +99,9 @@ TOOL_DIRS = {
     # probe, which test/iap_probe.py builds and runs on the host; the shell and PowerShell scripts run on the
     # devices. Nothing here goes into an image.
     'iap_probe': ({'test_iap_tools.py'}, ('test/iap_probe.py',)),
+    # the Bluetooth relay (docs/bt-relay.md): host tools and a Windows helper for a Q2 on a desk. Nothing here
+    # goes into an image; btrelay.sh and win/ run on the Windows laptop alone and have no automated test.
+    'btrelay': ({'test_btrelay_snoop.py', 'test_btrelay_wav.py', 'test_btrelay_q2.py', 'test_vamp.py'}, ()),
 }
 # remote/ paths a rule knows (a file or a folder's prefix; any other remote/ file runs everything): (the test/unit
 # files that read them, the test/X.py suites that do). Nothing here is in source_sha256 or compiled into the payload.

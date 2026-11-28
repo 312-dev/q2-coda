@@ -157,3 +157,13 @@ def test_status_is_read_only():
 def test_usage():
     with pytest.raises(ValueError, match='usage: vamp bt'):
         run(Q2(), 'dance')
+
+
+def test_refusals_carry_the_q2s_words():
+    q2 = Q2([('GetManagedObjects', pcm_answer()), ('q2bt-codec', 'org.bluealsa.Error: codec not offered\nrc=1\n')])
+    status, said = run(q2, 'codec', 'LDAC')
+    assert status == 1 and 'LDAC refused: org.bluealsa.Error: codec not offered' in said
+    status, said = run(Q2([('hcidump -w', 'a capture is already running\nrc=1\n')]), 'snoop', 'start')
+    assert status == 1 and 'already running' in said and 'snoop install' not in said
+    with pytest.raises(ValueError, match='vamp bt snoop stop'):
+        q2side.main(Q2(), ['snoop', 'stop'], out=lambda _line: None)

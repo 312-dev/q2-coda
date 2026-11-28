@@ -170,6 +170,7 @@ vamp key centre; vamp wheel 3; vamp tap 187 160  # input: key, wheel, tap, swipe
 vamp prof 5 --build /tmp/q2-dev                  # demo's threads sampled, symbolized
 vamp state; vamp wake; vamp devices; vamp events 2 5; vamp reboot --wait
 vamp -t 192.168.1.40 shell id                    # another Q2 for one command (or VAMP_TARGET)
+vamp bt status; vamp bt codec LDAC; vamp bt play # the Bluetooth relay's Q2 side: docs/bt-relay.md#on-the-q2
 vamp pubkey                                      # this computer's adb_keys line
 ```
 

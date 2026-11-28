@@ -118,6 +118,9 @@ def test_a_capture_with_lead_in_and_no_signal():
     assert r['problems'] == [] and r['signal_at'] == pytest.approx(1.0 + btsignal.TONE_AT, abs=0.06)
     silent = wavcheck.check(wavcheck.read(wavcheck.encode([[0.0] * RATE * 3] * 2, RATE, 16)))
     assert silent['problems'] == ['no test tone found: nothing was received, or not the test signal']
+    assert silent['bits_used'] == 0
+    quiet = wavcheck.check(wavcheck.read(wavcheck.encode([[0.0] * RATE] * 2, RATE, 32, floating=True)))
+    assert quiet['bits_used'] == 0 and quiet['float']
 
 
 def test_not_a_wav_and_the_command_line(tmp_path, capsys):
@@ -130,3 +133,47 @@ def test_not_a_wav_and_the_command_line(tmp_path, capsys):
     bad.write_bytes(wavcheck.encode([[0.0] * 44100] * 2, 44100, 16))
     assert wavcheck.main([str(bad)]) == 1
     assert 'FAIL' in capsys.readouterr().out
+
+
+def test_other_containers_and_files_that_are_not_read():
+    left, right = floats()
+    wide = wavcheck.read(wavcheck.encode([left, right], RATE, 32))
+    assert wide['bits'] == 32 and wavcheck.check(wide)['bits_used'] == 32
+    grid24 = [[round(v * 8388608) / 8388608 for v in ch] for ch in (left, right)]
+    assert wavcheck.check(wavcheck.read(wavcheck.encode(grid24, RATE, 32, floating=True)))['bits_used'] == 24
+    plain = btsignal.wav(RATE, 16)
+    listed = plain[:12] + b'LIST' + struct.pack('<I', 3) + b'abc\0' + plain[12:]   # an odd chunk, padded, first
+    assert wavcheck.check(wavcheck.read(listed))['problems'] == []
+    with pytest.raises(ValueError, match='no fmt or data'):
+        wavcheck.read(plain[:36])
+    eight = bytearray(plain)
+    struct.pack_into('<H', eight, 34, 8)
+    with pytest.raises(ValueError, match='at 8 bits is not read'):
+        wavcheck.read(bytes(eight))
+    mono = wavcheck.check(wavcheck.read(wavcheck.encode([left], RATE, 16)))
+    assert mono['problems'] == ['one channel: the test signal is stereo']
+
+
+def test_a_recording_that_ends_early():
+    left, right = floats()
+    tone_only = [ch[:int(4.6 * RATE)] for ch in (left, right)]          # stopped before the noise
+    r = wavcheck.check(wavcheck.read(wavcheck.encode(tone_only, RATE, 16)))
+    assert r['bandwidth_hz'] == 0.0 and r['problems'] == []
+    no_noise = [ch[:int(4.6 * RATE)] + [0.0] * (4 * RATE) for ch in (left, right)]
+    assert wavcheck.check(wavcheck.read(wavcheck.encode(no_noise, RATE, 16)))['bandwidth_hz'] == 0.0
+    lost_tail = [ch[:int(3.0 * RATE)] + [0.0] * len(ch[int(3.0 * RATE):]) for ch in (left, right)]
+    r = wavcheck.check(wavcheck.read(wavcheck.encode(lost_tail, RATE, 16)))
+    at, length = r['dropouts'][-1]
+    assert at == pytest.approx(3.0, abs=0.01) and length == pytest.approx(1.47, abs=0.02)
+
+
+def test_the_command_lines_options(tmp_path, capsys):
+    path = tmp_path / 's.wav'
+    path.write_bytes(btsignal.wav(RATE, 16))
+    assert wavcheck.main([str(path), '--min-sinad', '120']) == 1
+    assert 'SINAD' in capsys.readouterr().out
+    assert wavcheck.main([str(path), '--json', '--min-bandwidth', '20000']) == 0
+    assert '"bits_used": 16' in capsys.readouterr().out
+    for main in (wavcheck.main, btsignal.main):
+        with pytest.raises(ValueError, match='usage:'):
+            main([])
