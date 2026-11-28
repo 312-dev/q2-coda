@@ -3266,9 +3266,27 @@ static void now_text(char *out, size_t room, const char *sep, int encode) {
     field(t, sizeof t, q.title, encode), field(a, sizeof a, q.artist, encode), field(b, sizeof b, q.album, encode);
     int k = snprintf(out, room, "title=%s%sartist=%s%salbum=%s%sstate=%d%spos=%d%slen=%d%svolume=%d%sid=%d", t, sep, a, sep, b,
                      sep, q.state, sep, encode ? q.pos_ms / 1000 : q.pos_ms, sep, q.len_s, sep, q.volume, sep, id);
-    /* Q2PLAY/1's: the play mode as the now file has it after these (now_write) */
-    if (encode && k > 0 && (size_t)k < room)
-        snprintf(out + k, room - (size_t)k, " shuffle=%d repeat=%d", q.shuffle != 0 || pm_shuffle(), pm_repeat());
+    /* Q2PLAY/1's: the play mode as the now file has it after these (now_write), then Now Playing's Retry and Skip
+     * (patch/np_stream.c): wait, the queue waits for an app's song (docs/playd.md#the-answer-as-it-grows); down, that
+     * app's state says server=down */
+    if (encode && k > 0 && (size_t)k < room) {
+        int wait = mq.on && mq.waiting && !src.on;
+        snprintf(out + k, room - (size_t)k, " shuffle=%d repeat=%d wait=%d down=%d", q.shuffle != 0 || pm_shuffle(),
+                 pm_repeat(), wait, mq.on && *mq.app && server_down(mq.app));
+    }
+}
+
+/* Retry (patch/np_stream.c np_stream_retry): the app whose song the queue waits for tries it again now, told by
+ * /tmp/q2-<id>.retry, written beside and renamed. -1 when nothing is waited for or it could not be written. */
+static int stream_retry(void) {
+    char rel[96], tmp[104];
+    if (!mq.on || !mq.waiting || src.on || !*mq.app) return -1;
+    snprintf(rel, sizeof rel, "/tmp/q2-%s.retry", mq.app);
+    snprintf(tmp, sizeof tmp, "%s.tmp", rel);
+    FILE *f = fopen(path(tmp), "wb");
+    int ok = f && fputs("1\n", f) >= 0;
+    if (!f || fclose(f) || !ok || rename(path(tmp), path(rel))) return unlink(path(tmp)), -1;
+    return 0;
 }
 
 /* Car Remote's view of the queue (coda_rc_shim.c cr_queue, read by coda_rc_lib.c's GetQueue): /tmp/coda-rc.queue,
@@ -3535,7 +3553,9 @@ static void client_line(struct client *c, char *line) {
         return;
     }
     if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode speed");
+        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode speed retry");
+    } else if (!strcmp(line, "retry")) {
+        client_say(c, stream_retry() ? "err retry" : "ok");
     } else if (!strncmp(line, "source ", 7)) {
         client_say(c, source_take((int)(c - cl), line + 7) ? "err source" : "ok");
     } else if (!strcmp(line, "focus")) {

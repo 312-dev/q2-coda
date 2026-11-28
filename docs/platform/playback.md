@@ -12,6 +12,7 @@
 | `seek S` | `ok`, to S seconds |
 | `volume V` | `ok` for 0 to 100 (capped at the Q2's Max Volume, saved), else `err volume V` |
 | `stop` | `ok`; nothing plays |
+| `retry` | `ok`: the app whose song the queue waits for (`wait=1`) tries it again now, told in its `/tmp/q2-<id>.retry` as today's Now Playing's Retry tells it. `err retry` with nothing waited for. Skip is `next`, which keeps waiting on that song as today's Next does |
 | `now` | a `now` line |
 | `watch` | `ok`; then a `now` line at each change, at most twice a second |
 | `source URL [title=T] [artist=A] [album=B]` | `ok`, or `err source` for a URL that is not `http://` or `https://` or holds a byte below `0x21`, `\|` or `0x7f` once decoded. Plays the URL with [audio focus](#audio-focus), the queue put aside; the URL and the fields are free text, percent-encoded (a URL's `=` and `%` too), a field this service does not know passed over |
@@ -28,7 +29,7 @@
 | `eq on`, `eq off` | `ok`: the EQ switch, Control Center's EQ circle ([q2playd: The EQ switch](../playd.md#the-eq-switch)). `on` plays the parametric EQ, or keeps an EQ already playing; `off` plays none. `err eq on` or `err eq off` when the state cannot be saved |
 | `speed` | `speed mode=M folder=F`: the song playing's play speed, M 0 normal, 1 1.25, 2 1.5 and 3 2 times; F 1 when its folder keeps it, 0 for a song with no folder (a stream). `speed mode=0 folder=0` with nothing playing |
 | `speed M` | `ok`: the song playing at M (0 to 3) from now on, and every song in its folder from their start, as today's Vamp keeps it ([q2playd: Speed](../playd.md#speed)); a song with no folder takes it for itself alone. `err speed M` for another M, with nothing playing, or when the folder's speed cannot be saved |
-| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode speed` |
+| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode speed retry` |
 
 ## Ratings
 
@@ -77,22 +78,24 @@ What plays is the queue's or one source's. A `source` takes the player for its c
 
 The holder is told, by a line between answers, when it loses the player for any reason but its own `focus release`: `focus lost why=W`, W `end` (the URL played out), `error` (it did not open, or the player went away), `stop` (a `stop` from anyone) or `taken` (a `play` from anyone, or another connection's `source`). On `end`, `error` and `focus release`, and when the holder's connection closes, the queue comes back **paused** where it was put aside (stopped, if it was), and `resume` plays it from there: it never starts again on its own. On `stop` it comes back stopped at its song; on `taken` by a `play` it is dropped, and by another connection's `source` it stays put aside for that one.
 
-**`now`** is `now` and these fields, in this order: `title`, `artist`, `album` (free text, percent-encoded), `state` (0 stopped, 1 playing, 2 paused), `pos` (seconds), `len` (seconds, 0 until the player knows), `volume`, `id` (the song's library id, 0 for a song played from an app's list of paths), `shuffle` (1 while the queue plays shuffled), `repeat` (0 Off, 1 One, 2 All). A client reads the fields by name: more may follow. Song ids are [the library's](library.md): a card song's from `songtable`, a server song's from `servertable` (ids from `0x40000000`), which plays through its app ([q2playd: Server songs](../playd.md#server-songs)).
+**`now`** is `now` and these fields, in this order: `title`, `artist`, `album` (free text, percent-encoded), `state` (0 stopped, 1 playing, 2 paused), `pos` (seconds), `len` (seconds, 0 until the player knows), `volume`, `id` (the song's library id, 0 for a song played from an app's list of paths), `shuffle` (1 while the queue plays shuffled), `repeat` (0 Off, 1 One, 2 All), `wait` (1 while the queue waits for an app's song not there yet, [q2playd: The answer as it grows](../playd.md#the-answer-as-it-grows)), `down` (1 while the app of the list playing says its server is down). Now Playing shows Retry and Skip once a song has waited 10 s with `down` 1, as today's Vamp does (`patch/np_stream.c`). A client reads the fields by name: more may follow. Song ids are [the library's](library.md): a card song's from `songtable`, a server song's from `servertable` (ids from `0x40000000`), which plays through its app ([q2playd: Server songs](../playd.md#server-songs)).
 
 ```conformance
 > Q2PLAY/1
 < Q2PLAY/1 ok
 > caps
-< caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode speed
+< caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode speed retry
 > now
-< ~ now title= artist= album= state=0 pos=0 len=0 volume=\d+ id=0 shuffle=\d repeat=\d
+< ~ now title= artist= album= state=0 pos=0 len=0 volume=\d+ id=0 shuffle=\d repeat=\d wait=0 down=0
+> retry
+< err retry
 > play 1 0 3
 > 1
 > 2
 > 3
 < ok
 > now
-< ~ now title=Beta artist=Bob album=First state=1 pos=0 len=0 volume=\d+ id=2 shuffle=\d repeat=\d
+< ~ now title=Beta artist=Bob album=First state=1 pos=0 len=0 volume=\d+ id=2 shuffle=\d repeat=\d wait=\d down=\d
 > pause
 < ok
 > toggle
@@ -148,7 +151,7 @@ The holder is told, by a line between answers, when it loses the player for any 
 > stop
 <* ~ now .*
 < ok
-< ~ now title=\S* artist=\S* album=\S* state=0 pos=\d+ len=\d+ volume=30 id=\d+ shuffle=\d repeat=\d
+< ~ now title=\S* artist=\S* album=\S* state=0 pos=\d+ len=\d+ volume=30 id=\d+ shuffle=\d repeat=\d wait=\d down=\d
 > bogus
 < err bogus
 ```
@@ -170,7 +173,7 @@ A renderer plays a URL from a phone and gives the queue back (`=` in the URL enc
 > source http://192.168.1.20:8200/MediaItems/22.mp3?q%3D1 title=Delta artist=Dee album=Phone
 < ok
 > now
-< ~ now title=Delta artist=Dee album=Phone state=1 pos=0 len=0 volume=\d+ id=0 shuffle=\d repeat=\d
+< ~ now title=Delta artist=Dee album=Phone state=1 pos=0 len=0 volume=\d+ id=0 shuffle=\d repeat=\d wait=\d down=\d
 > focus
 < focus source=1 held=1
 > next
@@ -180,7 +183,7 @@ A renderer plays a URL from a phone and gives the queue back (`=` in the URL enc
 > focus release
 < ok
 > now
-< ~ now title=Alpha artist=Ann album=First state=2 pos=0 len=0 volume=\d+ id=1 shuffle=\d repeat=\d
+< ~ now title=Alpha artist=Ann album=First state=2 pos=0 len=0 volume=\d+ id=1 shuffle=\d repeat=\d wait=\d down=\d
 > focus release
 < err focus release
 ```

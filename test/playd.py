@@ -468,7 +468,7 @@ def test_q2play1_free_text_is_percent_encoded_and_cannot_forge_a_field(run):
     pl.pump()
     a.say('now')
     line = a.line()
-    assert '\n' not in line and line.count(' state=') == 1 and line.count('=') == 10
+    assert '\n' not in line and line.count(' state=') == 1 and line.count('=') == 12  # one per field
     got = fields(line)
     assert (got['title'], got['artist'], got['album']) == ('Cut state=2 id=9 50%\nsecond line', 'A "B" C', 'x=y')
     assert (got['state'], got['id']) == ('1', '6')
@@ -914,6 +914,45 @@ def test_next_before_the_next_song_lands_waits_for_it(run):
     land(root, two)
     pl.pump(1.0)
     assert pl.songs()[-1] == ('set-songurl', two)
+    sock.close()
+
+
+def test_retry_asks_the_app_of_the_song_waited_for_while_its_server_is_down(run):
+    """Now Playing's Retry and Skip (patch/np_stream.c): Q2PLAY/1's now says wait=1 while the queue waits for an app's
+    song and down=1 while that app says server=down; retry writes the app's /tmp/q2-<id>.retry as the firmware does;
+    Skip is next, which waits on the same song as the firmware's Next (addon_next_waits)."""
+    root, pl = run
+    sock = catalogue(root)
+    a = api(root)
+    a.say('retry')
+    assert a.line() == 'err retry', 'nothing waited for: refused'
+    play_list(root, [SERVER + 1, SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    one, two = '/mnt/mmc/.navi/stream/a/hi/x/Cloud One [s1].flac', '/mnt/mmc/.navi/stream/a/hi/x/Cloud Two [s2].flac'
+    land(root, one)
+    answer(root, one, two)
+    pl.pump(1.0)
+    a.say('now')
+    assert re.search(r' wait=0 down=0$', a.line()), 'playing a song that is there: not waiting'
+    a.say('next')
+    assert a.line() == 'ok'
+    pl.pump(0.5)
+    a.say('now')
+    assert re.search(r' wait=1 down=0$', a.line()), 'waiting for the next song, its server up'
+    (root/'tmp/q2-navi.state').write_text('server=down\n')
+    a.say('now')
+    assert re.search(r' wait=1 down=1$', a.line()), "... and the app's server down"
+    a.say('retry')
+    assert a.line() == 'ok'
+    assert (root/'tmp/q2-navi.retry').read_text() == '1\n', "the app's retry file, as np_stream_retry writes it"
+    assert not (root/'tmp/q2-navi.retry.tmp').exists(), 'written beside and renamed'
+    land(root, two)
+    pl.pump(1.0)
+    assert pl.songs()[-1] == ('set-songurl', two)
+    a.say('now')
+    assert re.search(r' wait=0 down=1$', a.line()), 'it landed: no longer waiting'
+    a.say('retry')
+    assert a.line() == 'err retry'
     sock.close()
 
 # ---- Download Ahead (docs/server-library.md#download-ahead-and-the-streaming-state, docs/playd.md#download-ahead) ----
@@ -1526,7 +1565,7 @@ def test_q2play_queue_next_and_last_take_their_ids_on_the_socket(run):
     assert a.line() == 'err queue', 'a source keeps its own queue'
 
 
-def test_q2play_mode_is_the_fifo_s_and_now_ends_with_shuffle_and_repeat(run):
+def test_q2play_mode_is_the_fifo_s_and_now_has_shuffle_and_repeat_after_the_id(run):
     """Q2PLAY/1 mode SHUFFLE REPEAT as the FIFO's (-1 leaves either), and now's shuffle= and repeat= as the now file's"""
     root, pl = run
     a = api(root)
@@ -1535,13 +1574,13 @@ def test_q2play_mode_is_the_fifo_s_and_now_ends_with_shuffle_and_repeat(run):
         a.say(str(i))
     assert a.line() == 'ok'
     a.say('now')
-    assert a.line().endswith(' id=1 shuffle=0 repeat=0')
+    assert ' id=1 shuffle=0 repeat=0 wait=' in a.line()
     for verb, want in (('mode -1 2', ' shuffle=0 repeat=2'), ('mode 1 -1', ' shuffle=1 repeat=2'), ('mode -1 1', ' shuffle=1 repeat=1')):
         a.say(verb)
         assert a.line() == 'ok'
         a.say('now')
         line = a.line()
-        assert line.endswith(want), (verb, line)
+        assert want + ' wait=' in line, (verb, line)
         n = now(root)
         assert ' shuffle=%s repeat=%s' % (n['shuffle'], n['repeat']) == want, (verb, n)
     assert ini(root).get('PLAYSET.PLAYMODE') == '1'
