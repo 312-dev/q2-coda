@@ -210,6 +210,29 @@ def static_qemu():
 # instead of a list is the reason the script cannot run here: it is skipped, with that reason printed.
 # tools/ci/test_ci.py checks that each script is in the table and that no row is for a script that is gone.
 SCRIPTS: dict[str, list[str] | str] = {
+    # VampOS's services on this machine (docs/vamp-os-base.md), each pytest under its own main
+    'test/api.py': [],  # Vamp API 1's transcripts, the conformance tests of the suites below
+    'test/apps.py': [],
+    'test/btd.py': [],
+    'test/carrd.py': [],
+    'test/dacloop.py': [],
+    'test/dlnad.py': [],
+    'test/gate.py': [],
+    'test/launch.py': [],  # the real q2pkgd and runsv
+    'test/libd.py': [],
+    'test/netd.py': [],
+    'test/perm.py': [],
+    'test/playd.py': [],
+    'test/q2vampos.py': [],
+    'test/scrobd.py': [],
+    'test/sendd.py': [],
+    'test/sysd.py': [],
+    'test/conformance.py': 'the transcript reader test/api.py and the suites import, with nothing to run',
+    # VampOS's image suites need a tools/vampos.py build (vampos.squashfs), not the firmware build {build} names
+    'test/os_image.py': 'needs a VampOS image (tools/vampos.py build --out DIR) and the stock ZIP: the VampOS sweep runs it',
+    'test/os_bt.py': 'needs a VampOS image (DIR/vampos.squashfs): the VampOS sweep runs it',
+    'test/card_e2e.py': 'needs a VampOS image and the stock ZIP: the VampOS sweep runs it',
+    'test/pkgd.py': 'needs a VampOS image and the stock ZIP: the VampOS sweep runs it',
     'test/adb.py': ['{build}'],
     'test/aic.py': ['{stockfs}'],
     'test/aic_build.py': ['{stockfs}'],  # no builds: it checks the guard, the module's ABI and its packaging

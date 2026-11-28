@@ -359,3 +359,7 @@ def test_no_q2_iroh_in_the_image_is_no_error(q2, tmp_path):
     q.port()
     time.sleep(2.5)
     assert 'iroh' not in (q.root/'q2carrd.log').read_text()
+
+
+if __name__ == '__main__':
+    sys.exit(pytest.main([__file__, '-q', '-p', 'no:cacheprovider']))
