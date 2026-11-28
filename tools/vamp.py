@@ -15,6 +15,8 @@ usage: vamp [-t TARGET] COMMAND [ARGS]
   log [LINES|-f|--clear]                demo's output
   key NAME [MS] | wheel N [--step-ms MS] | tap X Y | swipe X1 Y1 X2 Y2 [MS]
   state | wake | devices | events N [S] | reboot [--wait] | prof S [--all] [--build DIR]
+  bt status | discoverable | connect | disconnect | forget | codec | play | snoop
+                                        the Bluetooth relay's Q2 side (`vamp bt` lists them; docs/bt-relay.md)
   pubkey                                this computer's key, an adb_keys line
 
 TARGET (or VAMP_TARGET) is a name `find` lists, HOST or HOST:PORT; without either, the Q2 `connect`
@@ -959,6 +961,10 @@ def main(argv=None):  # pragma: no mutate block
         except q2flash.Refused as e:
             print(f'vamp: install refused: {e}', file=sys.stderr)
             return 1
+    if cmd == 'bt':
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / 'btrelay'))
+        import q2side
+        return q2side.main(dev, a, pull=lambda remote, local: pull(dev, remote, local))
     if cmd in Q2REMOTE_COMMANDS:
         if cmd == 'shot' and '--adb' in a:
             raise ValueError('vamp shot always goes over adb: leave out --adb')
