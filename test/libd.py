@@ -69,7 +69,8 @@ def song(path, seconds=1, **tags):
 def card(tmp_path):
     m = tmp_path/'mnt/mmc'
     song(m/'Music/Ann/First/01 Alpha.flac', title='Alpha', artist='Ann', album='First', track='1', date='2001', album_artist='Ann')
-    song(m/'Music/Bob/b.mp3', title='Beta', artist='Bob', album='Second', track='7/12')
+    song(m/'Music/Bob/b.mp3', title='Beta', artist='Bob', album='Second', track='7/12', lyrics='Line one\nLine two')
+    (m/'Music/Ann/First/01 Alpha.lrc').write_text('[ar:Ann]\n[00:01.00]<00:01.00>Hello <00:01.50>world\n[00:02.00][00:04.00]Again\n')
     song(m/'loose.wav')
     song(m/'.hidden/c.flac', title='Hidden')
     (m/'Music/notes.txt').write_text('not music')
@@ -412,6 +413,14 @@ def test_conformance_q2lib_every_command_is_on_the_page():
 @pytest.mark.parametrize('n', range(len(conformance.blocks('library.md'))))
 def test_conformance_q2lib(served, n):
     conformance.replay(served.sock, conformance.blocks('library.md')[n])
+
+
+def test_q2lib_lyrics_from_a_gb18030_sidecar_and_upper_case_one(served, card):
+    m = card/'mnt/mmc'
+    (m/'loose.LRC').write_bytes('[00:01.50]\u4f60\u597d\n[00:00.50]\u4e16\u754c'.encode('gb18030'))
+    got = lines(served.sock, 'Q2LIB/1', 'lyrics 3', want=5)
+    assert got[1:] == ['lyrics id=3 kind=line source=file lines=2', 'line at=500 text=\u4e16\u754c words=',
+                       'line at=1500 text=\u4f60\u597d words=', 'ok'], 'GB18030 as UTF-8 (sent as it is: the common shape encodes no high byte), in time order, from .LRC'
 
 
 def test_q2lib_refuses_a_caller_without_the_library_permission(binary, card):

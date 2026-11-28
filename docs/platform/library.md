@@ -63,7 +63,16 @@ song id=ID title=T artist=A albumartist=AA album=AL genre=G composer=C year=Y tr
 | `playlist id=N` or `playlist app=APP pid=P` `[from=N] [count=N]` | the playlist's songs in its order, a `song` line each (a song the library does not have is left out), then `ok`; `err none` for no such playlist |
 | `search TEXT [count=N]` | the songs whose title, artist, album artist or album holds TEXT (percent-encoded; case aside), in the order above, then `ok` |
 | `art ID` | `art id=ID file=PATH`, the song's cover on the card (`/mnt/mmc/.vamp/covers/...`, JPEG or PNG), or `err none` |
+| `lyrics ID` | the song's lyrics, `lyrics id=ID kind=word\|line\|plain source=file\|tag lines=N`, then `line at=MS text=T words=MS:BYTE,...` a line in time order, then `ok`; `err none` for a song with no lyrics, a server song or an unknown id |
 | `watch` | `ok`; then `changed library` when `library.db` is written again, `changed catalogue` when `catalogue.db` is (a scan, or an offline copy gained or lost), looked at every second |
+
+**Lyrics** are read from what is on the card, as today's firmware reads them (`patch/lyrics.c` is the reference). The sources, in order: the sidecar beside the song, its path with `.lrc` for its extension (then `.LRC`), then the file's own tags as FFmpeg reads them (`lyrics`, any key starting `lyrics-` such as an ID3 USLT frame's `lyrics-eng`, else `UNSYNCEDLYRICS`, case aside); `source` says which answered, and only a text's first 64 KB is read. A text that is not UTF-8 and has no byte-order mark is converted from GB18030, as today's firmware does. A song that is a span of a file (a CUE track) takes its file's sidecar and tags; `lyrics` does not cut a file's lyrics to the track.
+
+`kind` is `plain` when the text has no time stamps (every `at` is `-1`, the lines in the text's order), `line` when its lines are timed (`[mm:ss.xx]`, which may stand more than once before a line: the line is listed once for each, in time order, and lines under one stamp, as a translation is, keep the file's order with the same `at`), and `word` when any line also has enhanced-LRC word stamps (`<mm:ss.xx>` inside it). `at` is the line's start in milliseconds. `words` is empty (`words=`) for a line with no word marks; otherwise each mark is its time in milliseconds and the byte offset in the line's text (the percent-decoded UTF-8, stamps removed) where that word starts. Only a line with exactly one line stamp keeps its word marks. Tag lines such as `[ar:Ann]` and `[offset:0]` are dropped, not applied; blank lines are dropped, and spaces at a line's ends.
+
+Which line is current, and how far its words are lit, is the caller's, as today's `patch/lyrics.c` does it (`lyrics_publish` and the page's painter): the current line is the last whose `at` is at or before the playing position; the lit width is interpolated between word marks; the last word lights at 90 ms per letter, at least 800 ms, and is done by the next line's start.
+
+**Not served yet** (designed only): lyrics from the network. Today's manual "Download Cover & Lyrics" and "Get Album Lyrics" (`patch/onlinematch.c`) ask `https://lrclib.net/api/search?track_name=T&artist_name=A`, take the first result's `syncedLyrics` and save it beside the song as a UTF-8 `.lrc` with a byte-order mark, and a card app's `lyrics=1` asks the same of its server. Q2LIB/1 would carry them as `lyrics fetch ID` and `lyrics fetch album=AL [artist=AA]`, answered `ok` at once, the outcome a `watch` event `lyrics id=ID state=saved|none|offline|busy|unwritable` (a later `lyrics ID` then finds the sidecar). `q2libd` has no TLS client yet; `q2scrobd`'s mbedTLS client is the model.
 
 A command it does not know is `err command`; a filter or number it cannot read, `err argument`.
 
@@ -71,13 +80,13 @@ A command it does not know is `err command`; a filter or number it cannot read, 
 
 ### Conformance
 
-`test/libd.py` runs `q2libd` on a stand-in card: `Music/Ann/First/01 Alpha.flac` (Alpha, Ann, album First, album artist Ann, 2001, track 1, a `cover.jpg` beside it), `Music/Bob/b.mp3` (Beta, Bob, album Second, track 7), `loose.wav` (no tags), each a second long; a card playlist `Road.m3u` (Beta, then Alpha); and the signed-in app `subsonic` with two songs (`Server<tab>Song` by Sam on Sam's Live, 1999, disc 1, track 3, 200 s, Rock; Other by Sue on B-Sides, track 1, 100 s, Pop) and its playlist `Mix` (the first). Each block is replayed on a connection of its own.
+`test/libd.py` runs `q2libd` on a stand-in card: `Music/Ann/First/01 Alpha.flac` (Alpha, Ann, album First, album artist Ann, 2001, track 1, a `cover.jpg` beside it), `Music/Bob/b.mp3` (Beta, Bob, album Second, track 7), `loose.wav` (no tags), each a second long; beside Alpha a sidecar `01 Alpha.lrc` (a tag line, one line with word stamps, one line with two line stamps), and Beta with an unsynced `lyrics` tag (an ID3 USLT frame); a card playlist `Road.m3u` (Beta, then Alpha); and the signed-in app `subsonic` with two songs (`Server<tab>Song` by Sam on Sam's Live, 1999, disc 1, track 3, 200 s, Rock; Other by Sue on B-Sides, track 1, 100 s, Pop) and its playlist `Mix` (the first). Each block is replayed on a connection of its own.
 
 ```conformance
 > Q2LIB/1
 < Q2LIB/1 ok
 > caps
-< caps songs song albums artists genres playlists playlist search art watch
+< caps songs song albums artists genres playlists playlist search art watch lyrics
 > songs
 < song id=3 title=loose artist= albumartist= album= genre= composer= year=0 track=0 disc=0 time=1 source=card
 < song id=1 title=Alpha artist=Ann albumartist=Ann album=First genre= composer= year=2001 track=1 disc=0 time=1 source=card
@@ -164,6 +173,30 @@ A command it does not know is `err command`; a filter or number it cannot read, 
 < err none
 > watch
 < ok
+```
+
+```conformance
+> Q2LIB/1
+< Q2LIB/1 ok
+> lyrics 1
+< lyrics id=1 kind=word source=file lines=3
+< line at=1000 text=Hello%20world words=1000:0,1500:6
+< line at=2000 text=Again words=
+< line at=4000 text=Again words=
+< ok
+> lyrics 2
+< lyrics id=2 kind=plain source=tag lines=2
+< line at=-1 text=Line%20one words=
+< line at=-1 text=Line%20two words=
+< ok
+> lyrics 3
+< err none
+> lyrics 1073741824
+< err none
+> lyrics 99
+< err none
+> lyrics x
+< err argument
 ```
 
 A hello that is not `Q2LIB/1`:

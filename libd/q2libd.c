@@ -24,11 +24,14 @@
  * are the new ones). --root prefixes every path, for test/libd.py.
  *
  * Unless --once, it serves Q2LIB/1 on /run/vamp/lib.sock (docs/platform/library.md#q2lib1-the-library-socket) from a
- * thread: queries of the two files, read-only, for callers with the library permission. */
+ * thread: queries of the two files, read-only, for callers with the library permission, and `lyrics ID`, which reads
+ * a song's lyrics (its .lrc beside it, else its tags) at the moment it is asked, parsed as patch/lyrics.c parses them
+ * (docs/libd.md#lyrics). */
 #define _GNU_SOURCE
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <iconv.h>
 #include <libavformat/avformat.h>
 #include <libavutil/log.h>
 #include <signal.h>
@@ -902,6 +905,17 @@ static void ldec(char *s) {
     *o = 0;
 }
 
+static void lsend(struct lclient *c, char *line, int n) { /* line's n bytes, the last of them its newline, or the client closed */
+    for (int off = 0; off < n && c->fd >= 0;) {
+        ssize_t w = send(c->fd, line + off, (size_t)(n - off), MSG_NOSIGNAL);
+        if (w <= 0) {
+            close(c->fd), c->fd = -1;
+            return;
+        }
+        off += (int)w;
+    }
+}
+
 static void lsay(struct lclient *c, const char *fmt, ...) { /* a whole line, or the client closed (2 s at most: SO_SNDTIMEO) */
     char line[4096];
     va_list ap;
@@ -911,14 +925,7 @@ static void lsay(struct lclient *c, const char *fmt, ...) { /* a whole line, or 
     if (n < 0 || c->fd < 0) return;
     if (n > (int)sizeof line - 2) n = (int)sizeof line - 2;
     line[n++] = '\n';
-    for (int off = 0; off < n;) {
-        ssize_t w = send(c->fd, line + off, (size_t)(n - off), MSG_NOSIGNAL);
-        if (w <= 0) {
-            close(c->fd), c->fd = -1;
-            return;
-        }
-        off += (int)w;
-    }
+    lsend(c, line, n);
 }
 
 /* SQLite's file: URI for a path (its %, ? and # escaped), read-only */
@@ -1012,23 +1019,271 @@ static int songs_of(struct lclient *c, sqlite3 *d, const char *sql, const char *
     return 0;
 }
 
+/* ---- lyrics (docs/libd.md#lyrics) ----
+ * A port of patch/lyrics.c's reading, kept to its rules: [mm:ss], [mm:ss.xx] or [mm:ss:xx] line stamps (several before a
+ * line copy it once each, then the lines go in time order, a tie in the file's order), "<mm:ss.xx>" word stamps cut from
+ * the text and kept (ms, byte offset) only on a line with exactly one line stamp, spaces trimmed at a line's ends, blank
+ * lines and tag lines ("[ar:Ann]") dropped, the lines before the first stamped one dropped. */
+#define LYRIC_MAX 65536
+#define LYRIC_NO_TIME (-1)
+
+struct lymark { int ms; unsigned at; };
+struct lyline { int time, order; const char *text; unsigned first, n; };
+
+/* A time at p between open and close; its milliseconds into *ms and its end, else 0 */
+static char *ly_time(char *p, char open, char close, int *ms) {
+    int mm = 0, ss = 0, frac = 0, scale = 100, digits = 0;
+    if (*p++ != open) return 0;
+    for (; *p >= '0' && *p <= '9' && digits < 4; ++digits) mm = mm * 10 + *p++ - '0';
+    if (!digits || *p++ != ':') return 0;
+    for (digits = 0; *p >= '0' && *p <= '9' && digits < 2; ++digits) ss = ss * 10 + *p++ - '0';
+    if (digits != 2 || ss > 59) return 0;
+    if (*p == '.' || *p == ':')
+        for (++p; *p >= '0' && *p <= '9'; ++p, scale /= 10) frac += (*p - '0') * scale;
+    if (*p++ != close) return 0;
+    *ms = (mm * 60 + ss) * 1000 + frac;
+    return p;
+}
+
+/* the line stamps leading *s into t (at most n), *s moved past them all; how many */
+static int ly_stamps(char **s, int *t, int n) {
+    int k = 0, ms;
+    for (char *q; (q = ly_time(*s, '[', ']', &ms)); *s = q)
+        if (k < n) t[k++] = ms;
+    return k;
+}
+
+/* s with its word stamps cut out, in place; when keep, each one's ms and byte offset into m (up to cap, counted in *n) */
+static void ly_words(char *s, struct lymark *m, unsigned cap, unsigned *n, int keep) {
+    char *text = s, *o = s, *q;
+    for (int ms; *s;)
+        if ((q = ly_time(s, '<', '>', &ms))) {
+            if (keep && *n < cap) m[(*n)++] = (struct lymark){ms, (unsigned)(o - text)};
+            s = q;
+        } else {
+            *o++ = *s++;
+        }
+    *o = 0;
+}
+
+/* the bytes of the space at p (ASCII's, a no-break, ideographic or zero-width space, a byte-order mark), else 0 */
+static int ly_space(const char *p) {
+    const unsigned char *u = (const unsigned char *)p;
+    if (*u == ' ' || *u == '\t' || *u == '\v' || *u == '\f') return 1;
+    if (u[0] == 0xc2 && u[1] == 0xa0) return 2;
+    return (u[0] == 0xe3 && u[1] == 0x80 && u[2] == 0x80) || (u[0] == 0xe2 && u[1] == 0x80 && u[2] == 0x8b) ||
+                   (u[0] == 0xef && u[1] == 0xbb && u[2] == 0xbf)
+               ? 3 : 0;
+}
+
+/* line without the spaces at either end, in place: its new start, and its n marks' offsets moved with it */
+static char *ly_trim(char *line, struct lymark *m, unsigned n) {
+    char *start = line, *end;
+    int k;
+    while ((k = ly_space(line))) line += k;
+    for (end = line + strlen(line); end > line;)
+        if (ly_space(end - 1) == 1) --end;
+        else if (end - line >= 2 && ly_space(end - 2) == 2) end -= 2;
+        else if (end - line >= 3 && ly_space(end - 3) == 3) end -= 3;
+        else break;
+    *end = 0;
+    for (unsigned i = 0; i < n; ++i) {
+        int at = (int)m[i].at - (int)(line - start);
+        m[i].at = at < 0 ? 0 : at > end - line ? (unsigned)(end - line) : (unsigned)at;
+    }
+    return line;
+}
+
+static int ly_order(const void *a, const void *b) {
+    const struct lyline *x = a, *y = b;
+    return x->time != y->time ? (x->time > y->time) - (x->time < y->time) : x->order - y->order;
+}
+
+/* whether s is an LRC tag line such as "[ar:Name]" */
+static int ly_idtag(const char *s) {
+    const char *p = s + (*s == '[');
+    while ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || *p == '#') ++p;
+    return *s == '[' && p > s + 1 && *p == ':' && s[strlen(s) - 1] == ']';
+}
+
+/* text's lines, cut in place, into *lp, and their word marks into *mp, both calloc'd for the caller; how many lines, -1
+ * out of memory. A line has LYRIC_NO_TIME when the text has no stamped line. */
+static int ly_parse(char *text, struct lyline **lp, struct lymark **mp) {
+    unsigned cap = 1, caps = 0, n = 0, nm = 0;
+    for (const char *s = text; *s; ++s) cap += *s == '\n' || *s == '\r' || *s == '[', caps += *s == '<';
+    struct lyline *l = *lp = calloc(cap, sizeof *l);
+    struct lymark *m = *mp = calloc(caps + 1, sizeof *m);
+    if (!l || !m) return -1;
+    int synced = 0;
+    for (char *s = text; *s;) {
+        char *e = s, c, *line = s;
+        int t[8], k;
+        unsigned first;
+        while (*e && *e != '\n' && *e != '\r') ++e;
+        c = *e, *e = 0;
+        if ((k = ly_stamps(&line, t, 8)) && !synced) synced = 1, n = 0; /* the lines before the first stamp go */
+        first = nm;
+        ly_words(line, m, caps, &nm, k == 1);
+        line = ly_trim(line, m + first, nm - first);
+        if (!*line) nm = first;
+        for (int i = 0; i < (*line ? k ? k : !synced : 0) && n < cap; ++i)
+            l[n] = (struct lyline){k ? t[i] : LYRIC_NO_TIME, (int)n, line, first, nm - first}, ++n;
+        s = e + (c != 0) + (c == '\r' && e[1] == '\n');
+    }
+    if (synced) qsort(l, n, sizeof *l, ly_order);
+    return (int)n;
+}
+
+/* whether the n bytes at s are UTF-8 */
+static int ly_utf8(const unsigned char *s, size_t n) {
+    for (size_t i = 0; i < n;) {
+        int k = s[i] < 0x80 ? 1 : s[i] >= 0xc2 && s[i] < 0xe0 ? 2 : s[i] >= 0xe0 && s[i] < 0xf0 ? 3 : s[i] >= 0xf0 && s[i] < 0xf5 ? 4 : 0;
+        if (!k || i + (size_t)k > n) return 0;
+        for (int j = 1; j < k; ++j)
+            if ((s[i + (size_t)j] & 0xc0) != 0x80) return 0;
+        if ((k == 3 && s[i] == 0xe0 && s[i + 1] < 0xa0) || (k == 3 && s[i] == 0xed && s[i + 1] >= 0xa0) ||
+            (k == 4 && ((s[i] == 0xf0 && s[i + 1] < 0x90) || (s[i] == 0xf4 && s[i + 1] >= 0x90))))
+            return 0;
+        i += (size_t)k;
+    }
+    return 1;
+}
+
+/* A text of n bytes (what a file or tag held, at most LYRIC_MAX of them) as UTF-8 without a byte-order mark, in a new
+ * NUL-ended buffer: UTF-8 as it is, else from GB18030 as today's firmware reads it. ponytail: where the image has no
+ * GB18030 converter (today's image carries no glibc gconv modules) or the text is not GB18030 either, its bytes go as
+ * they are; copying glibc's GB18030.so and gconv-modules into the image (os/) lifts it. A character cut by the 64 KB limit is dropped. */
+static char *ly_text(const char *in, size_t n) {
+    char *out = malloc(2 * n + 8);
+    if (!out) return 0;
+    if (n >= 3 && !memcmp(in, "\xef\xbb\xbf", 3)) in += 3, n -= 3;
+    for (size_t back = 1; n == LYRIC_MAX && back <= 3 && back <= n; ++back) { /* a character the limit cut: its lead byte and what follows go */
+        unsigned char u = (unsigned char)in[n - back];
+        if ((u & 0xc0) == 0x80) continue;
+        if (u >= 0xc0 && (size_t)(u >= 0xf0 ? 4 : u >= 0xe0 ? 3 : 2) > back) n -= back;
+        break;
+    }
+    size_t got = 0;
+    int done = 0;
+    iconv_t cd = ly_utf8((const unsigned char *)in, n) ? (iconv_t)-1 : iconv_open("UTF-8", "GB18030");
+    if (cd != (iconv_t)-1) {
+        char *ip = (char *)in, *op = out;
+        size_t il = n, ol = 2 * n + 4;
+        if (iconv(cd, &ip, &il, &op, &ol) != (size_t)-1) got = (size_t)(op - out), done = 1;
+        iconv_close(cd);
+    }
+    if (!done) memcpy(out, in, n), got = n;
+    out[got] = 0;
+    return out;
+}
+
+/* path's first LYRIC_MAX bytes through ly_text; 0 when it is no file or holds nothing */
+static char *ly_file(const char *file) {
+    struct stat st;
+    FILE *f = !stat(file, &st) && S_ISREG(st.st_mode) ? fopen(file, "rb") : 0;
+    char *b = f ? malloc(LYRIC_MAX) : 0, *t = 0;
+    if (b) {
+        size_t n = fread(b, 1, LYRIC_MAX, f);
+        t = n ? ly_text(b, n) : 0;
+    }
+    if (f) fclose(f);
+    free(b);
+    return t;
+}
+
+/* a song's lyrics tag as FFmpeg gives it: "lyrics" or "lyrics-xxx", else "UNSYNCEDLYRICS", names case aside; 0 for none */
+static char *ly_tag(const char *file, const char *url) {
+    struct song g;
+    AVFormatContext *f = read_song(file, url, &g);
+    char *t = 0;
+    if (!f) return 0;
+    AVDictionary *dicts[2] = {f->metadata, f->nb_streams ? f->streams[0]->metadata : 0};
+    for (int pass = 0; pass < 2 && !t; ++pass)
+        for (int d = 0; d < 2 && !t; ++d)
+            for (AVDictionaryEntry *e = 0; dicts[d] && !t && (e = av_dict_get(dicts[d], "", e, AV_DICT_IGNORE_SUFFIX));)
+                if (e->value && *e->value &&
+                    (pass ? !strcasecmp(e->key, "unsyncedlyrics") : !strcasecmp(e->key, "lyrics") || !strncasecmp(e->key, "lyrics-", 7))) {
+                    size_t n = strlen(e->value);
+                    t = ly_text(e->value, n > LYRIC_MAX ? LYRIC_MAX : n);
+                }
+    avformat_close_input(&f);
+    return t;
+}
+
+/* lyrics ID's answer (docs/platform/library.md#q2lib1-the-library-socket): the sidecar's lines, else the tag's */
+static void lyrics_say(struct lclient *c, long long id, const char *url) {
+    char side[800], *text = 0, *dot;
+    const char *source = "file";
+    struct lyline *l = 0;
+    struct lymark *m = 0;
+    int n = 0;
+    snprintf(side, sizeof side, "%s%s", root, url);
+    dot = strrchr(side, '.');
+    if (!dot || strchr(dot, '/')) dot = side + strlen(side);
+    for (int i = 0; i < 3 && n <= 0; ++i) {
+        free(text), free(l), free(m);
+        text = 0, l = 0, m = 0, n = 0;
+        if (i < 2) {
+            if ((size_t)(dot - side) + 5 > sizeof side) continue;
+            strcpy(dot, i ? ".LRC" : ".lrc");
+            text = ly_file(side);
+            source = "file";
+        } else {
+            snprintf(side, sizeof side, "%s%s", root, url);
+            text = ly_tag(side, url);
+            source = "tag";
+        }
+        if (!text || (n = ly_parse(text, &l, &m)) <= 0) {
+            n = 0;
+            continue;
+        }
+        if (l[0].time == LYRIC_NO_TIME && i < 2) { /* a plain sidecar: its tag lines are no lyrics */
+            int k = 0;
+            for (int j = 0; j < n; ++j)
+                if (!ly_idtag(l[j].text)) l[k++] = l[j];
+            n = k;
+        }
+    }
+    if (n <= 0) {
+        lsay(c, "err none");
+    } else {
+        unsigned marks = 0;
+        size_t room = 64;
+        for (int i = 0; i < n; ++i) marks += l[i].n, room += 3 * strlen(l[i].text) + 40 + 24 * (size_t)l[i].n;
+        lsay(c, "lyrics id=%lld kind=%s source=%s lines=%d", id, marks ? "word" : l[0].time == LYRIC_NO_TIME ? "plain" : "line", source, n);
+        char *b = malloc(room);
+        for (int i = 0; b && i < n && c->fd >= 0; ++i) {
+            size_t j = (size_t)sprintf(b, "line at=%d text=", l[i].time);
+            lenc(b + j, room - j, l[i].text);
+            j += strlen(b + j);
+            j += (size_t)sprintf(b + j, " words=");
+            for (unsigned w = 0; w < l[i].n; ++w) j += (size_t)sprintf(b + j, "%s%d:%u", w ? "," : "", m[l[i].first + w].ms, m[l[i].first + w].at);
+            b[j++] = '\n';
+            lsend(c, b, (int)j);
+        }
+        free(b);
+        lsay(c, "ok");
+    }
+    free(text), free(l), free(m);
+}
+
 static void lib_command(struct lclient *c, char *line) {
     char *rest = strchr(line, ' ');
     if (rest) *rest++ = 0;
     else rest = line + strlen(line);
-    if (!strcmp(line, "caps")) return lsay(c, "caps songs song albums artists genres playlists playlist search art watch");
+    if (!strcmp(line, "caps")) return lsay(c, "caps songs song albums artists genres playlists playlist search art watch lyrics");
     if (!strcmp(line, "watch")) return c->watch = 1, lsay(c, "ok");
     static const char *const SONG_KEYS[] = {"album", "artist", "genre", "source", 0}, *const NONE[] = {0},
                              *const ALBUM_KEYS[] = {"artist", 0}, *const PL_KEYS[] = {"id", "app", "pid", 0};
     int known = !strcmp(line, "songs") || !strcmp(line, "song") || !strcmp(line, "albums") || !strcmp(line, "artists") ||
                 !strcmp(line, "genres") || !strcmp(line, "playlists") || !strcmp(line, "playlist") || !strcmp(line, "search") ||
-                !strcmp(line, "art");
+                !strcmp(line, "art") || !strcmp(line, "lyrics");
     if (!known) return lsay(c, "err command");
     struct largs a;
     char q[1500], *end;
     long long id = 0;
     char text[600] = "";
-    if (!strcmp(line, "song") || !strcmp(line, "art")) {
+    if (!strcmp(line, "song") || !strcmp(line, "art") || !strcmp(line, "lyrics")) {
         id = strtoll(rest, &end, 10);
         if (!isdigit((unsigned char)*rest) || *end) return lsay(c, "err argument");
     } else if (!strcmp(line, "search")) {
@@ -1165,6 +1420,14 @@ static void lib_command(struct lclient *c, char *line) {
                 else lsay(c, "err library");
             }
         }
+    } else if (!strcmp(line, "lyrics")) {
+        char url[1100] = "";
+        if (sqlite3_prepare_v2(d, "select fileurl from main.songtable where id = ?", -1, &st, 0) == SQLITE_OK) {
+            sqlite3_bind_int64(st, 1, id);
+            if (sqlite3_step(st) == SQLITE_ROW) snprintf(url, sizeof url, "%s", col(st, 0));
+        }
+        if (*url) lyrics_say(c, id, url);
+        else lsay(c, "err none");
     } else if (!strcmp(line, "art")) {
         if (sqlite3_prepare_v2(d, "select c.file from main.vamp_cover c join main.songtable t on t.id = c.id where c.id = ?"
                                   " and coalesce(c.file, '') != ''", -1, &st, 0) == SQLITE_OK) {
