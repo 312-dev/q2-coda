@@ -1088,7 +1088,19 @@ static int gpio_in(int n, int *v) {
     return read_int(p, v);
 }
 
+/* /run/vamp/jack, "po=N bal=N" (1 plugged), written whole at each change: q2playd's, for the output it readies at a
+ * song's start (docs/playd.md#the-dacs-output) */
+static void jack_write(void) {
+    char tmp[320], dst[300];
+    snprintf(dst, sizeof dst, "%s", path("/run/vamp/jack")), snprintf(tmp, sizeof tmp, "%s.tmp", dst);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "po=%d bal=%d\n", jack_in[0], jack_in[1]);
+    if (fclose(f) || rename(tmp, dst)) unlink(tmp);
+}
+
 static void jack_poll(unsigned long long t) {
+    int was[2] = {jack_in[0], jack_in[1]};
     for (int i = 0; i < 2; ++i) {
         int raw;
         if (gpio_in(JACK_GPIO[i], &raw)) continue;
@@ -1109,6 +1121,7 @@ static void jack_poll(unsigned long long t) {
             if (music_playing()) ask("/run/vamp/play.sock", "Q2PLAY/1", "pause");
         }
     }
+    if (was[0] != jack_in[0] || was[1] != jack_in[1]) jack_write();
 }
 
 /* ---- heat (docs/sysd.md#heat): today's Vamp's overheat guardian (patch/q2guard_core.c, q2guard_pmic.c), its

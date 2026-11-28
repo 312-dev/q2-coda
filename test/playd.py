@@ -48,7 +48,7 @@ SHIM = r"""
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-/* the DAC's ioctl recorded (Q2_IOCTL_LOG), every other passed on */
+/* the DAC's volume ioctl recorded (Q2_IOCTL_LOG), its power and headset mode (Q2_DAC_LOG), every other passed on */
 int ioctl(int fd, unsigned long req, ...) {
     va_list ap;
     va_start(ap, req);
@@ -57,6 +57,11 @@ int ioctl(int fd, unsigned long req, ...) {
     if (req == 0xc0044d00ul) {
         FILE *f = fopen(getenv("Q2_IOCTL_LOG"), "a");
         if (f) fprintf(f, "%d\n", *(int *)arg), fclose(f);
+        return 0;
+    }
+    if (req == 0xc0044d1aul || req == 0xc0044d1cul) { /* the DAC's power and headset mode, in Q2_DAC_LOG */
+        FILE *f = fopen(getenv("Q2_DAC_LOG"), "a");
+        if (f) fprintf(f, "%lx %d\n", req & 0xff, *(int *)arg), fclose(f);
         return 0;
     }
     int (*real)(int, unsigned long, ...) = (int (*)(int, unsigned long, ...))dlsym(RTLD_NEXT, "ioctl");
@@ -148,7 +153,7 @@ def run(binary, shim, tmp_path, config, prepare):
     db.close()
     if prepare:
         prepare(tmp_path)
-    env = dict(os.environ, LD_PRELOAD=str(shim), Q2_IOCTL_LOG=str(tmp_path/'dac.log'))
+    env = dict(os.environ, LD_PRELOAD=str(shim), Q2_IOCTL_LOG=str(tmp_path/'dac.log'), Q2_DAC_LOG=str(tmp_path/'dacpower.log'))
     p = subprocess.Popen([str(binary), '--root', str(tmp_path)], stderr=subprocess.PIPE, env=env)
     player = Player(tmp_path)
     wait_for(tmp_path/'tmp/coda-rc.cmdq', 5)  # made after the player's socket, which Player waited for
@@ -2866,3 +2871,61 @@ def test_find_with_no_buzzer_or_no_q2sysd_is_unavailable(run, answer):
         FakeSys(root, answer)
     send(root, '92 find')
     assert wait_for_value(lambda: acks(root)[:1], [(92, 2)]), 'the shim\'s 2, UNAVAILABLE'
+
+
+
+# ---- the DAC's output (docs/playd.md#the-dacs-output) ----
+
+def dac_calls(root):
+    p = root/'dacpower.log'
+    return p.read_text().splitlines() if p.exists() else []
+
+
+def jacks(root, po, bal):
+    (root/'run/vamp').mkdir(parents=True, exist_ok=True)
+    (root/'run/vamp/jack.tmp').write_text(f'po={po} bal={bal}\n')
+    (root/'run/vamp/jack.tmp').rename(root/'run/vamp/jack')
+
+
+@pytest.mark.parametrize('bal, mode', [(0, '0'), (1, '1')])
+def test_a_song_s_start_readies_the_jack_in_use_and_powers_the_dac(run, bal, mode):
+    """config_outputchannel(g_headset_output, 2) before the player plays: mclSetHeadsetMode (0xc0044d1c, 1 the 4.4 mm
+    jack when plugged, else the 3.5 mm) and mclSetDacPwr(1) (0xc0044d1a)"""
+    root, pl = run
+    jacks(root, 1, bal)
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    assert dac_calls(root) == [f'1c {mode}', '1a 1'], dac_calls(root)
+    fifo(root, 'next')
+    pl.pump()
+    assert dac_calls(root) == [f'1c {mode}', '1a 1'] * 2, 'again at each start, as stock sends them'
+
+
+def test_a_plug_while_playing_switches_the_jack_and_bluetooth_powers_the_dac_off(run):
+    """config_bal_output's insert while playing; config_outputchannel's Bluetooth: mclSetDacPwr(0)"""
+    root, pl = run
+    jacks(root, 1, 0)
+    play_list(root, [1], 0)
+    pl.pump()
+    jacks(root, 1, 1)
+    assert wait_for_value(lambda: dac_calls(root)[2:], ['1c 1', '1a 1']), dac_calls(root)
+    a = api(root)
+    a.say('output bluetooth')
+    assert a.line() == 'ok'
+    assert wait_for_value(lambda: dac_calls(root)[4:], ['1a 0'])
+
+
+def test_thirty_seconds_with_nothing_playing_power_the_dac_off_and_play_powers_it_again(run):
+    """check_dacoff_state: a count each second while not playing, the DAC off at 31"""
+    root, pl = run
+    jacks(root, 1, 0)
+    play_list(root, [1], 0)
+    pl.pump()
+    fifo(root, 'pause')
+    pl.pump()
+    time.sleep(28)
+    assert dac_calls(root) == ['1c 0', '1a 1'], 'not before 31 s'
+    assert wait_for_value(lambda: dac_calls(root)[2:], ['1a 0'], 6)
+    fifo(root, 'resume')
+    pl.pump()
+    assert dac_calls(root)[3:] == ['1c 0', '1a 1'], dac_calls(root)

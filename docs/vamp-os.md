@@ -396,9 +396,9 @@ What the owner would lose or notice running Vamp OS by [card boot](vamp-os-base.
 | # | What | State | Detail |
 | --- | --- | --- | --- |
 | 1 | Sound from the headphone DAC with no `demo` | Device | `demo` powers the DAC and sets its PCM mode before each song (`dac_take`); whether `q2player`'s own `/dev/shanling_dac` handling is enough, and the volume law in dB ([playd: The volume](playd.md#the-volume)) |
-| 2 | The 4.4 mm and 3.5 mm outputs | Partial | Plugs are seen and an unplug pauses ([sysd: The jacks](sysd.md#the-jacks)); the switch between outputs (the headset-mode ioctl, the DAC's power, the song started again) is not built |
+| 2 | The 4.4 mm and 3.5 mm outputs | Device | Plugs are seen, an unplug pauses, and each start sets the jack's headset mode and powers the DAC as stock's `config_outputchannel` does, off after 30 s idle ([playd: The DAC's output](playd.md#the-dacs-output)); that the ioctls switch the jack on a Q2 |
 | 3 | The screen going dark and lighting | Device | `bl_power`, the brightness scale, the double tap ([sysd: Needs a Q2](sysd.md#needs-a-q2)) |
-| 4 | The UI's pages | Partial | `q2ui` is the UI agent's: no Bluetooth page or pairing notice, no stars, album favourite or shuffle and repeat buttons yet (`q2playd` has their verbs), no Q2UI/1 asks served (LocalSend's accept, Car Remote's pairing card), no EQ page |
+| 4 | The UI's pages | Partial | `q2ui` is the UI agent's; its status row, Control Center, Wi-Fi and Bluetooth pages read `demo`'s files and pipe, which [q2gate](gate.md) keeps on Vamp OS (a new secured network's password and the EQ switch not yet); no pairing notice, stars, album favourite or shuffle and repeat buttons yet (`q2playd` has their verbs) |
 | 5 | Bluetooth headphones | Partial | `q2btd` connects, routes and keeps levels ([btd](btd.md)); pairing a new headset needs the UI's notice; per-device settings, ear detection and the AirPods handshake missing |
 | 6 | Standby | Device | `mem` suspend with Vamp OS's services, its wake sources ([sysd](sysd.md#needs-a-q2)) |
 | 7 | Power off, battery, charging, Charge Limit | Device | Built ([sysd](sysd.md)); `poweroff` reaching the PMIC, `PE22` through the GPIO class |

@@ -1,0 +1,7 @@
+#!/bin/sh
+# q2gate (docs/gate.md): q2ui's settings pipe, /run/vamp/ui.ctl, turned into Vamp API 1's words, and the status,
+# Wi-Fi and Bluetooth files q2ui reads (/tmp/q2ui.status, /tmp/q2ui.wifi, /tmp/q2ui.bt) kept from the services.
+. /usr/libexec/vamp/log
+step "q2gate: start"
+exec 2>&1
+exec /usr/bin/q2gate

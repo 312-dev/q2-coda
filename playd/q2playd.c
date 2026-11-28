@@ -319,7 +319,7 @@ static void path_lookup_want(void) {
 }
 
 /* The queue's song at `at` from ss seconds (a queue given back after a source starts where it was put aside). */
-static void resume_leave(void);
+static void resume_leave(void), dac_ready(void);
 static int start_from(int at, int ss) {
     resume_leave(); /* the song read before keeps its place; the one started is read anew */
     gapless_forget();
@@ -327,6 +327,7 @@ static int start_from(int at, int ss) {
         q.at = at;
         if (q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]])) {
             int cut = q.loaded;
+            dac_ready();
             send_song(cut ? "set-nexturl" : "set-songurl", q.file, ss);
             set_cover(q.paths ? -1 : q.ids[q.order[at]], q.paths || *q.row_url ? q.row_url : q.file);
             q.expect_cut = cut;
@@ -458,11 +459,14 @@ static void ask_status(void) {
  * the output. */
 #define DAC_SET_VOLUME 0xc0044d00u
 
-static void dac_volume(void) {
+static void dac_volume_open(void) {
     if (dac < 0 && !dac_missing) {
         dac = open(path("/dev/shanling_dac"), O_RDWR | O_CLOEXEC);
         if (dac < 0) dac_missing = 1, logf_("no /dev/shanling_dac: the volume is kept and shown, not set");
     }
+}
+static void dac_volume(void) {
+    dac_volume_open();
     if (dac < 0) return;
     int both = (q.volume & 0xff) << 8 | (q.volume & 0xff);
     if (ioctl(dac, DAC_SET_VOLUME, &both) < 0) logf_("the DAC refused volume %d: %s", q.volume, strerror(errno));
@@ -480,6 +484,58 @@ static unsigned long long volume_dirty_at;
  * keeps its own level, as today's Vamp does: [PLAYSET] VOLUME the DAC's, BT_VOLUME Bluetooth's (-1 until saved: the
  * DAC's then). */
 static int way, soft, other_volume = -1;
+
+/* ---- the DAC's output (docs/playd.md#the-dacs-output) ----
+ * As stock's config_outputchannel(g_headset_output, 2), which player_start, player_play_pause, player_change_music and
+ * a paused seek call before the player plays: on the DAC, the headset mode for the jack in use (mclSetHeadsetMode,
+ * ioctl DAC_HEADSET: 1 the 4.4 mm jack when it is plugged, else 0 the 3.5 mm, check_outputdevice's choice) and the DAC
+ * powered (mclSetDacPwr, DAC_POWER 1, the Q2's case of it). A plug while playing does the same (config_po_output,
+ * config_bal_output); 30 s with nothing playing powers it off (check_dacoff_state, a count each second to 31), and so
+ * does an output other than the DAC. The jacks are q2sysd's, in /run/vamp/jack ("po=N bal=N"). */
+#define DAC_HEADSET 0xc0044d1cu
+#define DAC_POWER 0xc0044d1au
+#define DAC_OFF_S 31
+static void dac_volume(void), dac_volume_open(void), read_small(const char *p, char *out, size_t room);
+static struct { int on, bal; char seen[64]; unsigned long long idle_at; } dp;
+static int dac_io(unsigned long req, int v) {
+    dac_volume_open();
+    if (dac < 0) return -1;
+    if (ioctl(dac, req, &v) < 0) return logf_("the DAC refused 0x%lx %d: %s", req, v, strerror(errno)), -1;
+    return 0;
+}
+static int jack_read(void) { /* 1 when the file says something new (read whole: a plug can keep its size and second) */
+    char b[64] = "";
+    read_small(path("/run/vamp/jack"), b, sizeof b);
+    if (!strcmp(b, dp.seen)) return 0;
+    memcpy(dp.seen, b, sizeof b);
+    const char *p = strstr(b, "bal=");
+    dp.bal = p && p[4] == '1';
+    return 1;
+}
+/* before the player plays on the DAC: the jack's mode and the power */
+static void dac_ready(void) {
+    if (way) return;
+    jack_read();
+    dac_io(DAC_HEADSET, dp.bal ? 1 : 0); /* every time, as stock's are: the driver's to keep */
+    if (!dac_io(DAC_POWER, 1)) dp.on = 1;
+    dp.idle_at = 0;
+}
+static void dac_off(void) {
+    if (dp.on && !dac_io(DAC_POWER, 0)) dp.on = 0;
+}
+/* each time round the loop: a plug while playing readies the jack; 30 s not playing powers the DAC off */
+static void dac_poll(unsigned long long t) {
+    if (way) return;
+    int bal = dp.bal, moved = jack_read();
+    if (q.state == PLAYING) {
+        if (moved && dp.bal != bal) dac_ready();
+        dp.idle_at = 0;
+        return;
+    }
+    if (!dp.on) return;
+    if (!dp.idle_at) dp.idle_at = t | 1;
+    else if (t >= dp.idle_at + DAC_OFF_S * 1000ull) dac_off(), logf_("the DAC powered off: %d s with nothing playing", DAC_OFF_S);
+}
 
 static int ini_get(const char *text, const char *section, const char *key, int fallback) {
     char head[64];
@@ -584,6 +640,7 @@ static void output_set(int w, int s) {
     }
     soft = s;
     logf_("output %s%s, volume %d", way ? "bluetooth" : "dac", way && soft ? " soft" : "", q.volume);
+    if (way) dac_off(); /* config_outputchannel's Bluetooth: mclSetDacPwr(0) */
     player_send("mcl-setoutputway", way ? "1" : "0");
     volume_apply();
     if (q.loaded) {
@@ -2812,6 +2869,7 @@ static int command(const char *verb, const int *ids, int n_ids) {
     if (!strcmp(verb, "resume")) {
         if (q.state == PAUSED && !q.loaded) return start_from(q.at, q.pos_ms / 1000); /* a queue given back */
         if (q.state == PAUSED) {
+            dac_ready();
             player_send("mcl-play", "null");
             q.state = PLAYING, ++q.seq;
             return 0;
@@ -3183,6 +3241,7 @@ static int source_take(int slot, const char *args) {
     snprintf(q.artist, sizeof q.artist, "%s", a), snprintf(q.album, sizeof q.album, "%s", b);
     int cut = q.loaded;
     gapless_forget();
+    dac_ready();
     send_song(cut ? "set-nexturl" : "set-songurl", url, 0);
     set_cover(-1, "");
     q.expect_cut = cut;
@@ -3486,6 +3545,7 @@ int main(int argc, char **argv) {
         m3u_poll();
         words_poll();
         find_poll();
+        dac_poll(now_ms());
         ahead_poll();
         air_poll();
         if (src.on && cl[src.holder].fd < 0) source_release(src.holder); /* its holder gone (here and after the reads): before a new client takes its slot */

@@ -753,6 +753,7 @@ def test_a_plug_counts_at_once_and_an_unplug_pauses_the_music(run):
     assert play.lines == ['pause'], "music playing paused at the unplug, as stock's config_po_output does"
     jack(root, 8, True)
     assert until(lambda: 'jack bal 1' in w.lines, 1.5) and jacks(root) == 'jack po=0 bal=1'
+    assert read(root, '/run/vamp/jack') == 'po=0 bal=1', "/run/vamp/jack for q2playd's output, written at each change"
 
 
 def test_an_unplugged_read_that_does_not_last_is_no_unplug(run):

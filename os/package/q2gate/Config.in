@@ -1,0 +1,6 @@
+config BR2_PACKAGE_Q2GATE
+	bool "q2gate"
+	help
+	  Vamp OS's side of q2ui's settings pipe and its status, Wi-Fi and
+	  Bluetooth files, which demo's gate keeps on today's Vamp
+	  (gate/, docs/gate.md).

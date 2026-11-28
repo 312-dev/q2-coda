@@ -197,7 +197,7 @@ def check_image(build, fs, manifest, perturb=None):
           and ko.exists() and hashlib.sha256(ko.read_bytes()).hexdigest() == uac1.PIN[0], "Car Audio: q2-iap, q2car and tools/uac1.py's pinned usb_f_uac1.ko")
     services = sorted(p.name for p in (fs/'etc/sv').iterdir())
     check(os.access(fs/'usr/bin/q2carrd', os.X_OK) and os.access(fs/'usr/bin/coda-rc', os.X_OK), "Car Remote: q2carrd and today's coda-rc")
-    check(services == ['adb-wifi', 'adbd', 'bluealsa', 'bluetoothd', 'bt-attach', 'dbus', 'q2-airplay', 'q2btd', 'q2carrd', 'q2dacloop', 'q2dlnad', 'q2libd',
+    check(services == ['adb-wifi', 'adbd', 'bluealsa', 'bluetoothd', 'bt-attach', 'dbus', 'q2-airplay', 'q2btd', 'q2carrd', 'q2dacloop', 'q2dlnad', 'q2gate', 'q2libd',
                        'q2netd', 'q2pkgd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sendd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(os.access(fs/'usr/bin/q2sendd', os.X_OK) and os.access(fs/'usr/bin/q2send', os.X_OK) and (fs/'etc/sv/q2sendd/down').exists()

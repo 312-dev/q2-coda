@@ -10,5 +10,8 @@ if [ ! -e /dev/fb0 ]; then
 fi
 step "q2ui: start"
 exec 2>&1
-exec /usr/bin/q2ui --db /mnt/data/vamp/library.db --catalogue /mnt/mmc/.vamp/catalogue.db \
+# the settings pipe q2gate reads (docs/gate.md), on fd 3: opened both ways, so neither end waits for the other
+[ -p /run/vamp/ui.ctl ] || mkfifo -m 600 /run/vamp/ui.ctl
+exec 3<>/run/vamp/ui.ctl
+exec /usr/bin/q2ui --ctl 3 --db /mnt/data/vamp/library.db --catalogue /mnt/mmc/.vamp/catalogue.db \
     --fonts /usr/share/vamp/fonts --icons /usr/share/vamp/icons
