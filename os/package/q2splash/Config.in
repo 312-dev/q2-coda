@@ -1,0 +1,5 @@
+config BR2_PACKAGE_Q2SPLASH
+	bool "q2splash"
+	help
+	  The boot animation (docs/boot.md#boot-animation): today's q2splash, patch/splash.c,
+	  and assets/boot-anim.q2a, played by rcS on a boot from flash while q2ui waits.

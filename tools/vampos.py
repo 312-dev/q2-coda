@@ -11,7 +11,7 @@
 
 `build` runs Buildroot (BUILDROOT, pinned by SHA-256, with os/patches/buildroot applied) over os/ as a
 BR2_EXTERNAL tree. Its sources are exported from git first: this tree's os/, tools/, player/, playd/, sysd/, libd/, netd/, pkgd/, patch/,
-remote/iroh-sidecar (the crate tools/iroh.py's pin names), assets/signing and assets/fonts at HEAD, and q2ui's ui/ and patch/ at Q2UI_COMMIT, so the image is a function of the commits
+remote/iroh-sidecar (the crate tools/iroh.py's pin names), assets/signing, assets/fonts and assets/boot-anim.q2a at HEAD, and q2ui's ui/ and patch/ at Q2UI_COMMIT, so the image is a function of the commits
 it names (manifest.json); --worktree exports the working tree instead, for a try, and says so. It needs
 Linux and a case-sensitive file system: on a Mac it runs under tools/mac/q2env, whose q2-os volume holds
 CACHE. Downloads go to DL.
@@ -61,7 +61,7 @@ BUILDROOT = ('2026.02.3', 'https://buildroot.org/downloads/buildroot-2026.02.3.t
 PATCHES = ROOT/'os/patches/buildroot'
 # feat/render-engine's ui/ (another worker's; read-only here): moved on by changing this commit
 Q2UI_COMMIT = '8c725cca'
-VAMP_PATHS = ['os', 'tools', 'player', 'playd', 'sysd', 'libd', 'netd', 'btd', 'pkgd', 'dacloop', 'scrobd', 'dlnad', 'sendd', 'carrd', 'gate', 'perm', 'patch', 'remote/iroh-sidecar', 'assets/signing', 'assets/fonts', 'assets/scrobble-ca.pem', 'LICENSE']
+VAMP_PATHS = ['os', 'tools', 'player', 'playd', 'sysd', 'libd', 'netd', 'btd', 'pkgd', 'dacloop', 'scrobd', 'dlnad', 'sendd', 'carrd', 'gate', 'perm', 'patch', 'remote/iroh-sidecar', 'assets/signing', 'assets/fonts', 'assets/scrobble-ca.pem', 'assets/boot-anim.q2a', 'LICENSE']
 Q2UI_PATHS = ['ui', 'patch', 'LICENSE', 'tools', 'assets/themes', 'assets/icons', 'assets/fonts']  # tools and assets: its art
 MANIFEST = ROOT/'os/vendor/V1.36.tsv'
 # A static qemu-mipsel for the boot test (test/os_image.py), the host's architecture: Ubuntu 24.04's, from

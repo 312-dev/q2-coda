@@ -30,7 +30,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark), `accent-blue` (with --card-boot: the accent saved Blue), `carrd-off` (no q2carrd), `carrd-card` (with --card-boot: q2carrd's run script not waiting on a card boot), `seed-off` (rcS without the random seed's mix-in), `lo-off` (rcS without the loopback interface), `lo-card` (with --card-boot: lo brought up over today's Vamp's network), `gconv-off` (no GB18030 gconv module: q2libd's GB18030 lyrics go as their bytes). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark), `accent-blue` (with --card-boot: the accent saved Blue), `carrd-off` (no q2carrd), `carrd-card` (with --card-boot: q2carrd's run script not waiting on a card boot), `seed-off` (rcS without the random seed's mix-in), `lo-off` (rcS without the loopback interface), `lo-card` (with --card-boot: lo brought up over today's Vamp's network), `gconv-off` (no GB18030 gconv module: q2libd's GB18030 lyrics go as their bytes), `splash-nowait` (q2ui's run script not waiting for the boot animation). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -154,6 +154,11 @@ def check_image(build, fs, manifest, perturb=None):
     size = image.stat().st_size
     check(size <= vamp_os.ROOTFS_ROOM, f'image is {size:,} bytes, within mtd2\'s {vamp_os.ROOTFS_ROOM:,}')
     check(not (fs/'vendor').exists(), 'no /vendor in the base image')
+    rcs = (fs/'etc/init.d/rcS').read_text()
+    check((fs/'usr/bin/q2splash').is_file() and elf_facts(fs/'usr/bin/q2splash') is not None and os.access(fs/'usr/bin/q2splash', os.X_OK)
+          and (fs/'usr/share/vamp/boot-anim.q2a').is_file() and (fs/'usr/share/vamp/boot-anim.q2a').read_bytes() == (ROOT/'assets/boot-anim.q2a').read_bytes()
+          and '/usr/bin/q2splash /usr/share/vamp/boot-anim.q2a' in rcs and 'q2splash.run' in (fs/'etc/sv/q2ui/run').read_text(),
+          "the boot animation: q2splash built from patch/splash.c, assets/boot-anim.q2a, rcS's start and q2ui's wait")
     gconv = fs/'usr/lib/gconv'
     check((gconv/'GB18030.so').is_file() and (gconv/'gconv-modules').is_file() and
           any(l.split()[1:3] == ['GB18030//', 'INTERNAL'] for l in (gconv/'gconv-modules').read_text().splitlines()
@@ -738,6 +743,13 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         r.write_text(r.read_text().replace('&& card=--card-boot', '&& card='))
     if perturb == 'zone-off':  # no zone table: rcS's q2sysd zone and the service set none
         (fs/'usr/share/vamp/timezones').unlink()
+    # q2splash's stand-in: the emulator's /dev/fb0 is a plain file, where the real one exits at its first ioctl. It
+    # holds the mark for 3 s as the animation would for 7.4, so q2ui's run script's wait can be seen
+    (fs/'usr/bin/q2splash').write_text('#!/bin/sh\n. /usr/libexec/vamp/log\n: > /tmp/q2splash.run\nsleep 3\n'
+                                       'step "splash: stand-in done"\nrm -f /tmp/q2splash.run\n')
+    if perturb == 'splash-nowait':  # q2ui's run script not waiting for the boot animation
+        r = fs/'etc/sv/q2ui/run'
+        r.write_text(r.read_text().replace('if [ -e /tmp/q2splash.run ]; then', 'if false; then'))
     if perturb == 'gconv-off':  # no GB18030 converter: q2libd's GB18030 lyrics go as their bytes
         (fs/'usr/lib/gconv/GB18030.so').unlink()
     if perturb == 'sysd-off':  # no q2sysd
@@ -930,6 +942,9 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         lo, lo_said = first('ifconfig lo 127.0.0.1 netmask 255.0.0.0 up'), first('net: lo up')
         check(lo is not None and lo_said is not None and done_at is not None and lo < done_at,
               'rcS brings up the loopback interface on a boot from flash, before the services')
+        sp, sp_end, ui = first('splash: started'), first('splash: stand-in done'), first('q2ui: start')
+        check(None not in (sp, sp_end, ui) and first('fb0: present') < sp < done_at and sp_end < ui,
+              'rcS starts the boot animation on a boot from flash, and q2ui starts once it has ended (a 3 s stand-in)')
         if first('rcK: stopping the services') is not None:  # the power key's hold (sysd_checks) ran init's shutdown
             check(first('rcK: seed saved') is not None, 'rcK saves a random seed at shutdown')
     if card:
@@ -937,6 +952,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
               'card boot: the module script is not run again over loaded modules')
         check(first('data: already mounted') is not None and not any(s.startswith(('ubiattach', 'mount -t tmpfs -o mode=0755 tmpfs /mnt/data')) for s in order),
               'card boot: /mnt/data is kept as mounted')
+        check(first('splash: started') is None, "card boot: no boot animation (today's Vamp played it)")
         idx = [first('rcS: done'), first('q2player: start'), first('q2ui: start')]
         check(None not in idx and idx[0] < min(idx[1:]), 'card boot: rcS done, then the services')
         print(f'boot: {logs or work} (console.log, timeline.txt)')
@@ -980,7 +996,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark', 'accent-blue', 'carrd-off', 'carrd-card', 'seed-off', 'lo-off', 'lo-card', 'gconv-off'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark', 'accent-blue', 'carrd-off', 'carrd-card', 'seed-off', 'lo-off', 'lo-card', 'gconv-off', 'splash-nowait'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()

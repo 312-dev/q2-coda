@@ -11,7 +11,8 @@
 #      Not run when any of them is loaded already (a boot from the card);
 #   4. the card's rescue copy of recovery-update/ put back after an install (q2pkgd restore), as soon as the card is
 #      mounted;
-#   5. a wait for /dev/fb0, and the input devices found.
+#   5. a wait for /dev/fb0; on a boot from flash the screen cleared and the boot animation started in the background
+#      (q2splash, which q2ui's run script waits for); and the input devices found.
 # Then init starts runsvdir (/etc/inittab). Nothing of Shanling's userspace runs: the scripts in /vendor are
 # insmod lines run by this image's BusyBox.
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
@@ -163,6 +164,16 @@ if [ -e /mnt/mmc/.vamp/rescue/pending ]; then
     if /usr/bin/q2pkgd restore > /dev/null 2>&1; then step "rescue: recovery-update/ restored"; else step "rescue: restore FAILED"; fi
 fi
 if wait_for /dev/fb0 50; then step "fb0: present"; else step "fb0: missing"; fi
+# The boot animation (docs/boot.md#boot-animation), on a boot from flash: on the card's, today's Vamp played it already.
+# Its frames are changes from a black first frame (display_logo's on today's Vamp), so the screen is cleared first,
+# both pages (320 x 375 x 4 bytes each, as q2ui maps them, ui/fb.c). While it plays it holds /tmp/q2splash.run, which q2ui's run script waits on; it exits at once (1) on a
+# screen that is not the Q2's. ponytail: it draws on page 0 and pans nothing, so it assumes page 0 is shown at this
+# point of a flash boot, as on stock; seen only on today's Vamp so far.
+if [ -e /dev/fb0 ] && [ ! -e /run/vamp/card-boot ] && [ -x /usr/bin/q2splash ]; then
+    dd if=/dev/zero of=/dev/fb0 bs=1280 count=750 conv=notrunc 2>/dev/null
+    /usr/bin/q2splash /usr/share/vamp/boot-anim.q2a < /dev/null > /dev/null 2>&1 &
+    step "splash: started"
+fi
 for e in /dev/input/event*; do
     [ -e "$e" ] && step "input: ${e##*/} $(cat "/sys/class/input/${e##*/}/device/name" 2>/dev/null)"
 done
