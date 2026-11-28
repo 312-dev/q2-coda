@@ -60,7 +60,7 @@ BUILDROOT = ('2026.02.3', 'https://buildroot.org/downloads/buildroot-2026.02.3.t
              '5a59e7501b0b4ec52c41f4bfa79412320e0b37eae5f719605a258e8d0c6fc7fb')
 PATCHES = ROOT/'os/patches/buildroot'
 # feat/render-engine's ui/ (another worker's; read-only here): moved on by changing this commit
-Q2UI_COMMIT = '18168833'
+Q2UI_COMMIT = 'df5add23'
 VAMP_PATHS = ['os', 'tools', 'player', 'playd', 'sysd', 'libd', 'netd', 'btd', 'pkgd', 'dacloop', 'scrobd', 'dlnad', 'sendd', 'carrd', 'gate', 'perm', 'patch', 'assets/signing', 'assets/fonts', 'assets/scrobble-ca.pem', 'LICENSE']
 Q2UI_PATHS = ['ui', 'patch', 'LICENSE', 'tools', 'assets/themes', 'assets/icons', 'assets/fonts']  # tools and assets: its art
 MANIFEST = ROOT/'os/vendor/V1.36.tsv'
