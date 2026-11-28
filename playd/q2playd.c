@@ -91,6 +91,7 @@ static struct {
     int expect_cut;              /* a set-nexturl or mcl-stop was sent: its answer is no song's end */
     char title[256], artist[256], album[256], file[1024];
     char row_url[1024];          /* a played-as-paths song's library row's fileurl, "" with none */
+    int cue_start, cue_end;      /* a CUE track's span in its file, seconds (docs/playd.md#cue-tracks); cue_end 0: the file's end */
     char **paths;                /* a server list's answer: the app's m3u, played as paths in place of ids (np of them) */
     int np;
     int offline;                 /* the list played by q2playd itself: its server rows by their offline copies */
@@ -144,20 +145,29 @@ static int song_lookup(int id) {
     sqlite3_stmt *st;
     int ok = 0, server = (unsigned)id >= CAT_ID_BASE;
     q.title[0] = q.artist[0] = q.album[0] = q.file[0] = q.row_url[0] = 0;
+    q.cue_start = q.cue_end = 0;
     if (sqlite3_open_v2(server ? cat_path : db_path, &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) {
         logf_("cannot read %s", server ? cat_path : db_path);
         sqlite3_close(db);
         return 0;
     }
-    if (sqlite3_prepare_v2(db, server ? "select fileurl, name, songer, album from servertable where id = ?"
-                                      : "select fileurl, name, songer, album from songtable where id = ?",
-                           -1, &st, 0) == SQLITE_OK) {
+    /* a card row's time and time_end are stock's CUE start and end (docs/libd.md#cue-sheets): the end is a cut only
+     * where the file's next track starts, as demo cuts one; a whole file's end is its own */
+    if (sqlite3_prepare_v2(db, server ? "select fileurl, name, songer, album, 0, 0 from servertable where id = ?"
+                                      : "select fileurl, name, songer, album, max(ifnull(time, 0), 0), case when exists"
+                                        " (select 1 from songtable n where n.fileurl = s.fileurl and n.id <> s.id and"
+                                        " n.time = s.time_end and s.time_end > s.time) then time_end else 0 end"
+                                        " from songtable s where id = ?",
+                           -1, &st, 0) == SQLITE_OK ||
+        /* a songtable without stock's time columns (a test's stand-in): whole files */
+        (!server && sqlite3_prepare_v2(db, "select fileurl, name, songer, album, 0, 0 from songtable where id = ?", -1, &st, 0) == SQLITE_OK)) {
         sqlite3_bind_int(st, 1, id);
         if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0)) {
             snprintf(q.file, sizeof q.file, "%s", (const char *)sqlite3_column_text(st, 0));
             snprintf(q.title, sizeof q.title, "%s", sqlite3_column_text(st, 1) ? (const char *)sqlite3_column_text(st, 1) : "");
             snprintf(q.artist, sizeof q.artist, "%s", sqlite3_column_text(st, 2) ? (const char *)sqlite3_column_text(st, 2) : "");
             snprintf(q.album, sizeof q.album, "%s", sqlite3_column_text(st, 3) ? (const char *)sqlite3_column_text(st, 3) : "");
+            q.cue_start = sqlite3_column_int(st, 4), q.cue_end = sqlite3_column_int(st, 5);
             ok = 1;
         }
         sqlite3_finalize(st);
@@ -302,7 +312,7 @@ static int path_lookup(int at) {
     const char *p = q.paths[at], *base = strrchr(p, '/');
     char app[64], sid[128], like[300];
     snprintf(q.file, sizeof q.file, "%s", p);
-    q.row_url[0] = 0;
+    q.row_url[0] = 0, q.cue_start = q.cue_end = 0;
     if (row_of(db_path, "select name, songer, album, fileurl from songtable where fileurl = ?1", p)) return 1;
     if (row_of(cat_path, "select s.name, s.songer, s.album, s.fileurl from servertable s join servermeta m on m.id = s.id"
                          " where m.local = ?1", p))
@@ -334,7 +344,7 @@ static int start_from(int at, int ss) {
         if (q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]])) {
             int cut = q.loaded;
             dac_ready();
-            send_song(cut ? "set-nexturl" : "set-songurl", q.file, ss);
+            send_song(cut ? "set-nexturl" : "set-songurl", q.file, q.cue_start + ss);
             set_cover(q.paths ? -1 : q.ids[q.order[at]], q.paths || *q.row_url ? q.row_url : q.file);
             q.expect_cut = cut;
             q.loaded = 1, q.state = PLAYING, q.pos_ms = ss * 1000, q.len_s = 0;
@@ -376,11 +386,15 @@ static void reshuffle(int first);
 static int pm_shuffle(void);
 
 static int gapless_took(void);
-static void ended(int error) {
-    logf_("song %d %s", q.n && !q.paths ? q.ids[q.order[q.at]] : 0, error ? "did not play" : "ended");
-    if (!error && !src.on && gapless_took()) return; /* the player plays the preloaded song on alone */
+static void ended_at(int error, int cue);
+static void ended(int error) { ended_at(error, 0); }
+/* cue: a CUE track's end, its file still playing (docs/playd.md#cue-tracks): the next song cuts it as set-nexturl does
+ * a song changed by hand, and a queue's end stops it */
+static void ended_at(int error, int cue) {
+    logf_("song %d %s", q.n && !q.paths ? q.ids[q.order[q.at]] : 0, error ? "did not play" : cue ? "ended (its CUE end)" : "ended");
+    if (!error && !cue && !src.on && gapless_took()) return; /* the player plays the preloaded song on alone */
     gl.sent = 0;
-    q.loaded = 0;
+    q.loaded = cue;
     if (src.on) { /* a source's URL: its holder is told and the queue given back */
         source_end(error ? "error" : "end");
         return;
@@ -400,6 +414,7 @@ static void ended(int error) {
         return;
     }
     player_send("mcl-orderstop", "null");
+    if (cue) q.loaded = 0, q.expect_cut = 1; /* the file stopped here: its close is no song's end */
     q.state = STOPPED, q.pos_ms = 0;
     ++q.seq;
 }
@@ -417,10 +432,19 @@ static void player_message(const char *name, const char *arg) {
     } else if (!strcmp(name, "media-info") && strcmp(arg, "no-playing-status")) {
         int rate, len, pos;
         if (sscanf(arg, "%*d|%d|%d|%d", &rate, &len, &pos) == 3 && q.loaded) {
+            if (q.cue_end && pos >= q.cue_end && !src.on) { /* the next track's start: demo ends this one there */
+                ended_at(0, 1);
+                return;
+            }
+            if (q.cue_start || q.cue_end) { /* the track's own place and length, not its file's */
+                len = (q.cue_end ? q.cue_end : len) - q.cue_start, pos -= q.cue_start;
+                if (len < 0) len = 0;
+                if (pos < 0) pos = 0;
+            }
             if (len != q.len_s) q.len_s = len, ++q.seq;
             if (pos * 1000 != q.pos_ms) q.pos_ms = pos * 1000, ++q.seq;
             listen_tick(pos, len), resume_tick(pos, len);
-            gapless_tick(pos, len);
+            if (!q.cue_end) gapless_tick(pos, len); /* a preload would play only at the file's end, past the track's */
         }
     }
 }
@@ -1717,7 +1741,7 @@ static void ratings_in_poll(unsigned long long t) {
 /* ---- the card's copy of the ratings (docs/playd.md#the-cards-copy) ----
  * Today's Vamp's /mnt/mmc/.ratings.tsv (patch/ratings.c rc_*, docs/internals.md#ratings "Card copy"), for a computer:
  * /mnt/data is not on the card that USB storage shows. Two comment lines naming the columns, then "song", stars,
- * liked, path, a CUE track's start (none here: q2playd has no CUE tracks), and "album", hearts, name, album artist
+ * liked, path, a CUE track's start (always 0: q2playd keys a song by its path alone, docs/playd.md#cue-tracks), and "album", hearts, name, album artist
  * and, for an album without one of those, its folder. The tables hold hashes, so a pass reads the paths and tags back:
  * the likes first (liked, with any stars kept for them), then the library's songtable, then the card catalogue's
  * servertable, a page of rows each time round the loop, the rated still to find sorted for a binary search; a table
@@ -2803,10 +2827,12 @@ static int peek_file(int at, char *out, size_t room) {
     char title[sizeof q.title], artist[sizeof q.artist], album[sizeof q.album], file[sizeof q.file], row[sizeof q.row_url];
     memcpy(title, q.title, sizeof title), memcpy(artist, q.artist, sizeof artist), memcpy(album, q.album, sizeof album);
     memcpy(file, q.file, sizeof file), memcpy(row, q.row_url, sizeof row);
+    int cue_start = q.cue_start, cue_end = q.cue_end;
     int ok = q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]]);
     if (ok) snprintf(out, room, "%s", q.file);
     memcpy(q.title, title, sizeof title), memcpy(q.artist, artist, sizeof artist), memcpy(q.album, album, sizeof album);
     memcpy(q.file, file, sizeof file), memcpy(q.row_url, row, sizeof row);
+    q.cue_start = cue_start, q.cue_end = cue_end;
     return ok;
 }
 
@@ -2975,7 +3001,9 @@ static int command(const char *verb, const int *ids, int n_ids) {
     }
     if (!strcmp(verb, "previous")) {
         if (q.loaded && q.pos_ms > 3000) {
-            player_send("mcl-seek", "0");
+            char s[16];
+            snprintf(s, sizeof s, "%d", q.cue_start); /* a CUE track's own start */
+            player_send("mcl-seek", s);
             q.pos_ms = 0, ++q.seq;
             return 0;
         }
@@ -2984,7 +3012,7 @@ static int command(const char *verb, const int *ids, int n_ids) {
     if (sscanf(verb, "seek %d", &a) == 1 && a >= 0) {
         char s[16];
         if (!q.loaded) return -1;
-        snprintf(s, sizeof s, "%d", a);
+        snprintf(s, sizeof s, "%d", q.cue_start + a); /* a CUE track's place, in its file */
         player_send("mcl-seek", s);
         q.pos_ms = a * 1000, ++q.seq;
         return 0;

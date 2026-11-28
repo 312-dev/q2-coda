@@ -304,6 +304,58 @@ def test_the_position_and_length_come_from_media_info(run):
     assert (n['pos'], n['len']) == ('42000', '200')
 
 
+def cue_rows(root):
+    """a CUE sheet's three tracks of one 10 s file as q2libd lists them (docs/libd.md#cue-sheets), and a whole file"""
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    db.execute('alter table songtable add column time integer')
+    db.execute('alter table songtable add column time_end integer')
+    db.executemany('insert into songtable values (?, ?, ?, ?, ?, 0, ?, ?)',
+                   [(50, '/mnt/mmc/live.flac', 'One', 'Cee', 'Live', 0, 4), (51, '/mnt/mmc/live.flac', 'Two', 'Cee', 'Live', 4, 7),
+                    (52, '/mnt/mmc/live.flac', 'Three', 'Cee', 'Live', 7, 10), (53, '/mnt/mmc/whole.flac', 'Whole', 'Cee', 'Live', 0, 10)])
+    db.commit()
+    db.close()
+
+
+@pytest.mark.parametrize('prepare', [cue_rows])
+def test_a_cue_track_plays_its_span_of_the_file_and_cuts_to_the_next_at_its_end(run):
+    """docs/playd.md#cue-tracks: ss= the track's start, its own place and length in Now Playing, a seek inside it,
+    and set-nexturl at the next track's start as demo cuts it, nothing preloaded before a cut; the file's last track
+    plays out, the next file preloaded as at any song's end"""
+    root, pl = run
+    play_list(root, [51, 52, 53], 0)
+    pl.info = '900000|44100|10|5|FLAC|16'
+    pl.pump(1.5)
+    sent = [a for n, a in pl.got if n == 'set-songurl']
+    assert sent and sent[-1].split('|')[:2] == ['/mnt/mmc/live.flac', 'ss=4'], sent
+    n = now(root, 0.6)
+    assert (n['title'], n['pos'], n['len']) == ('Two', '1000', '3'), n
+    assert 'set-gapless' not in pl.names(), 'nothing preloaded 2 s before a cut inside the file'
+    fifo(root, 'seek 2')
+    pl.pump()
+    assert ('mcl-seek', '6') in pl.got, "a place in the track is its file's place"
+    pl.info = '900000|44100|10|7|FLAC|16'
+    pl.pump(1.5)
+    cut = [a for n, a in pl.got if n == 'set-nexturl']
+    assert cut and cut[-1].split('|')[:2] == ['/mnt/mmc/live.flac', 'ss=7'], "cut at the next track's start"
+    pl.info = '900000|44100|10|9|FLAC|16'
+    pl.pump(1.5)
+    n = now(root, 0.6)
+    assert (n['title'], n['pos'], n['len']) == ('Three', '2000', '3'), n
+    assert len([a for n, a in pl.got if n == 'set-nexturl']) == 1, "the file's last track is not cut: it plays out"
+    gapless = [a for n, a in pl.got if n == 'set-gapless']
+    assert gapless and gapless[-1].split('|')[0] == '/mnt/mmc/whole.flac', "the file's last track ends with it: the next file preloaded"
+
+
+@pytest.mark.parametrize('prepare', [cue_rows])
+def test_a_whole_file_with_its_length_in_time_end_is_never_cut(run):
+    root, pl = run
+    play_list(root, [53], 0)
+    pl.info = '900000|44100|10|10|FLAC|16'
+    pl.pump(1.5)
+    assert [a.split('|')[1] for n, a in pl.got if n == 'set-songurl'][-1:] == ['ss=0'] and 'set-nexturl' not in pl.names()
+    assert (now(root, 0.6)['pos'], now(root, 0)['len']) == ('10000', '10')
+
+
 def dac(root):
     """the levels the DAC was set to, each as (left, right)"""
     return [(int(v) >> 8, int(v) & 0xff) for v in (root/'dac.log').read_text().split()] if (root/'dac.log').exists() else []

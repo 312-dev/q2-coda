@@ -57,7 +57,7 @@ At its start: an empty library first when there is none, so `q2ui` always has on
 
 ## CUE sheets
 
-A `.cue` in a folder of the card makes one row a track, as stock's scan does: each row the audio file the sheet's `FILE` names, `time` its `INDEX 01` and `time_end` the next track's (the file's last track ends at the file's end), in whole seconds, the unit of stock's column and of the player's `ss=` start. The sheet's `TITLE` is the album and its `PERFORMER` the album artist and each track's artist unless the track names its own; `REM DATE`, `REM GENRE` and `REM DISCNUMBER` fill year, genre and disc; a track with no `TITLE` is `Track NN`. A `FILE` that names another audio extension than the card's file (a sheet written for the `.wav` the `.flac` was made from) is found by its name without the extension. The audio a sheet takes is listed through its tracks alone; a sheet whose audio is not beside it adds nothing and says so. A track keeps its id while its file and number stay, and is read again when the sheet or the audio changes. ponytail: a sheet in a legacy code page (stock read GBK) shows its bytes as they are; uchardet and iconv would read it. Playing a track from its start to its end is `q2playd`'s ([playd](playd.md)).
+A `.cue` in a folder of the card makes one row a track, as stock's scan does: each row the audio file the sheet's `FILE` names, `time` its `INDEX 01` and `time_end` the next track's (the file's last track ends at the file's end), in whole seconds, the unit of stock's column and of the player's `ss=` start. The sheet's `TITLE` is the album and its `PERFORMER` the album artist and each track's artist unless the track names its own; `REM DATE`, `REM GENRE` and `REM DISCNUMBER` fill year, genre and disc; a track with no `TITLE` is `Track NN`. A `FILE` that names another audio extension than the card's file (a sheet written for the `.wav` the `.flac` was made from) is found by its name without the extension. The audio a sheet takes is listed through its tracks alone; a sheet whose audio is not beside it adds nothing and says so. A track keeps its id while its file and number stay, and is read again when the sheet or the audio changes. ponytail: a sheet in a legacy code page (stock read GBK) shows its bytes as they are; uchardet and iconv would read it. Playing a track from its start to its end is `q2playd`'s ([playd: CUE tracks](playd.md#cue-tracks)).
 
 ## Tests
 
@@ -65,6 +65,5 @@ A `.cue` in a folder of the card makes one row a track, as stock's scan does: ea
 
 ## What is missing
 
-- Playing a CUE track's span: `q2playd` starts a row at 0 and plays its file to the end ([CUE sheets](#cue-sheets)).
 - Duplicates by MusicBrainz id or the same file, thumbnails of covers, a changed cover picked up without its file removed.
 - Scans driven by inotify instead of a 10 s look, and progress for a long first scan: measured under QEMU only, not on a Q2's card.
