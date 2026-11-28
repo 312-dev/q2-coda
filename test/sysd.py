@@ -1346,7 +1346,7 @@ def test_with_no_backlight_device_the_screen_is_stock_s_pwm_on_pc00(binary, tree
     level 0, on is LIGHTNESS + 11, brightness P is LIGHTNESS P"""
     shutil.rmtree(tree/'sys/class/backlight/lcd')
     put(tree, '/mnt/data/config.ini', '[SYSSET]\nLIGHTNESS=40\n')
-    f = Pwm(binary, tree, pwm_shim)
+    f = Pwm(binary, tree, pwm_shim, extra=['--card-boot'])
     assert f.calls() == [], 'nothing touched at the start: a card boot keeps the light demo left'
     assert ask_sys(tree, 'screen off') == 'ok' and ask_sys(tree, 'screen') == 'screen off'
     assert f.calls() == ['request PC00', 'level 1 0', 'config 10000 1 steps 111', 'level 1 0'], f.calls()
@@ -1359,9 +1359,21 @@ def test_with_no_backlight_device_the_screen_is_stock_s_pwm_on_pc00(binary, tree
     assert f.end()[0] == 0
 
 
+def test_a_boot_from_flash_lights_the_screen_at_the_saved_brightness_at_the_start(binary, tree, tools, pwm_shim):
+    """No demo before it on a boot from flash, so nothing lit the panel: stock's demo did at its start
+    (config_lightness), and q2sysd does it there, at [SYSSET] LIGHTNESS (docs/sysd.md#the-backlight)"""
+    shutil.rmtree(tree/'sys/class/backlight/lcd')
+    put(tree, '/mnt/data/config.ini', '[SYSSET]\nLIGHTNESS=40\n')
+    f = Pwm(binary, tree, pwm_shim)
+    assert f.calls() == ['request PC00', 'level 1 0', 'config 10000 1 steps 111', 'level 1 51'], f.calls()
+    assert ask_sys(tree, 'screen') == 'screen on'
+    assert f.end()[0] == 0
+
+
 def test_a_pwm_backlight_refused_is_err_screen_and_no_level(binary, tree, tools, pwm_shim):
     shutil.rmtree(tree/'sys/class/backlight/lcd')
-    f = Pwm(binary, tree, pwm_shim, env={'Q2PWM_REFUSE': '1'})
+    # a card boot, so the first use is this ask (a boot from flash makes it at the start, and asks again at the next)
+    f = Pwm(binary, tree, pwm_shim, env={'Q2PWM_REFUSE': '1'}, extra=['--card-boot'])
     assert ask_sys(tree, 'screen off') == 'err screen'
     assert not [c for c in f.calls() if c.startswith('level') and c != 'level 1 0'], f.calls()
     f.end()

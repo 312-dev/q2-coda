@@ -155,8 +155,8 @@ static int jack_in[2]; /* the jacks' (below) */
  * The Q2 has none: stock's toolSetBackLight, for the model its demo is built for (23, the constant main passes to
  * initToolsModule), drives the panel's light from PWM pin PC00 through /dev/jz_pwm, as libhardware2.so's pwm_request,
  * pwm_config and pwm_set_level send it: 10 kHz over BL_STEPS steps, lit at [SYSSET] LIGHTNESS (0 to 100) + 1 + 10, dark
- * at 0 (docs/sysd.md#the-backlight). The channel is taken at its first use, not at the start, so a card boot leaves
- * the light today's Vamp's demo set until it is asked to change it. */
+ * at 0 (docs/sysd.md#the-backlight). On a card boot the channel is taken at its first use, not at the start, so the
+ * light today's Vamp's demo set stays until it is asked to change it; a boot from flash lights it at the start. */
 static int config_int(const char *section, const char *key, int fallback);
 #define BL_PIN "PC00"
 #define BL_STEPS 111 /* pwm_config's fifth word: LIGHTNESS 100 + 1 + 10 is the whole period */
@@ -1458,6 +1458,10 @@ int main(int argc, char **argv) {
     q2perm_socket(a.sun_path, path("/etc/group"), "settings"); /* 0660, the settings group's */
     charge_limit = config_int("Q2POD", "CHARGELIMIT", 0);
     find_backlight();
+    /* A boot from flash has no demo before it, which lit the panel at the saved LIGHTNESS as it started
+     * (config_lightness): the light is set here, the PWM's way. A card boot keeps the light today's Vamp left, and a
+     * sysfs backlight device keeps the level its driver holds. */
+    if (!card_boot && !backlight[0]) set_screen(1);
     open_inputs();
     read_battery();
     light_poll();
