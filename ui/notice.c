@@ -33,6 +33,7 @@
  * stepped by notice_step, drawn by notice_draw over the page and the status row). */
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>

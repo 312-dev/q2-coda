@@ -6,7 +6,10 @@ STRIP ?= strip
 SRC := main.c ui.c anim.c fb.c panel.c draw.c text.c image.c input.c theme.c status.c lib.c api.c player.c now.c notice.c art.c config.c list.c card.c page_songs.c page_library.c page_settings.c page_display.c page_playback.c page_general.c page_wifi.c page_bluetooth.c page_control.c page_home.c page_now.c page_depth.c page_gallery.c page_edit.c page_menu.c cells.c \
        ../patch/wheel_accel.c
 OBJ := $(patsubst %.c,$(OUT)/%.o,$(notdir $(SRC)))
-CFLAGS := -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -isystem $(STB) -isystem $(STBI) -isystem $(SQLITE_INC)
+# GCC 14 (Buildroot's, VampOS's image) makes these three errors; every compiler that builds q2ui is held to them so
+# a missing header fails here first, not in VampOS's image build
+STRICT := -Werror=implicit-function-declaration -Werror=implicit-int -Werror=incompatible-pointer-types
+CFLAGS := -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra $(STRICT) -ffunction-sections -fdata-sections -isystem $(STB) -isystem $(STBI) -isystem $(SQLITE_INC)
 # SQLite linked by file: the root filesystem has the library and no header, and no libsqlite3.so link for -l
 LIBS := $(SQLITE_LIB) -Wl,--allow-shlib-undefined -lm -lpthread
 
