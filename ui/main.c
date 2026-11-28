@@ -354,6 +354,24 @@ static void bench_case(const char *name, int ticks, int dir, unsigned gap_us, in
         bench_note(name, ui_stats.frames - before.frames, cpu_ns() - t0, ui_stats.draw_ns - before.draw_ns,
                    ui_stats.show_ns - before.show_ns, worst, ui_stats.px - before.px);
 }
+/* A finger dragging the list a frame at a time: down at y 280, up 4 px a frame for 50 frames, held still, lifted, and
+ * the same back down, four times; every frame the rows follow it (ui/list.c list_touch). */
+static void bench_drag(const char *name) {
+    struct ui_stats before = ui_stats;
+    uint64_t t0 = cpu_ns(), worst = 0;
+    for (int round = 0; round < 4; ++round)
+        for (int k = 0; k <= 52; ++k) {
+            int y = round & 1 ? 80 + 4 * (k > 50 ? 50 : k) : 280 - 4 * (k > 50 ? 50 : k);
+            input_t in = { !k ? IN_TOUCH_DOWN : k == 52 ? IN_TOUCH_UP : IN_TOUCH_MOVE, 0, 0, (unsigned)(fake_us / 1000u), 150, y };
+            uint64_t f0 = cpu_ns();
+            ui_clock_fake(fake_us);
+            ui_frame(&in, 1);
+            if (cpu_ns() - f0 > worst) worst = cpu_ns() - f0;
+            fake_us += FRAME_US;
+        }
+    bench_note(name, ui_stats.frames - before.frames, cpu_ns() - t0, ui_stats.draw_ns - before.draw_ns,
+               ui_stats.show_ns - before.show_ns, worst, ui_stats.px - before.px);
+}
 static void bench(void) {
     int rows = lib_songs(), steps = rows > 420 ? 200 : rows / 3, motion = list_motion;
     fb_vsync = 0;
@@ -374,6 +392,7 @@ static void bench(void) {
     bench_case("glide_slow", 20, 1, 400000, 1);
     bench_case("glide_fast", 100, 1, 27000, 1);
     bench_case("glide_back", 100, -1, 27000, 1);
+    bench_drag("drag");
     strcat(bench_json, "}");
     list_motion = motion;
 }

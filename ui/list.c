@@ -182,6 +182,17 @@ struct ui_list {
         float from;
         uint64_t at;
     } slides[SLIDES];
+    /* a finger on the list (list_touch): the row it landed on (-1 none), where, when; dragging once it has gone
+     * TOUCH_SLOP px up or down, the scroll then following it from ref_scroll at ref_y; held once a still finger's
+     * hold went out; its last two samples, for a fling's speed */
+    struct {
+        int down, dragging, held, row, y0, ref_y, n;
+        double ref_scroll;
+        uint64_t at;
+        int ys[2];
+        unsigned ms[2];
+    } touch;
+    float glide_s; /* the scroll's spring now: a fling's longer one, else 0 for GLIDE_S */
 };
 
 #define SONG_COL_GAP 12   /* a song row's columns apart (patch/navigation.h) */
@@ -946,6 +957,171 @@ void list_select(ui_list *l, int i, int animate) {
     }
 }
 
+/* Centre let go on the selected row, or a tap on it: a slider grabbed or set down, the playing song's Now Playing,
+ * else the source's choice. */
+static void choose(ui_list *l) {
+    if (row_text_flags(l, l->sel) & ROW_SLIDER) { /* Centre grabs a slider and sets it down */
+        l->grab = l->grab == l->sel ? -1 : l->sel;
+        ui_mark(l->focus_was);
+    } else if (row_text_flags(l, l->sel) & ROW_PLAYING) /* the song plays on: never sent again */
+        ui_push(&page_now, 0);
+    else if (l->src.chosen)
+        l->src.chosen(l->src.ctx, l->sel);
+}
+
+/* ---- touch (docs/ui-rewrite.md#the-toolkit) ----
+ * A finger on the list, as the wheel's list behaves wherever it can: a tap on a row selects it and chooses it as
+ * Centre would; a still finger held KEY_HOLD_MS holds the row as Centre held does; a finger that goes TOUCH_SLOP px up
+ * or down drags the rows with it (no tap, no hold), the selection kept on a row in sight, and let go it flings: the
+ * rows go on at its speed and settle on whole rows (FLING_S), as a tick's glide does. Past either end the rows follow
+ * at EDGE_GIVE of the finger and spring back. The same TOUCH_SLOP is Control Center's (page_control.c): a finger that
+ * pulls Control Center down from the status row is taken from the list with an IN_TOUCH_UP of value 1 (ui.c pulled),
+ * which ends the touch with no tap. */
+#define TOUCH_SLOP 10     /* px up or down before a finger drags */
+#define FLING_S 0.45f     /* a fling's spring: the rows coast this long */
+#define FLING_LEAD 0.30f  /* and go on as far as its speed takes them in this many seconds */
+#define FLING_MIN 150.0f  /* px/s: a slower let-go only settles */
+#define EDGE_GIVE 0.35f
+static double scroll_max(const ui_list *l) {
+    int over = l->n - l->src.pinned - l->rows;
+    return over > 0 ? (double)over * l->row_h : 0;
+}
+/* The row at screen (x, y), -1 none: a pinned row in its place, else the scrolling row there now. */
+static int row_at(ui_list *l, int x, int y) {
+    int p = l->src.pinned;
+    if (x < l->box.x || x >= l->box.x + l->box.w || y < l->box.y || y >= l->box.y + l->box.h) return -1;
+    if (y < l->y0) {
+        int i = (y - l->box.y) / l->row_h;
+        return i < p ? i : -1;
+    }
+    int guess = p + (int)floor(((double)(y - l->y0) + l->scroll.x) / (double)l->row_h);
+    for (int i = guess - 2; i <= guess + 2; ++i) {
+        if (i < p || i >= l->n) continue;
+        float top = row_y(l, i);
+        if ((float)y >= top && (float)y < top + (float)l->row_h + row_extra(l, i)) return i;
+    }
+    return -1;
+}
+/* The rows at scroll s, wherever the finger has them: the platter on the selected row, the selection moved onto
+ * a row in sight when it would leave (no click: the wheel's clicks are a row's each, a drag's are not). */
+static void drag_to(ui_list *l, double s) {
+    int p = l->src.pinned, old = l->sel;
+    spring_set(&l->scroll, s);
+    double top = s < 0 ? 0 : s > scroll_max(l) ? scroll_max(l) : s;
+    int first = p + (int)ceil(top / l->row_h - 0.25), last = first + l->rows - 1;
+    last = last >= l->n ? l->n - 1 : last;
+    if (l->sel >= p && (l->sel < first || l->sel > last)) {
+        int sel = l->sel < first ? first : last, dir = l->sel < first ? 1 : -1;
+        while (sel >= first && sel <= last && !selectable(l, sel)) sel += dir;
+        if (sel >= first && sel <= last) l->sel = sel;
+    }
+    l->top = first;
+    if (l->sel != old) {
+        cap_to(l, 0);
+        l->mq_row = -1, l->mq_at = 0, l->mq_x = 0;
+        struct rowc *c = row_text(l, l->sel);
+        spring_set(&l->knob, c->row.flags & ROW_ON ? 1.0f : 0.0f);
+        if (l->src.focus) l->src.focus(l->src.ctx, l->sel);
+    }
+    spring_set(&l->bar, l->sel < p ? (double)bar_to(l) : (double)row_y(l, l->sel));
+    l->sb_at = ui_time();
+    if (l->sb_alpha != 255) l->sb_alpha = 255, ui_mark(sb_rect());
+    ui_wake_ms((SB_SHOW_US - SB_FADE_US) / 1000u);
+    ui_mark(frame_rect(l));
+    rect_t f = focus_rect(l);
+    ui_mark(rect_union(f, l->focus_was));
+    l->focus_was = f;
+}
+/* Let go after a drag: on at the finger's speed v (px/s of scroll), to whole rows. */
+static void fling(ui_list *l, double v) {
+    int p = l->src.pinned, rows_over = (int)(scroll_max(l) / l->row_h);
+    double to = l->scroll.x + (fabs(v) >= FLING_MIN ? v * FLING_LEAD : 0);
+    int top = p + (int)floor(to / l->row_h + 0.5);
+    top = top < p ? p : top > p + rows_over ? p + rows_over : top;
+    l->top = top;
+    if (l->sel >= p) {
+        int sel = l->sel < top ? top : l->sel > top + l->rows - 1 ? top + l->rows - 1 : l->sel, old = l->sel;
+        sel = sel >= l->n ? l->n - 1 : sel;
+        while (sel < top + l->rows - 1 && sel < l->n - 1 && !selectable(l, sel)) ++sel;
+        if (selectable(l, sel)) l->sel = sel;
+        if (l->sel != old) moved(l, old);
+    }
+    retarget(l);
+    l->scroll.v = fabs(v) >= FLING_MIN ? v : 0;
+    l->glide_s = FLING_S;
+    if (!list_motion || ui_reduce_motion) {
+        settle(l);
+        ui_mark(frame_rect(l));
+        return;
+    }
+    kick(l);
+}
+static void list_touch(ui_list *l, const input_t *e) {
+    if (e->type == IN_TOUCH_DOWN) {
+        l->touch.down = 1, l->touch.dragging = l->touch.held = 0, l->touch.n = 0;
+        l->touch.row = l->grab >= 0 ? -1 : row_at(l, e->x, e->y); /* a grabbed slider keeps the wheel's */
+        l->touch.y0 = e->y, l->touch.at = ui_time();
+        if (l->touch.row >= 0 && l->src.held) ui_wake_ms(KEY_HOLD_MS);
+        if (l->moving && l->glide_s) { /* a finger on coasting rows stops them where they are */
+            spring_set(&l->scroll, l->scroll.x);
+            l->touch.dragging = 1, l->touch.ref_y = e->y, l->touch.ref_scroll = l->scroll.x, l->touch.row = -1;
+        }
+        l->glide_s = 0;
+    }
+    if (!l->touch.down) return;
+    if (e->type == IN_TOUCH_UP && e->value) { /* taken by Control Center's pull: no tap, and the rows settle */
+        int dragged = l->touch.dragging;
+        l->touch.down = 0;
+        if (dragged) fling(l, 0);
+        return;
+    }
+    if (e->type != IN_TOUCH_UP) { /* a lift comes where the finger last was: only a move says how fast it went */
+        if (l->touch.n == 2) l->touch.ys[0] = l->touch.ys[1], l->touch.ms[0] = l->touch.ms[1], l->touch.n = 1;
+        l->touch.ys[l->touch.n] = e->y, l->touch.ms[l->touch.n++] = e->ms;
+    }
+    if (!l->touch.dragging && !l->touch.held && abs(e->y - l->touch.y0) >= TOUCH_SLOP && l->grab < 0) {
+        /* from here the rows follow the finger, taking up where it is now (no jump of the slop) */
+        l->touch.dragging = 1, l->touch.ref_y = e->y, l->touch.ref_scroll = l->scroll.x;
+    }
+    if (l->touch.dragging) {
+        double s = l->touch.ref_scroll - (double)(e->y - l->touch.ref_y), max = scroll_max(l);
+        if (s < 0) s *= EDGE_GIVE;
+        if (s > max) s = max + (s - max) * EDGE_GIVE;
+        if (e->type == IN_TOUCH_MOVE) drag_to(l, s);
+    }
+    if (e->type != IN_TOUCH_UP) return;
+    l->touch.down = 0;
+    if (l->touch.dragging) {
+        double v = 0;
+        if (l->touch.n == 2 && l->touch.ms[1] > l->touch.ms[0] && l->touch.ms[1] - l->touch.ms[0] < 100 &&
+            e->ms - l->touch.ms[1] < 100) /* still moving as it lifted */
+            v = -(double)(l->touch.ys[1] - l->touch.ys[0]) * 1000.0 / (double)(l->touch.ms[1] - l->touch.ms[0]);
+        fling(l, v);
+        return;
+    }
+    if (l->touch.held || l->touch.row < 0 || row_at(l, e->x, e->y) != l->touch.row || !selectable(l, l->touch.row)) return;
+    int old = l->sel; /* a tap: the row selected, a press's sink and spring back, and chosen */
+    l->sel = l->touch.row;
+    if (l->sel != old) moved(l, old), ui_click(0);
+    if (list_motion && !ui_reduce_motion) l->press.x = -PRESS_SINK, l->press.to = 0, kick(l);
+    choose(l);
+}
+/* A still finger's hold, from list_step: due KEY_HOLD_MS after it landed on a row. */
+static void touch_hold(ui_list *l) {
+    if (!l->touch.down || l->touch.dragging || l->touch.held || l->touch.row < 0 || !l->src.held) return;
+    uint64_t due = l->touch.at + (uint64_t)KEY_HOLD_MS * 1000u;
+    if (ui_time() < due) {
+        ui_wake_ms((unsigned)((due - ui_time()) / 1000u) + 1);
+        return;
+    }
+    l->touch.held = 1;
+    if (!selectable(l, l->touch.row)) return;
+    int old = l->sel;
+    l->sel = l->touch.row;
+    if (l->sel != old) moved(l, old);
+    l->src.held(l->src.ctx, l->sel);
+}
+
 void list_event(ui_list *l, const input_t *e) {
     if (!l->n) return;
     if (ui_time() - live.input >= LIVE_IDLE_US) ui_again(); /* the cells at rest start again */
@@ -959,6 +1135,7 @@ void list_event(ui_list *l, const input_t *e) {
         if (after.level != before.level) ui_click(0); /* as demo's slider: only a change clicks */
         ui_mark(l->focus_was);
     } else if (e->type == IN_TICK) {
+        l->glide_s = 0;
         int dir = e->value, step = wheel_accel(&l->accel, l, dir, e->ms, l->n), old = l->sel;
         int sel = step == WA_LETTER && l->src.letters ? letter_step(l, l->sel, dir)
                                                       : l->sel + dir * (step == WA_LETTER ? WA_MAX_ROWS : step);
@@ -999,14 +1176,10 @@ void list_event(ui_list *l, const input_t *e) {
         else kick(l);
         if (e->type == IN_KEY_HOLD) {
             if (l->src.held) l->src.held(l->src.ctx, l->sel);
-        } else if (was && row_text_flags(l, l->sel) & ROW_SLIDER) { /* Centre grabs a slider and sets it down */
-            l->grab = l->grab == l->sel ? -1 : l->sel;
-            ui_mark(l->focus_was);
-        } else if (was && row_text_flags(l, l->sel) & ROW_PLAYING) { /* the song plays on: never sent again */
-            ui_push(&page_now, 0);
-        } else if (was && l->src.chosen)
-            l->src.chosen(l->src.ctx, l->sel);
-    }
+        } else if (was)
+            choose(l);
+    } else if (e->type >= IN_TOUCH_DOWN)
+        list_touch(l, e);
 }
 
 static float slides_now(const ui_list *l) {
@@ -1059,6 +1232,7 @@ int list_trace(char *out, size_t room) {
 void list_step(ui_list *l) {
     uint64_t now = ui_time();
     traced = l;
+    touch_hold(l);
     if (l->src.song && playing_id() != l->playing_seen) /* another song plays: its row marked, the last's not */
         l->playing_seen = playing_id(), list_rows_changed();
     /* rows changed from outside (list_rows_changed): read again, the selected switch sliding over,
@@ -1073,12 +1247,13 @@ void list_step(ui_list *l) {
     double scroll = l->scroll.x;
     int moving = 0;
     if (l->moving) {
-        moving |= spring_step(&l->scroll, dt, GLIDE_S, 1);
+        moving |= spring_step(&l->scroll, dt, l->glide_s ? l->glide_s : GLIDE_S, 1);
         moving |= spring_step(&l->bar, dt, BAR_S, 1);
         moving |= spring_step(&l->lean, dt, LEAN_S, LEAN_DAMP);
         moving |= spring_step(&l->press, dt, l->pressed ? 0.09f : PRESS_S, l->pressed ? 1.0f : 0.55f);
         moving |= spring_step(&l->knob, dt, 0.2f, 1);
         l->moving = moving;
+        if (!moving) l->glide_s = 0; /* a fling's spring ends with it */
         if (moving) ui_again();
         if (l->scroll.x != scroll) ui_mark(frame_rect(l));
         rect_t f = focus_rect(l);
