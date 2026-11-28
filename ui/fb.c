@@ -42,6 +42,9 @@ static int fd = -1, shown, can_wait = 1;
 static unsigned refresh_us = 16667;
 static uint64_t paced_ns;
 uint64_t fb_panned_us; /* when the last frame was panned to: its work ended there (ui.c) */
+/* the last frame's pan ioctl and its wait for the refresh after it, apart (ui.c account: the stats' pan_us and
+ * vsync_wait_us, to tell a pan that waits for the panel from work that runs long) */
+uint64_t fb_pan_us, fb_wait_us;
 static uint32_t *pages;
 static struct fb_var_screeninfo var;
 static struct damage {
@@ -194,8 +197,10 @@ unsigned fb_present(void) {
     for (int i = 0; i < last.n; ++i) add(&both, last.r[i]);
     for (int i = 0; i < both.n; ++i) px += turn(page, both.r[i]);
     var.yoffset = (unsigned)(hidden * PAGE_H);
+    uint64_t pan_at = mono_us();
     ioctl(fd, FBIOPAN_DISPLAY, &var);
     fb_panned_us = mono_us();
+    fb_pan_us = fb_panned_us - pan_at, fb_wait_us = 0;
     if (fb_vsync) {
         uint32_t crtc = 0;
         if (can_wait && ioctl(fd, FBIO_WAITFORVSYNC, &crtc) < 0) can_wait = 0;
@@ -211,6 +216,7 @@ unsigned fb_present(void) {
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, 0);
         }
     }
+    if (fb_vsync) fb_wait_us = mono_us() - fb_panned_us;
     shown = hidden;
     last = now;
     now.n = 0;

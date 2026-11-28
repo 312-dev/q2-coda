@@ -2888,7 +2888,15 @@ def live_stats(binary, work):
             time.sleep(1.1)
             seen.append(run.stats()['frames'])
         spin.join()
-        return check('scrolling for 3 s, the stats file moves each second before the list rests', seen[0] < seen[1] < seen[2], seen)
+        good = check('scrolling for 3 s, the stats file moves each second before the list rests', seen[0] < seen[1] < seen[2], seen)
+        s = run.rest()
+        gaps = s.get('gap_hist_refreshes', {})
+        # a host run is paced to the refresh by the clock (fb.c): its wait is most of a frame, its pan a file's ioctl
+        good &= check("the frame's pan and its wait for the refresh are timed apart, and a motion's frames counted by "
+                      'the refreshes since the one before', 0 <= s.get('pan_us_per_frame', -1) < 1000
+                      and s.get('vsync_wait_us_per_frame', 0) > 1000 and gaps.get('r1', 0) > 50
+                      and sum(gaps.values()) <= s['frames'], f"pan {s.get('pan_us_per_frame')} wait {s.get('vsync_wait_us_per_frame')} {gaps}")
+        return good
     finally:
         run.end()
 
