@@ -3511,3 +3511,18 @@ def test_a_stale_file_s_get_line_reads_as_fail(run):
     pl.pump(1.0)
     assert pl.songs()[-1] == ('set-songurl', S2)
     sock.close()
+
+
+def test_a_get_line_under_3_s_old_is_not_stale_across_a_second_s_turn(run):
+    """3 s of the file's own time, not 3 turns of the clock's second: a .stream written 10 ms before a second began,
+    read 2 s and a little later, is three whole seconds back by time(2) and st_mtime, yet under 3 s old"""
+    root, pl = run
+    sock = grown(root, pl, ('get', 1000, 30000000, 200000, S2))
+    while time.time() % 1 > 0.05:  # just after a second begins, so the read below stays under 3 s
+        time.sleep(0.005)
+    t = int(time.time()) - 2 - 0.01
+    os.utime(root/'tmp/q2-navi.stream', (t, t))
+    pl.say('player-status', 'exit')
+    pl.pump(0.5)
+    assert pl.songs() == [('set-songurl', S1)], 'a get line 2.1 to 2.6 s old still waits'
+    sock.close()

@@ -877,7 +877,11 @@ static int grow_ready(const char *e) {
     snprintf(p, sizeof p, "/tmp/q2-%s.stream", mq.app);
     struct stat st;
     FILE *f = stat(path(p), &st) ? 0 : fopen(path(p), "r");
-    int ready = 1, stale = f && time(0) - st.st_mtime >= STREAM_STALE_S;
+    struct timespec now;
+    clock_gettime(CLOCK_REALTIME, &now);
+    /* to the millisecond: time(2) less a whole-second st_mtime would call a file stale anywhere from 2 to 3 s */
+    long long age_ms = f ? (now.tv_sec - st.st_mtim.tv_sec) * 1000LL + (now.tv_nsec - st.st_mtim.tv_nsec) / 1000000 : 0;
+    int ready = 1, stale = f && age_ms >= STREAM_STALE_S * 1000LL;
     while (f && fgets(line, sizeof line, f)) {
         char state[8];
         long long bytes, total, ms;
