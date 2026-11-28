@@ -93,7 +93,7 @@ TOOL_DIRS = {
     # uac1_build.py and the kernel sources it builds usb_f_uac1.ko from. tools/uac1.py hashes every file here
     # into its PIN, and the build stops (uac1.module()) when the hash is not the pinned one: test_uac1.py checks
     # the pin, test/build.py the build. test_iap_tools.py and test/uac1_bind.py load uac1_build.py; uac1_bind.py
-    # and uac1_isoc.py need a built module, so the gate prints why they are skipped (gate.SCRIPTS).
+    # and uac1_isoc.py run on the module the build carries (gate.SCRIPTS).
     'uac1_module': ({'test_uac1.py', 'test_iap_tools.py'}, ('test/build.py', 'test/uac1_bind.py', 'test/uac1_isoc.py')),
     # route 1's probe on a Q2 by hand: probe_build.py (test_iap_tools.py loads it) builds patch/q2_iap.c as the
     # probe, which test/iap_probe.py builds and runs on the host; the shell and PowerShell scripts run on the

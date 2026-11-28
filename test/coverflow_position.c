@@ -49,7 +49,11 @@ static void stop_timer(unsigned *id) {
     }
 }
 static unsigned deque_size(void *d) { return (unsigned)albums; }
-static unsigned widget_count_children(void *w) { return (unsigned)cards; }
+/* The slide's albums and cards, its logical count (not the pool's child count). */
+static int slide_count(void *w) {
+    assert(w == cf.slide);
+    return cards;
+}
 static int visual(void *w, int n, int *c, int *frac) {
     *c = centre;
     *frac = fraction;

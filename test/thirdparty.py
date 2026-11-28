@@ -4,7 +4,8 @@ qemu-mipsel in a bwrap chroot of it. Usage: test/thirdparty.py BUILD QEMU_MIPSEL
 (QEMU_MIPSEL statically linked: the chroot has no host libraries)
 
 Each replaced program reports the version the manifest records; every stock program that links a
-replaced library still resolves all of its libraries; the curl tool built beside libcurl verifies
+replaced library still resolves all of its libraries, as do an --own-bluez or --own-bluealsa build's own
+daemons; the curl tool built beside libcurl verifies
 GitHub, Last.fm and radio-browser against the firmware's CA bundle, refuses example.com (whose root
 the bundle lacks), a wrong host and a self-signed certificate, and verifies example.com against the
 host's bundle (needs the network; --offline skips those); a small C program reads a stock PNG through
@@ -15,6 +16,7 @@ component outputs tools/thirdparty.py caches (a build has made them).
 import json, os, pathlib, re, shutil, subprocess, sys, tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
 import thirdparty
+from build import BLUEALSA, BLUETOOTHD, stock_program  # noqa: E402
 
 # q2-heavy preloads tools/ci/nodump.c, which makes bwrap non-dumpable, and the kernel then refuses the write of
 # its uid map ("bwrap: setting up uid map: Permission denied"). The sandbox runs without the preload.
@@ -149,9 +151,14 @@ def main(argv):
                              ' && /usr/bin/ffmpeg -nostdin -v error -i a.jpg -f rawvideo -pix_fmt rgb24 - | wc -c', timeout=300)
             expect('ffmpeg decodes PNG, stacks, scales, writes and reads JPEG', code == 0 and out.split()[-1:] == ['9600'],
                    f'exit {code}: {out}')
-        # Every stock program on a replaced library still finds all of its libraries.
-        for exe in ('release/bin/demo', 'usr/bin/hciplayer', 'usr/bin/bluetoothd', 'usr/bin/bluealsa', 'usr/sbin/wpa_supplicant',
-                    'usr/bin/ntpdate', 'usr/bin/shairport', 'usr/bin/ffmpeg'):
+        # Every stock program on a replaced library still finds all of its libraries: stock's bluetoothd and bluealsa
+        # where an --own-bluez or --own-bluealsa build moved them (its launcher, a shell script, stands at their
+        # paths), and that build's own daemons too, which link the same rootfs libraries.
+        own = ([manifest['own_bluez']['path']] if 'own_bluez' in manifest else []) + \
+              [f for f in manifest.get('own_bluealsa', {}).get('files', {}) if f.rsplit('/', 1)[1] == 'bluealsa']
+        for exe in ('release/bin/demo', 'usr/bin/hciplayer', stock_program(BLUETOOTHD, manifest),
+                    stock_program(BLUEALSA, manifest), 'usr/sbin/wpa_supplicant', 'usr/bin/ntpdate', 'usr/bin/shairport',
+                    'usr/bin/ffmpeg', *own):
             code, out = mips('/lib/ld-linux-mipsn8.so.1', '--list', '/' + exe)
             expect(f'{exe} links', code == 0 and 'not found' not in out and '=>' in out, out[-300:])
     print(f'{len(failures)} failed' if failures else 'all passed')
