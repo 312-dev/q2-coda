@@ -63,8 +63,20 @@ def library(root):
     db.close()
 
 
+# q2-iroh's stand-in: its pid in --pid's file and its arguments, one start a line, in that file's .args beside it
+IROH = '''#!/bin/sh
+pid=
+prev=
+for a in "$@"; do [ "$prev" = --pid ] && pid=$a; prev=$a; done
+echo "$@" >> "$pid.args"
+echo $$ > "$pid"
+trap 'exit 0' TERM
+while :; do sleep 0.05; done
+'''
+
+
 class Q2:
-    def __init__(self, build, tmp, on=True, answer=None, net='connected', player=True, ui_timeout=59000):
+    def __init__(self, build, tmp, on=True, answer=None, net='connected', player=True, ui_timeout=59000, iroh=()):
         self.out, self.root = build, tmp
         self.socks = tmp/'run/vamp'
         for d in ('tmp', 'run/vamp', 'mnt/data', 'mnt/mmc', 'dev'):
@@ -95,7 +107,7 @@ class Q2:
             playd.wait_for(tmp/'tmp/coda-rc.cmdq', 5)
         self.log = open(tmp/'q2carrd.log', 'w')
         self.p = subprocess.Popen([str(build/'q2carrd'), '--root', str(tmp), '--sockets', str(self.socks), '--coda-rc', str(build/'coda-rc'),
-                                   '--ui-timeout', str(ui_timeout), '--no-ble', '--port', '0', '--iroh-port', '0'], stderr=self.log)
+                                   '--ui-timeout', str(ui_timeout), *iroh, '--no-ble', '--port', '0', '--iroh-port', '0'], stderr=self.log)
 
     def switch(self, on):
         (self.root/'mnt/data/config.ini').write_text(f'[Q2POD]\nTHEME=0\nCARREMOTE={1 if on else 0}\n')
@@ -278,3 +290,72 @@ def test_sigterm_stops_coda_rc_then_q2carrd(q2):
     q = q2(player=False)
     port = q.port()
     assert q.end() == 0 and not listening(port)
+
+
+def iroh(tmp, *more):
+    """q2carrd's options for IROH as q2-iroh: (its args file, the options)"""
+    fake = tmp/'q2-iroh'
+    fake.write_text(IROH)
+    fake.chmod(0o755)
+    return tmp/'tmp/q2-iroh.pid.args', ('--iroh', str(fake), *more)
+
+
+def iroh_running(q):
+    pid = q.root/'tmp/q2-iroh.pid'
+    try:
+        os.kill(int(pid.read_text()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def test_q2_iroh_runs_while_wifi_has_a_link_with_the_shim_s_arguments(q2, tmp_path):
+    """coda_rc_shim.c cr_iroh_poll: started while Car Remote is on and Q2NET/1 says connected, with CR_IROH_ARGS under
+    --root; stopped CR_IROH_DOWN_MS (here --iroh-down 4000) after the link went, and started again when it is back"""
+    args, opts = iroh(tmp_path, '--iroh-down', '4000')
+    q = q2(player=False, iroh=opts)
+    assert wait(lambda: iroh_running(q)), (q.root/'q2carrd.log').read_text()
+    r = str(q.root)
+    assert args.read_text().split() == [
+        'serve', '--key', f'{r}/mnt/data/coda-rc/iroh.key', '--relay-file', f'{r}/mnt/data/coda-rc/relay',
+        '--info', f'{r}/tmp/coda-rc.iroh', '--pid', f'{r}/tmp/q2-iroh.pid', '--nice', '19', '--log', f'{r}/tmp/q2-iroh.log',
+        '--forward-named', '127.0.0.1:7721', '--allow-file', f'{r}/tmp/coda-rc.iroh-allow', '--open-while', f'{r}/tmp/coda-rc.qr']
+    q.net_state = 'searching'  # the last look that saw the link was at most LINK_MS (1 s) before this
+    time.sleep(2)
+    assert iroh_running(q), 'a link gone for less than --iroh-down keeps it'
+    assert wait(lambda: not iroh_running(q), 6), 'stopped once the link is gone that long'
+    assert not (q.root/'tmp/q2-iroh.pid').exists() and not (q.root/'tmp/coda-rc.iroh').exists()
+    q.net_state = 'connected'
+    assert wait(lambda: iroh_running(q)), 'started again with the link back'
+    assert len(args.read_text().splitlines()) == 2
+
+
+def test_q2_iroh_waits_for_a_link_and_goes_with_car_remote(q2, tmp_path):
+    args, opts = iroh(tmp_path)
+    q = q2(player=False, net='searching', iroh=opts)
+    q.port()
+    time.sleep(2.5)
+    assert not args.exists(), 'no link, no q2-iroh'
+    q.net_state = 'connected'
+    assert wait(lambda: iroh_running(q))
+    q.switch(False)
+    assert wait(lambda: not iroh_running(q), 5), 'Car Remote off stops it at once'
+    q.switch(True)
+    assert wait(lambda: iroh_running(q))
+    assert q.end() == 0 and not iroh_running(q), 'TERM stops it with q2carrd'
+
+
+def test_q2_iroh_that_ends_is_started_again_after_the_restart_wait(q2, tmp_path):
+    args, opts = iroh(tmp_path, '--restart', '1500')
+    q = q2(player=False, iroh=opts)
+    assert wait(lambda: iroh_running(q))
+    os.kill(int((q.root/'tmp/q2-iroh.pid').read_text()), 15)
+    assert wait(lambda: not iroh_running(q), 2)
+    assert wait(lambda: len(args.read_text().splitlines()) == 2, 5), 'started again'
+
+
+def test_no_q2_iroh_in_the_image_is_no_error(q2, tmp_path):
+    q = q2(player=False, iroh=('--iroh', str(tmp_path/'none')))
+    q.port()
+    time.sleep(2.5)
+    assert 'iroh' not in (q.root/'q2carrd.log').read_text()

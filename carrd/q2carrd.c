@@ -48,7 +48,9 @@
 #define HOLD_S 60          /* Q2NET/1's hold, renewed every HOLD_S / 2 while wanted */
 #define UI_RETRY_MS 2000   /* Q2UI/1 tried again this often while a card waits to be shown */
 #define UI_TIMEOUT_MS 59000 /* an answer 0 this long after the ask is Q2UI/1's own timeout (notice.c TIMEOUT_S 60) */
-#define STOP_MS 5000       /* coda-rc's end after a TERM, waited for this long before a KILL */
+#define STOP_MS 5000       /* coda-rc's and q2-iroh's end after a TERM, waited for this long before a KILL */
+#define IROH_DOWN_MS 60000 /* coda_rc_shim.c CR_IROH_DOWN_MS: q2-iroh runs on this long after Wi-Fi's link went */
+#define LINK_MS 1000       /* Wi-Fi's link asked of Q2NET/1 this often while Car Remote is on */
 
 static char root[256], socks[256] = "/run/vamp";
 static unsigned ui_timeout_ms = UI_TIMEOUT_MS; /* --ui-timeout MS: the tests' */
@@ -264,6 +266,74 @@ static void stop(void) {
     tidy();
 }
 
+/* ---- q2-iroh (remote/iroh-sidecar), the phones across networks ---- */
+
+/* coda_rc_shim.c CR_IROH_ARGS, each path under --root: the key beside coda-rc's, the relays to use instead of n0's
+ * public ones, the id file coda-rc reads for Pair a Phone's QR code, the allow-list it writes, and the code file
+ * that opens q2-iroh to unpaired phones while the QR code shows */
+static const char *const iroh_args[] = {
+    "serve", "--key", "@/mnt/data/coda-rc/iroh.key", "--relay-file", "@/mnt/data/coda-rc/relay", "--info", "@/tmp/coda-rc.iroh",
+    "--pid", "@/tmp/q2-iroh.pid", "--nice", "19", "--log", "@/tmp/q2-iroh.log", "--forward-named", "127.0.0.1:7721",
+    "--allow-file", "@/tmp/coda-rc.iroh-allow", "--open-while", "@/tmp/coda-rc.qr"};
+#define IROH_NARGS (sizeof iroh_args / sizeof *iroh_args)
+
+static const char *iroh_bin = "/usr/bin/q2-iroh"; /* --iroh PATH: the tests' stand-in */
+static unsigned iroh_down_ms = IROH_DOWN_MS, restart_ms = RESTART_MS; /* --iroh-down MS, --restart MS: the tests' */
+static pid_t iroh;
+static unsigned long long iroh_at, link_at, link_looked;
+
+static void iroh_start(unsigned long long t) {
+    char *args[IROH_NARGS + 2], paths[IROH_NARGS][320];
+    iroh_at = t;
+    if (access(iroh_bin, X_OK)) return; /* an image without it: Car Remote on the LAN and over LE only */
+    args[0] = (char *)iroh_bin;
+    for (unsigned i = 0; i < IROH_NARGS; ++i) {
+        if (iroh_args[i][0] == '@') snprintf(paths[i], sizeof paths[i], "%s%s", root, iroh_args[i] + 1), args[i + 1] = paths[i];
+        else args[i + 1] = (char *)iroh_args[i];
+    }
+    args[IROH_NARGS + 1] = 0;
+    unlink(path("/tmp/coda-rc.iroh")); /* the id coda-rc reads is the new one's, never a dead one's */
+    iroh = fork();
+    if (iroh == 0) {
+        execv(iroh_bin, args);
+        _exit(127);
+    }
+    if (iroh < 0) iroh = 0, say("cannot start %s", iroh_bin);
+    else say("q2-iroh %d started", (int)iroh);
+}
+
+static void iroh_stop(const char *why) {
+    int status;
+    iroh_at = 0;
+    if (!iroh) return;
+    kill(iroh, SIGTERM);
+    unsigned long long end = now_ms() + STOP_MS;
+    while (waitpid(iroh, &status, WNOHANG) == 0 && now_ms() < end) usleep(50000);
+    if (waitpid(iroh, &status, WNOHANG) == 0) kill(iroh, SIGKILL), waitpid(iroh, &status, 0);
+    say("q2-iroh stopped (%s)", why);
+    iroh = 0;
+    unlink(path("/tmp/q2-iroh.pid")), unlink(path("/tmp/coda-rc.iroh"));
+}
+
+/* coda_rc_shim.c cr_iroh_poll: q2-iroh while Wi-Fi has a link (Q2NET/1 status, asked every LINK_MS) or had one
+ * within iroh_down_ms, since with no network it reaches no one and its relay's retries were the idle Q2's largest CPU
+ * user (docs/internals.md#car-remote-iroh); one that ended is started again restart_ms after its start */
+static void iroh_poll(unsigned long long t) {
+    int status;
+    if (iroh && waitpid(iroh, &status, WNOHANG) == iroh) say("q2-iroh ended"), iroh = 0;
+    if (!link_looked || t - link_looked >= LINK_MS) {
+        char got[256];
+        link_looked = t;
+        if (!ask_once("net.sock", "Q2NET/1", "status", got, sizeof got) && strstr(got, "state=connected")) link_at = t;
+    }
+    if (!link_at || t - link_at >= iroh_down_ms) {
+        if (iroh_at) iroh_stop("no Wi-Fi link");
+        link_at = 0;
+    } else if (!iroh && (!iroh_at || t - iroh_at >= restart_ms)) {
+        iroh_start(t);
+    }
+}
+
 /* ---- the pairing card (Q2UI/1 ask) ---- */
 
 static struct conn ui = {.fd = -1};
@@ -391,6 +461,9 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--sockets") && i + 1 < argc) snprintf(socks, sizeof socks, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--coda-rc") && i + 1 < argc) coda_rc = argv[++i];
         else if (!strcmp(argv[i], "--ui-timeout") && i + 1 < argc) ui_timeout_ms = (unsigned)atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--iroh") && i + 1 < argc) iroh_bin = argv[++i];
+        else if (!strcmp(argv[i], "--iroh-down") && i + 1 < argc) iroh_down_ms = (unsigned)atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--restart") && i + 1 < argc) restart_ms = (unsigned)atoi(argv[++i]);
         else if (na < 64) args[na++] = argv[i];
     }
     signal(SIGPIPE, SIG_IGN);
@@ -403,13 +476,15 @@ int main(int argc, char **argv) {
         if (on != was_on) say("Car Remote %s", on ? "on" : "off"), was_on = on;
         if (child && waitpid(child, &status, WNOHANG) == child) ended(status);
         if (!on && child) stop(), withdraw("Car Remote off"), pc.code[0] = 0;
-        if (on && !child && (!started_at || t - started_at >= RESTART_MS)) start(args, na, coda_rc);
+        if (!on && iroh_at) iroh_stop("Car Remote off"), link_at = link_looked = 0;
+        if (on && !child && (!started_at || t - started_at >= restart_ms)) start(args, na, coda_rc);
         if (on) {
             char online[8];
             look_pair();
             look_wake();
             if (read_text(path("/tmp/coda-rc.online"), online, sizeof online) > 0) use_at = t;
             hold_radio(t);
+            iroh_poll(t);
         }
         struct pollfd p[2] = {{.fd = tell_fd, .events = POLLIN}, {.fd = ui.fd, .events = POLLIN}};
         if (poll(p, 2, LOOK_MS) < 0 && errno != EINTR) break;
@@ -419,7 +494,7 @@ int main(int argc, char **argv) {
         }
         if (ui.fd >= 0 && p[1].revents) read_ui();
     }
-    stop(), withdraw("q2carrd's end");
+    stop(), iroh_stop("q2carrd's end"), withdraw("q2carrd's end");
     say("ended");
     return 0;
 }

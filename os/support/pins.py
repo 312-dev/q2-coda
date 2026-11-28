@@ -9,6 +9,9 @@
     pins.py adb-mdns-sources          tools/build.py's ADB_MDNS_SOURCES
     pins.py coda-rc-sources           tools/build.py's CODA_RC_SOURCES
     pins.py release-key               the release key's public half (assets/signing/q2-coda-release.pub) as a C array
+    pins.py iroh                      Car Remote's q2-iroh: tools/iroh.py's pinned binary in the third-party cache,
+                                      its SHA-256 and size checked and the crate the one it was built from; the
+                                      build stops when either is not so
     pins.py uac1                      Car Audio's usb_f_uac1.ko: tools/uac1.py's pinned module in the third-party cache,
                                       its SHA-256 checked; the build stops when it is not there
     pins.py bluez-options             tools/thirdparty.py's BLUEZ_OPTIONS, one per word
@@ -58,6 +61,12 @@ elif sys.argv[1:] in (['adb-mdns-sources'], ['coda-rc-sources']):
     tree = ast.parse((TOOLS/'build.py').read_text())
     value = next(n.value for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, 'id', None) == name for t in n.targets))
     print(' '.join(ast.literal_eval(value)))
+elif sys.argv[1:] == ['iroh']:
+    import iroh
+    why = iroh.problem()
+    if why:
+        sys.exit(f'pins.py: {why}')
+    print(iroh.CACHE/iroh.PIN[0]/'q2-iroh')
 elif sys.argv[1:] == ['uac1']:
     import hashlib
     import uac1

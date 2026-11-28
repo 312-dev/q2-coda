@@ -1,0 +1,7 @@
+config BR2_PACKAGE_Q2_IROH
+	bool "q2-iroh"
+	help
+	  Car Remote across networks (docs/carrd.md, docs/remote.md#car-remote-across-networks):
+	  q2-iroh, the iroh sidecar q2carrd runs while Wi-Fi has a link. Rust, so not built
+	  here: tools/iroh.py's pinned binary from the third-party cache, checked by its
+	  SHA-256 (docs/vamp-os-base.md#toolchain-decisions).
