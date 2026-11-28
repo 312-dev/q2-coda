@@ -225,6 +225,7 @@ typedef struct {
 int input_open(const char *dir);
 int input_fds(int *fds, int max);
 int input_read(input_t *out, int max); /* what has arrived, without waiting */
+int input_wheel_feed(int x, int touching, unsigned ms, input_t *out, int max); /* a script's wheel, read as the device's */
 extern uint64_t input_at_us;            /* when the first event the last input_read took happened (mono_us) */
 int wheel_steps(int speed); /* a level's steps for a tick at speed: demo's volume curve (patch/volume.c vol_accel) */
 int input_wait_ms(void);               /* until a held key's hold is due; -1: no key is down */
@@ -502,6 +503,9 @@ int list_lifted(const ui_list *l);
 void list_moved_row(ui_list *l, int from, int to);
 float list_scroll(const ui_list *l); /* px scrolled, for a test */
 extern int list_motion; /* 0: every move is at its end at once (a bench, Reduce Motion) */
+/* 1 (--wheel-scroll follow, the default): while the wheel turns, the rows go on between ticks at the finger's speed;
+ * 0 (tick): they glide a tick's rows on at each tick (list.c follow) */
+extern int list_wheel_follow;
 extern int list_living, list_living_fps; /* the living row: drawn; its frames a second at rest (list.c) */
 /* A page that is one list and nothing else. */
 extern const ui_page list_page;

@@ -167,6 +167,21 @@ static int wheel_event(const struct input_event *e, input_t *out, int max) {
     return n;
 }
 
+/* A script's wheel (main.c's "wheel" line): the finger at x round the ring, or lifted, at ms, through the same reading
+ * as the device's events, so its ticks, tugs and speed are the ones a real turn would give. */
+int input_wheel_feed(int x, int touching, unsigned ms, input_t *out, int max) {
+    struct input_event e[3] = { { .type = EV_ABS, .code = ABS_X, .value = x },
+                                { .type = EV_ABS, .code = ABS_PRESSURE, .value = touching },
+                                { .type = EV_SYN } };
+    int n = 0;
+    for (int k = 0; k < 3; ++k) {
+        e[k].input_event_sec = ms / 1000, e[k].input_event_usec = ms % 1000 * 1000;
+        n += wheel_event(&e[k], out + n, max - n);
+    }
+    for (int k = 0; k < n; ++k) out[k].ms = ms; /* on the script's clock, not this machine's */
+    return n;
+}
+
 static int touch_event(const struct input_event *e, input_t *out, int max) {
     if (e->type == EV_ABS && e->code == ABS_X) ts.raw_x = e->value;
     if (e->type == EV_ABS && e->code == ABS_Y) ts.raw_y = e->value;

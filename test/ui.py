@@ -3106,6 +3106,80 @@ def frame_log(binary, work):
     return good
 
 
+def wheel_scroll(binary, work):
+    """A steady turn of the wheel scrolls the list evenly, frame by frame, at the finger's speed between ticks
+    (--wheel-scroll follow, the default), where tick has it surge at each tick and ease out before the next (the
+    device read of 2026-11-28: steps of 10 to 40 px a frame, a tick's period apart). Either way the selection moves
+    by ticks, the rows come to rest on whole rows, and a single tick from rest moves the list exactly one row
+    (docs/ui-rewrite.md#motion)."""
+    def steps(trace):
+        sc = [t['scroll'] for t in trace]
+        return [b - a for a, b in zip(sc, sc[1:])]
+
+    def steady(d):
+        """The middle half of a turn's moving frames, the steps' mean, their cv (sd over mean), and the cv of each step
+        against the mean of the seven round it, one tick's frames at this pace: the pulse a tick makes, with the
+        speed's own climb as the wheel's acceleration takes more rows a tick left out."""
+        moving = [i for i, x in enumerate(d) if abs(x) > 1e-6]
+        run = d[moving[0]:moving[-1] + 1] if moving else []
+        q = len(run) // 4
+        mid = run[q:3 * q]
+        mean = sum(mid) / len(mid) if mid else 0
+        sd = (sum((x - mean) ** 2 for x in mid) / len(mid)) ** 0.5 if mid else 0
+        local = [run[i] - sum(run[i - 3:i + 4]) / 7 for i in range(max(q, 3), min(3 * q, len(run) - 3))]
+        lsd = (sum(x * x for x in local) / len(local)) ** 0.5 if local else 0
+        return mid, mean, sd / mean if mean else 9, lsd / mean if mean else 9
+
+    def whole(trace, rh):
+        s = trace[-1]['scroll']
+        return abs(s - round(s / rh) * rh) < 0.01
+
+    good = True
+    paced = ['rest', 'wheel 150 4', 'wheel lift', 'rest']  # 4 units a frame: a tick every 7 frames, as the device read
+    cvs, mids = {}, {}
+    for mode in ('follow', 'tick'):
+        trace, _, _ = script(binary, work, 400, paced, '--wheel-scroll', mode)
+        mid, mean, cv, lcv = steady(steps(trace))
+        cvs[mode], mids[mode] = (cv, lcv), [round(x, 1) for x in mid]
+        rh = 32
+        good &= check(f'--wheel-scroll {mode}: a paced turn comes to rest on whole rows', whole(trace, rh), str(trace[-1]['scroll']))
+    good &= check("a paced turn of the wheel scrolls the list evenly: each frame's step within 0.15 of its tick's mean (cv)",
+                  cvs['follow'][1] < 0.15, f"cv {cvs['follow'][1]:.3f} (over the middle half {cvs['follow'][0]:.3f}, the climb in it the "
+                  f"acceleration's), steps {mids['follow'][:24]}")
+    good &= check('--wheel-scroll tick keeps the surge at each tick, for an A/B', cvs['tick'][1] > 0.3,
+                  f"cv {cvs['tick'][1]:.3f} (over the middle half {cvs['tick'][0]:.3f}), steps {mids['tick'][:14]}")
+
+    # one tick from rest, the selection on the list's foot so the tick scrolls: exactly one row, no further on the way
+    for lift in (True, False):
+        lines = ['rest', 'tick 20', 'rest', 'wheel 4 11'] + (['wheel lift'] if lift else []) + ['run 1500']
+        trace, _, _ = script(binary, work, 400, lines)
+        at = next(i for i in range(len(trace) - 1, 0, -1) if trace[i - 1]['sel'] != trace[i]['sel'])
+        before = trace[at - 1]['scroll']
+        after = [t['scroll'] for t in trace[at:]]
+        good &= check(f"a single tick from rest ({'lifted' if lift else 'the finger left on the wheel'}) moves the list "
+                      'exactly one row and no further on the way',
+                      trace[-1]['sel'] - trace[at - 1]['sel'] == 1 and abs(after[-1] - before - 32) < 0.01 and max(after) <= after[-1] + 0.01,
+                      f"sel {trace[at - 1]['sel']}->{trace[-1]['sel']}, scroll {before}->{after[-1]}, most {max(after)}")
+
+    # the finger stopped mid-tick, still down: the rows ease to a whole row, not held between two
+    trace, _, _ = script(binary, work, 400, ['rest', 'wheel 60 4', 'run 1500'])
+    good &= check('a turn stopped between ticks, the finger still down, eases to a whole row', whole(trace, 32), str(trace[-1]['scroll']))
+    # turned back mid-tick
+    trace, _, _ = script(binary, work, 400, ['rest', 'wheel 60 4', 'wheel 24 -4', 'wheel lift', 'rest'])
+    good &= check('a turn reversed between ticks comes to rest on whole rows', whole(trace, 32), str(trace[-1]['scroll']))
+    # a short list: the rows never pass the end on the way
+    trace, _, _ = script(binary, work, 30, ['rest', 'wheel 200 4', 'wheel lift', 'rest'])
+    most = max(t['scroll'] for t in trace)
+    good &= check("a turn past a list's end never takes the rows past their last place", most <= trace[-1]['scroll'] + 0.01 and whole(trace, 32),
+                  f"most {most}, rest {trace[-1]['scroll']}")
+    # fast: the rows keep going one way, frame by frame
+    trace, _, _ = script(binary, work, 400, ['rest', 'wheel 60 16', 'wheel lift', 'rest'])
+    d = steps(trace)
+    good &= check('a fast turn moves the rows one way only, and to whole rows', min(d) >= -0.01 and whole(trace, 32),
+                  f'least step {min(d):.2f}, rest {trace[-1]["scroll"]}')
+    return good
+
+
 def live_stats(binary, work):
     """The stats file while the list moves, not only at rest (the coordinator's, 2026-11-28: a device read during a scroll
     saw no update): written at most once a second as the loop runs, whole each time."""
@@ -3499,6 +3573,8 @@ def main():
             good &= api_play(binary, work) & api_status(binary, work)
         if 'rests' in only:  # the stats across rests alone ('live' runs it too)
             good &= stats_rests(binary, work)
+        if not only or 'wheelscroll' in only:
+            good &= wheel_scroll(binary, work)
         if 'framelog' in only:  # --frame-log alone ('live' runs it too)
             good &= frame_log(binary, work)
         if 'danger' in only:  # the danger card alone ('pages' runs it too)
