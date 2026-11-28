@@ -1,7 +1,8 @@
 ################################################################################
 #
 # q2-iroh: Car Remote's iroh sidecar, tools/iroh.py's pinned binary (built from remote/iroh-sidecar outside the
-# image, kept in the third-party cache under its SHA-256), checked by os/support/pins.py from the exported tree
+# image, kept in the third-party cache under its SHA-256), checked by os/support/pins.py from the exported tree;
+# configs/vamp_q2_defconfig keeps Buildroot's strip off it (BR2_STRIP_EXCLUDE_FILES), so the image has the pinned bytes
 #
 ################################################################################
 

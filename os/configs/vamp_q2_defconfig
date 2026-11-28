@@ -73,3 +73,6 @@ BR2_PACKAGE_DBUS=y
 BR2_PACKAGE_VAMP_BLUEZ=y
 BR2_PACKAGE_VAMP_BLUEALSA=y
 BR2_PACKAGE_Q2BTD=y
+# q2-iroh is tools/iroh.py's pinned binary, already stripped: Buildroot's own strip of the target would rewrite
+# it (same size, another SHA-256), and the image is to carry the pinned bytes
+BR2_STRIP_EXCLUDE_FILES="q2-iroh"
