@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -173,6 +174,8 @@ static void paint_guard(void) {
     pid_t pid = fork();
     if (!pid) {
         static const ui_page bad = { .name = "bad", .draw = draw_marks };
+        /* the abort is the check passing: no core file from it in the caller's directory */
+        setrlimit(RLIMIT_CORE, &(struct rlimit){ 0, 0 });
         fclose(stderr);
         ui_push(&bad, 0);
         ui_clock_fake(1000000);

@@ -13,7 +13,8 @@
    the wheel's own events, the frame read back from the file, no frame and no wake at rest, Return ends it.
 
 Without the build's inputs (stb_truetype, stb_image and SQLite's header in the third-party cache, the host's SQLite)
-it prints why it is skipped and passes.
+it fails with one line naming what is missing, so a run that forgot them cannot pass unseen; with --allow-skip it
+prints why it is skipped and passes instead.
 """
 import json
 import os
@@ -3521,10 +3522,13 @@ def main():
         if not ui.HOST_SQLITE.exists():
             raise SystemExit(f'no {ui.HOST_SQLITE}')
     except (SystemExit, OSError) as e:
-        print(f'skipped: q2ui cannot be built here ({e})')
-        return 0
+        if '--allow-skip' in sys.argv[1:]:
+            print(f'skipped: q2ui cannot be built here ({e})')
+            return 0
+        print(f'test/ui.py: q2ui cannot be built here, missing {e} (--allow-skip to pass without it)')
+        return 2
     binary, engine = ui.build('host'), ui.build('host', 'q2ui-test')
-    only = sys.argv[1:]
+    only = [a for a in sys.argv[1:] if a != '--allow-skip']
     good = True
     with tempfile.TemporaryDirectory() as work:
         if not only or 'engine' in only:
