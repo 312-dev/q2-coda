@@ -797,7 +797,7 @@ def test_a_band_with_no_memory_past_the_new_end_is_dropped(fw):
     assert d.next.used == 1
 
 
-# Auto in the player: the saved number, which demo keeps as the cut for every rate (peq_ui.c headroom)
+# Auto in the player: the saved number, which demo keeps as the cut for every rate (peq_level.c peq_headroom)
 
 @pytest.mark.parametrize('automatic', (0, 1, 2))
 def test_the_player_plays_the_saved_preamp_auto_s_too(fw, automatic):

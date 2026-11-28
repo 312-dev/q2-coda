@@ -592,7 +592,7 @@ def test_nothing_to_apply_is_display_only_until_an_edit(fw):
 
 
 def headroom(fw, p):
-    return fw.fn('peq_ui__headroom', C.c_double, C.c_void_p)(r(p))
+    return fw.fn('peq_headroom', C.c_double, C.c_void_p)(r(p))
 
 
 def test_auto_is_one_cut_for_every_rate_at_the_row_s_size(fw):

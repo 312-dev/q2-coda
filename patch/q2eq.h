@@ -61,7 +61,7 @@ typedef struct {
     char message[160];
     char owner[20];               /* the output the playing EQ belongs to, with EQ per Output on */
     char name[256], applied[256]; /* the draft's preset, and the playing one's */
-    double automatic;             /* Auto's cut for the draft, dB (peq_ui.c headroom) */
+    double automatic;             /* Auto's cut for the draft, dB (peq_level.c peq_headroom) */
     eq_state state;               /* what is saved to play */
     peq_preset draft;
 } q2eq_reply;

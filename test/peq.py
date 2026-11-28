@@ -397,7 +397,7 @@ def headroom_check(lib, ui):
     auto = ui.check_headroom(C.byref(p))  # Auto's: the loudest standard rate's
     assert -12.37 < auto < -12.34, auto  # strongest response is at 32 kHz, not the old 48 kHz estimate
     assert bytes(p) == before and ui.check_headroom(C.byref(p)) == auto
-    # Auto's cut is kept by a hash of the bands (headroom's two FNV-1a, hash.c's hash_bytes): a band changed, even by
+    # Auto's cut is kept by a hash of the bands (peq_level.c peq_headroom's two FNV-1a, hash.c's hash_bytes): a band changed, even by
     # its smallest step, is a different preset and gets its own cut, and the first preset's comes back for it after,
     # each the loudest standard rate's peq_auto, as worked out afresh
     def fresh(q):
@@ -829,9 +829,9 @@ def editor_check(lib, tmp):
                                        'static void *check_calloc(size_t n, size_t size) { return calloc_fails ? 0 : calloc(n, size); }\n'
                                        '#define calloc check_calloc\n#include "peq_ui.c"\n#undef calloc\n'
                                        'void check_calloc_fails(int on) { calloc_fails = on; }\n'
-                                       'double check_headroom(const peq_preset *p) { return headroom(p); }\n'
+                                       'double check_headroom(const peq_preset *p) { return peq_headroom(p); }\n'
                                        'int check_view(void) { return (int)(long)ui.view; }\nint check_graph(void) { return (int)(long)ui.graph; }\n')
-    ui = compile_host(tmp, 'peq_ui.so', tmp/'peq_ui_checks.c', ROOT/'patch/peq.c', ROOT/'patch/hash.c', tmp/'shim.c',
+    ui = compile_host(tmp, 'peq_ui.so', tmp/'peq_ui_checks.c', ROOT/'patch/peq.c', ROOT/'patch/hash.c', ROOT/'patch/peq_level.c', tmp/'shim.c',
                       '-I', ROOT/'patch', '-include', tmp/'shim.h')
     headroom_check(lib, ui)
     ui.shim_title.restype = C.c_char_p
@@ -1182,7 +1182,7 @@ def output_check(tmp):
                                 'double check_gain(void) { return e3.gain[0]; }\n'
                                 'void check_draft(double b) { ui.dirty = 1; ui.draft.balance = b; }\n'
                                 'double check_balance(void) { return ui.draft.balance; }\n')
-    ui = compile_host(tmp, 'outputs.so', tmp/'checks.c', ROOT/'patch/peq.c', ROOT/'patch/hash.c', tmp/'shim.c',
+    ui = compile_host(tmp, 'outputs.so', tmp/'checks.c', ROOT/'patch/peq.c', ROOT/'patch/hash.c', ROOT/'patch/peq_level.c', tmp/'shim.c',
                       '-I', ROOT/'patch', '-include', tmp/'shim.h')
     ui.eq_output.argtypes = [C.c_char_p]
     ui.eq_load.argtypes = ui.eq_save.argtypes = [C.POINTER(State)]

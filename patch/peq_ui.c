@@ -19,23 +19,12 @@ int peq_stock_eq(int mode) {
     return result;
 }
 
-static double headroom(const peq_preset *p);
-/* PEQ's Auto (or never picked) preamp as the cut for every rate, which the player plays as saved
- * (docs/internals.md#parametric-eq). 1 if that changed it. */
-static int auto_level(eq_state *s) {
-    if (s->peq.automatic == 2) return 0;
-    double cut = headroom(&s->peq);
-    int changed = s->peq.automatic != 1 || s->peq.preamp != cut;
-    s->peq.automatic = 1, s->peq.preamp = cut;
-    return changed;
-}
-
 /* Off's comparison preamp belongs to the open page, which cannot survive a restart; and an Auto saved
  * by another version (its 48 kHz cut) becomes the cut for every rate before anything plays. */
 void peq_boot(void) {
     eq_state s;
     if (!eq_load(&s)) return;
-    int changed = auto_level(&s);
+    int changed = eq_auto_level(&s);
     if (s.hold) s.hold = 0, changed = 1;
     if (changed && eq_save(&s) && peq_chained) peq_stock_eq(1);
 }
@@ -44,7 +33,7 @@ void peq_boot(void) {
  * config key (boot instantiates the filter only when it is set) written when on/off changes, and the
  * player told. */
 static int eq_commit(eq_state *s) {
-    auto_level(s);
+    eq_auto_level(s);
     if (!eq_save(s)) return 0;
     int on = s->mode != EQ_OFF;
     if (on != g_equalizer_flag) write_int_config(on, "PLAYSET", "EQFLAG");
@@ -313,35 +302,6 @@ static void curve(void) {
     }
 }
 
-/* Auto, PEQ's and 3EQ's: one saved cut that covers every standard PCM rate's peak, so tracks at
- * different rates play at one level and the player works nothing out at a track's start. Kept until
- * a band changes, as preamp, balance and the switch move none: the bands are known again by two
- * FNV-1a hashes of them from two seeds, 8 bytes in place of a copy of the preset. ponytail: two
- * band sets with both hashes equal would share a cut (odds about 1 in 2^64); no bound for
- * nonstandard rates (37.8 kHz and the like), whose peak can sit between two of these. */
-#define HEADROOM_SEED2 0x9e3779b9u
-static double headroom(const peq_preset *p) {
-    static const int rates[] = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100,
-                               48000, 64000, 88200, 96000, 176400, 192000, 352800, 384000};
-    static unsigned cached[2];
-    static int have_cache;
-    static double gain;
-    peq_preset key = *p;
-    key.preamp = key.balance = 0, key.bypass = key.automatic = key.spare = 0;
-    if (!peq_valid(&key)) return p->preamp;
-    unsigned h[2] = {hash_bytes(FNV_SEED, (const unsigned char *)&key, sizeof key),
-                     hash_bytes(HEADROOM_SEED2, (const unsigned char *)&key, sizeof key)};
-    if (have_cache && h[0] == cached[0] && h[1] == cached[1]) return gain;
-    gain = 0;
-    for (unsigned i = 0; i < sizeof(rates) / sizeof(*rates); ++i) {
-        double g = peq_auto(&key, rates[i]);
-        if (g < gain) gain = g;
-    }
-    cached[0] = h[0], cached[1] = h[1];
-    have_cache = 1;
-    return gain;
-}
-
 static double *picked(void) {
     return (double *[]){&ui.draft.balance, &ui.draft.preamp, &ui.draft.bands[ui.band].gain}[ui.pick - BALANCE];
 }
@@ -388,12 +348,12 @@ static int on_auto(void) { return ui.draft.automatic != 2; }
 
 /* A draft on Auto takes the cut for every rate, which plays as saved. */
 static void follow_auto(void) {
-    if (on_auto()) ui.draft.automatic = 1, ui.draft.preamp = headroom(&ui.draft);
+    if (on_auto()) ui.draft.automatic = 1, ui.draft.preamp = peq_headroom(&ui.draft);
 }
 
 /* The Preamp row's and the picker's Auto. */
 static void auto_text(char *s, unsigned n) {
-    snprintf(s, n, "Auto (%.1f dB)", headroom(&ui.draft));
+    snprintf(s, n, "Auto (%.1f dB)", peq_headroom(&ui.draft));
 }
 
 /* A Preamp pick sticks to the preset on the card it was loaded from, written out again (peq_export);
@@ -686,7 +646,7 @@ static int action(void *ctx, void *event) {
         else if (ui.screen == PICK && id < picks[ui.pick - BALANCE].rows) {
             /* Preamp's Auto row: the band-edit cut, which later band edits then keep up to date. */
             *picked() = ui.pick == PREAMP && !id
-                            ? headroom(&ui.draft)
+                            ? peq_headroom(&ui.draft)
                             : picks[ui.pick - BALANCE].first + picks[ui.pick - BALANCE].step * id;
             if (ui.pick == PREAMP) ui.draft.automatic = id ? 2 : 1, remember_preamp();
             if (ui.pick == GAIN && !b->enabled) b->enabled = 1; /* picking a gain is using the band */
@@ -1249,7 +1209,7 @@ static int e3_y(double gain) {
 
 static void e3_preset(peq_preset *p) {
     eq3_bands(p, e3.gain);
-    p->preamp = headroom(p);
+    p->preamp = peq_headroom(p);
 }
 
 static void e3_show(void) {
@@ -1717,7 +1677,7 @@ void q2eq_poll(void) {
     memcpy(rp.owner, eq_owner, sizeof rp.owner);
     memcpy(rp.name, ui.name, sizeof rp.name);
     memcpy(rp.applied, ui.applied, sizeof rp.applied);
-    rp.automatic = headroom(&ui.draft);
+    rp.automatic = peq_headroom(&ui.draft);
     eq_load(&rp.state);
     rp.draft = ui.draft;
     peq_save_file(Q2EQ_REPLY, "Q2EQR01", &rp, sizeof rp);

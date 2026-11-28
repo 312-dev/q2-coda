@@ -148,6 +148,10 @@ int peq_compile(const peq_preset *p, int rate, peq_engine *out); /* the saved pr
 void peq_response(const peq_engine *e, int rate, double f, double *l, double *r);
 /* Auto's preamp at rate, dB: what the player plays */
 double peq_auto(const peq_preset *p, int rate);
+/* peq_level.c: Auto's cut for every standard rate (the saved preamp for an invalid preset), and the
+ * state's PEQ given it unless its preamp was picked: 1 if that changed it */
+double peq_headroom(const peq_preset *p);
+int eq_auto_level(eq_state *s);
 void peq_reset(peq_dsp *d, int rate, int channels, const peq_preset *p);
 int peq_update(peq_dsp *d, const peq_preset *p);
 void peq_process(peq_dsp *d, float *audio, unsigned frames);

@@ -927,7 +927,7 @@ def test_a_picked_preamp_is_left(fw):
 
 def test_auto_is_kept_until_a_band_changes(fw):
     u = ui(fw)
-    headroom = fw.fn('peq_ui__headroom', C.c_double, C.c_void_p)
+    headroom = fw.fn('peq_headroom', C.c_double, C.c_void_p)
     u.draft = peak_preset(6)
     assert headroom(r(u.draft)) == pytest.approx(-6, abs=1e-6)
     u.draft.preamp, u.draft.balance, u.draft.bypass, u.draft.automatic = -3, 2, 1, 2  # none of these move it
@@ -938,7 +938,7 @@ def test_auto_is_kept_until_a_band_changes(fw):
 
 def test_auto_is_the_loudest_cut_of_every_standard_rate(fw):
     ui(fw)
-    headroom = fw.fn('peq_ui__headroom', C.c_double, C.c_void_p)
+    headroom = fw.fn('peq_headroom', C.c_double, C.c_void_p)
     auto = fw.fn('peq_auto', C.c_double, C.c_void_p, C.c_int)
     p = peak_preset(12, 15000)  # skipped below 30 kHz, and its response differs by rate above
     rates = (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000, 352800, 384000)
@@ -948,7 +948,7 @@ def test_auto_is_the_loudest_cut_of_every_standard_rate(fw):
 
 def test_3eq_s_headroom_covers_every_standard_rate(fw):
     ui(fw)
-    headroom = fw.fn('peq_ui__headroom', C.c_double, C.c_void_p)
+    headroom = fw.fn('peq_headroom', C.c_double, C.c_void_p)
     p = peak_preset(6)
     assert headroom(r(p)) == pytest.approx(-6, abs=1e-6)
     p = peak_preset(-6)
@@ -959,7 +959,7 @@ def test_3eq_s_headroom_of_a_bad_preset_is_its_preamp(fw):
     ui(fw)
     p = peak_preset(6)
     p.count, p.preamp = 99, -4
-    assert fw.fn('peq_ui__headroom', C.c_double, C.c_void_p)(r(p)) == -4
+    assert fw.fn('peq_headroom', C.c_double, C.c_void_p)(r(p)) == -4
 
 
 def test_the_graph_s_axes(fw):

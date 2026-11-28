@@ -410,7 +410,7 @@ int eq_save(const eq_state *s) { return eq_save_to(PEQ_ACTIVE, s); }
 
 /* What plays: the mode's preset, bypassed when Off, or with hold the 3EQ's preamp alone. Only PEQ
  * marks Auto (1), unless picked: never picked (0) is Auto, as the editor takes it. Either way the
- * saved preamp is what plays, Auto's being demo's cut for every rate (peq_ui.c headroom). */
+ * saved preamp is what plays, Auto's being demo's cut for every rate (peq_level.c peq_headroom). */
 void eq_effective(const eq_state *s, peq_preset *out) {
     *out = s->mode == EQ_3 ? s->eq3 : s->peq;
     if (s->mode == EQ_PEQ ? !out->automatic : out->automatic == 1)
