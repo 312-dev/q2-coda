@@ -347,14 +347,21 @@ int ui_frame(const input_t *in, int n) {
 }
 
 
-/* Whether the screen is dark: demo turns the backlight off after its idle time and on at the
- * next press, which is then a wake and nothing else (docs/internals.md#screen-off-and-wake). q2ui
- * reads the same keys, so it drops what arrives while the light is off. No backlight to read (a
- * host run, the emulator) is a lit screen. */
+/* Whether the screen is dark: demo, or q2sysd on Vamp OS, turns the light off after its idle time and
+ * on at the next press, which is then a wake and nothing else (docs/internals.md#screen-off-and-wake).
+ * q2ui reads the same keys, so it drops what arrives while the light is off. The Q2 has no
+ * backlight class device (its light is stock's PWM on /dev/jz_pwm), so the word is the light's
+ * owner's: Q2SYS/1's screen events on Vamp OS (ui/api.c), demo's dark= in its status file
+ * (patch/q2ui_gate.c tell). Where neither says, a backlight device's bl_power and brightness; none
+ * of the three (a host run, the emulator) is a lit screen. */
 const char *ui_backlight = "/sys/class/backlight";
 int ui_dark(void) {
     static char power[160], level[160];
     static int found = -1;
+    int said = api_screen_dark();
+    if (said >= 0) return said;
+    char word[8];
+    if (status_told_value("dark", word, sizeof word)) return atoi(word) != 0;
     if (found < 0) {
         found = 0;
         char cmd[200];
@@ -448,13 +455,25 @@ int ui_run(void) {
             rested = 0;
         struct timespec ts = { wait / 1000, (long)(wait % 1000) * 1000000L };
         ppoll(fds, (nfds_t)n, wait >= 0 ? &ts : 0, &open_mask);
+        /* dark as the wait ended, before the watches read a word of the screen lit: the press that
+         * lit it (demo's wake, at the same key) may be read in the same pass as that word */
+        int dark = ui_dark();
         for (int k = 0; k < watches; ++k)
             if (fds[nfds + k].revents && fds[nfds + k].fd == watch[k].fd && watch[k].fd >= 0) watch[k].fn();
         input_t in[64];
         int got = input_read(in, 64);
-        /* the press that wakes the screen is only that, its release included */
+        /* the press that wakes the screen is only that, its release included. demo lights it at a
+         * key itself (patch/nav/input.c); q2sysd only at the power key, so on Vamp OS q2ui asks for
+         * it at any other key's press (not the wheel's tick nor a touch, as demo's wake_key) */
         static uint64_t quiet_until, last_input;
-        if (got && ui_dark()) quiet_until = mono_us() + 400000;
+        if (got && (dark || ui_dark())) {
+            quiet_until = mono_us() + 400000;
+            for (int i = 0; i < got && api_vamp; ++i)
+                if (in[i].type == IN_KEY_DOWN && in[i].value != 116) { /* KEY_POWER: q2sysd's */
+                    api_sys_send("screen on");
+                    break;
+                }
+        }
         if (got && mono_us() < quiet_until) got = 0;
         /* a panel set up again on waking is back at 16 bits a pixel (panel.c): told again when the
          * screen was dark, and at the first input after a pause long enough for it to have been */

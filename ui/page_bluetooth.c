@@ -96,8 +96,9 @@ static void row(void *ctx, int i, ui_row *out) {
         out->title = tails[i - tail()], out->flags = ROW_CHEVRON;
 }
 
-/* A paired device's own page: Connect or Disconnect, then Forget This Device; either acts and comes
- * back. */
+/* A paired device's own page: Connect or Disconnect, which acts and comes back, then Forget This
+ * Device, which asks first on the confirmation card (as demo's bt_detail.c forget_ask: destructive, on
+ * Cancel) and forgets and comes back only at Forget Device. */
 static const struct dev *picked_dev(void) {
     for (int k = 0; k < n_devs; ++k)
         if (!strcmp(devs[k].mac, picked)) return &devs[k];
@@ -112,10 +113,25 @@ static void dev_row(void *ctx, int i, ui_row *out) {
     const struct dev *d = picked_dev();
     out->title = i ? "Forget This Device" : d && d->state ? "Disconnect" : "Connect";
 }
+static char forgetting[18]; /* the device the card asks about: the page may have moved on by the answer */
+static void forget_answered(int n) {
+    if (n != 2) return; /* Cancel, Return, the screen off or the timeout: nothing is forgotten */
+    player_line("btforget", forgetting);
+    if (!strcmp(picked, forgetting)) ui_pop();
+}
 static void dev_chosen(void *ctx, int i) {
     (void)ctx;
-    player_line(i ? "btforget" : "btlink", picked);
-    ui_pop();
+    if (!i) {
+        player_line("btlink", picked);
+        ui_pop();
+        return;
+    }
+    static const char *const rows[] = { "Cancel", "Forget Device" };
+    const struct dev *d = picked_dev();
+    char title[48];
+    snprintf(title, sizeof title, "Forget %.30s?", d && *d->name ? d->name : "This Device");
+    snprintf(forgetting, sizeof forgetting, "%s", picked);
+    notice_ask_local(title, "You'll need to pair again to use it.", rows, 2, 0, 1, forget_answered);
 }
 
 static void chosen(void *ctx, int i) {

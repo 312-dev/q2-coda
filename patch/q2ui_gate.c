@@ -86,6 +86,7 @@ static struct {
     unsigned started_at; /* time_now_ms when q2ui was last started */
     unsigned asked_at; /* time_now_ms when it was asked for */
     unsigned told_at, told; /* the status's last look (time_now_ms), and the hash of what was written */
+    char told_lit;     /* g_backlight_status at that look: a change is told at once, not at the next look */
     unsigned told_wifi, told_bt; /* the same for Q2UI_WIFI and Q2UI_BT */
     char piped;        /* ctl holds the pipe's ends: read (demo's), write (q2ui's) */
     int ctl[2];
@@ -222,7 +223,10 @@ static void tell_networks(void) {
 }
 
 /* The status row's states for q2ui (Q2UI_STATUS), written when they change; looked at every
- * Q2UI_STATUS_MS, so a cable put in shows in q2ui's row within half a second. Then About's
+ * Q2UI_STATUS_MS, so a cable put in shows in q2ui's row within half a second. dark= is whether the
+ * screen is off (g_backlight_status clear; the Q2 has no backlight device q2ui could read, its light is
+ * stock's PWM): a press that arrives dark only wakes in q2ui too (ui/ui.c ui_dark), so a change of it
+ * is looked at on the pass it happens, not up to Q2UI_STATUS_MS later. Then About's
  * product=, version= and firmware= (this build's, as demo's About shows them), and last, cover=, the
  * playing song's cover's file or nothing (ui/now.c now_cover reads it): its bytes change with every
  * song, which q2ui sees by its watch of the file's folder, so only a change of file is written here.
@@ -230,8 +234,9 @@ static void tell_networks(void) {
  * q2ui runs; a key of the queue's song and the player's type would spare them. */
 static void tell(void) {
     unsigned now = (unsigned)time_now_ms();
-    if (qu.told_at && now - qu.told_at < Q2UI_STATUS_MS) return;
-    qu.told_at = now | !now;
+    char lit = g_backlight_status != 0;
+    if (qu.told_at && now - qu.told_at < Q2UI_STATUS_MS && lit == qu.told_lit) return;
+    qu.told_at = now | !now, qu.told_lit = lit;
     char b[1024], url[600];
     unsigned pos, count;
     unsigned n = status_row_state(b, 448); /* the slots, the clock's zone and form, and Control Center's states */
@@ -239,8 +244,8 @@ static void tell(void) {
     if (!song_cover_url(queue_now(&pos, &count), url, sizeof url)) url[7] = 0; /* past "file://": none */
     char v[64];
     vamp_version(v, sizeof v);
-    int k = tk_snprintf(b + n, sizeof b - n, "product=%s\nversion=%s\nfirmware=%s\ncover=%s\n", PRODUCT_NAME, v,
-                        STOCK_VERSION, url + 7);
+    int k = tk_snprintf(b + n, sizeof b - n, "dark=%d\nproduct=%s\nversion=%s\nfirmware=%s\ncover=%s\n", !lit,
+                        PRODUCT_NAME, v, STOCK_VERSION, url + 7);
     if (k > 0 && (unsigned)k < sizeof b - n) n += (unsigned)k;
     unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)b, n);
     if (h != qu.told && blob_io(Q2UI_STATUS, Q2UI_STATUS ".tmp", b, n, 1)) qu.told = h;
