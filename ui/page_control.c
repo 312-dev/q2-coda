@@ -139,6 +139,7 @@ struct cc_st {
     char usb_s[24];
     struct {
         int on, stop, x0, y0, moved, dragging, held, want; /* want: a dragged level not yet sent, -1 none */
+        int nolift; /* the sheet could not be lifted (no memory for its pictures): this touch does not try again */
         uint64_t at, sent_at;
         float finger; /* a dragged slider's place under the finger, 0 to 1 */
     } touch;
@@ -311,23 +312,24 @@ static int touch(struct cc_st *s, const input_t *e) {
     int dx = e->x - s->touch.x0, dy = e->y - s->touch.y0, slider = s->touch.stop == BRIGHT || s->touch.stop == VOLUME;
     if (e->type == IN_TOUCH_DOWN) {
         s->touch.on = 1, s->touch.stop = hit(e->x, e->y), s->touch.x0 = e->x, s->touch.y0 = e->y, s->touch.at = ui_time();
-        s->touch.moved = s->touch.dragging = s->touch.held = 0, s->touch.want = -1;
+        s->touch.moved = s->touch.dragging = s->touch.held = s->touch.nolift = 0, s->touch.want = -1;
         if (s->touch.stop >= 0 && s->touch.stop <= EQ) ui_wake_ms(QUICK_HOLD_MS);
         return 0;
     }
     if (!s->touch.on) return 0;
-    if (!s->touch.moved && (abs(dx) >= SLIDE_PX || abs(dy) >= SLIDE_PX)) {
+    if (!s->touch.moved && (abs(dx) >= SLIDE_PX || abs(dy) >= SLIDE_PX))
         s->touch.moved = 1, s->touch.dragging = slider && abs(dx) > abs(dy);
-        if (!s->touch.dragging && abs(dy) >= abs(dx)) { /* up or down: the sheet lifts with the finger (lifting) */
-            s->behind = ui_snapshot_under();
-            sheet_make(s);
-            if (!s->sheet || !s->behind) { /* no memory for the motion: a swipe up still closes it on the lift */
-                free(s->sheet), free(s->behind), s->sheet = s->behind = 0, ui_status_hidden = 0;
-            } else {
-                s->pulling = s->lifting = 1, s->vy = 0, s->last_t = 0, s->reveal = SCREEN_H;
-                follow(s, SCREEN_H + (float)dy);
-                return 0;
-            }
+    /* SLIDE_PX up or down, whatever it did first (a thumb from the screen's foot goes sideways before it goes up),
+     * and not a slider's: the sheet lifts with the finger (lifting) */
+    if (s->touch.moved && !s->touch.dragging && !s->touch.nolift && abs(dy) >= SLIDE_PX) {
+        s->behind = ui_snapshot_under();
+        sheet_make(s);
+        if (!s->sheet || !s->behind) { /* no memory for the motion: a swipe up still closes it on the lift */
+            free(s->sheet), free(s->behind), s->sheet = s->behind = 0, ui_status_hidden = 0, s->touch.nolift = 1;
+        } else {
+            s->pulling = s->lifting = 1, s->vy = 0, s->last_t = 0, s->reveal = SCREEN_H;
+            follow(s, SCREEN_H + (float)dy);
+            return 0;
         }
     }
     if (s->touch.dragging) {

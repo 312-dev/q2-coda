@@ -199,7 +199,9 @@ static void parse_file(const char *path) {
 }
 
 static void write_stats(void) {
-    FILE *f = fopen(opt.stats, "w");
+    char tmp[300];
+    snprintf(tmp, sizeof tmp, "%s.new", opt.stats); /* whole or not at all: a reader mid-run sees the last one */
+    FILE *f = fopen(tmp, "w");
     const struct ui_stats *s = &ui_stats;
     if (!f) return;
     char notices[200], title[256];
@@ -230,7 +232,7 @@ static void write_stats(void) {
             now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(), api_vamp, api_play_live(),
             now_get()->hearts, now_get()->liked, title, notices,
             *bench_json ? ",\n \"bench\": " : "", bench_json);
-    fclose(f);
+    if (fclose(f) || rename(tmp, opt.stats)) remove(tmp);
 }
 
 /* Where a q2ui before this one rested, when that was a moment ago: its pages and each one's row
@@ -586,6 +588,7 @@ int main(int argc, char **argv) {
     notice_wake = wake_screen;
     notice_changed = write_stats; /* the card's state is seen in the stats file while the loop is not at rest */
     ui_on_rest(at_rest);
+    ui_on_second(write_stats); /* and while it moves: the stats file is live, not only at rest */
     ui_on_stack(state_save); /* a page that never rests (Now Playing while a song plays) is still come back to */
     int code = ui_run();
     notice_close();
