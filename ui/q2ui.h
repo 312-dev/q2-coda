@@ -327,6 +327,7 @@ struct ui_frame_rec {
     uint32_t glyphs;       /* glyphs made for it (text.c) */
     uint32_t glyph_max_us; /* the slowest of them */
     uint32_t faults;       /* major page faults since the frame before (a mapped font's pages read from flash) */
+    uint32_t pan_us;       /* its pan ioctl's time, the refresh wait included: work_us less this is the frame's own */
 };
 #define FRAME_MOVING 1  /* the frame asked for the next */
 #define FRAME_OVERLAP 2 /* the panel said the page this frame was turned onto was the one shown */

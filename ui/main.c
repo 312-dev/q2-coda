@@ -47,7 +47,8 @@
  * that q2ui left for ended on demo's Now Playing (a Search result played; patch/q2ui_gate.c).
  *
  * --frame-log N keeps the last N frames shown in the stats (frame_log_*: each one's time since the one before, its
- * list's scroll, q2ui.h's FRAME_* flags, its work time, the glyphs it made, the slowest one's time and the major page faults since the frame before) and reads the panel's shown page back before each turn (fb_overlaps);
+ * list's scroll, q2ui.h's FRAME_* flags, its work time, the glyphs it made, the slowest one's time, the major page faults since the frame before and its pan's time, the refresh wait
+ * included) and reads the panel's shown page back before each turn (fb_overlaps);
  * --fb-flush 1 msyncs the page turned onto before its pan, 2 writes the CPU's data cache back over it (MIPS).
  * --pan-blocks makes a panel file's pan wait for the refresh, as the Q2's FBIOPAN_DISPLAY does (a host
  * test of the stats; a real panel's pan is its own).
@@ -258,9 +259,9 @@ static void write_stats(void) {
             now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(), api_vamp, api_play_live(),
             now_get()->hearts, now_get()->liked, title, notices,
             *bench_json ? ",\n \"bench\": " : "", bench_json);
-    /* the frame log, oldest first: seven lists of the same length (q2ui.h struct ui_frame_rec) */
-    static const char *const logs[] = { "dt_us", "scroll16", "flags", "work_us", "glyphs", "glyph_max_us", "faults" };
-    for (int k = 0; k < 7 && ui_frame_log_n; ++k) {
+    /* the frame log, oldest first: eight lists of the same length (q2ui.h struct ui_frame_rec) */
+    static const char *const logs[] = { "dt_us", "scroll16", "flags", "work_us", "glyphs", "glyph_max_us", "faults", "pan_us" };
+    for (int k = 0; k < 8 && ui_frame_log_n; ++k) {
         fprintf(f, ",\n \"frame_log_%s\": [", logs[k]);
         for (unsigned i = 0, o = 0; i < ui_frame_log_n; ++i) {
             const struct ui_frame_rec *r = &ui_frame_log[(ui_frame_log_at + i) % ui_frame_log_n];
@@ -268,7 +269,7 @@ static void write_stats(void) {
             if (k == 0) fprintf(f, "%s%u", o++ ? "," : "", r->dt_us);
             else if (k == 1) fprintf(f, r->scroll16 == INT32_MIN ? "%snull" : "%s%d", o++ ? "," : "", r->scroll16);
             else
-                fprintf(f, "%s%u", o++ ? "," : "", k == 2 ? r->flags : k == 3 ? r->work_us : k == 4 ? r->glyphs : k == 5 ? r->glyph_max_us : r->faults);
+                fprintf(f, "%s%u", o++ ? "," : "", k == 2 ? r->flags : k == 3 ? r->work_us : k == 4 ? r->glyphs : k == 5 ? r->glyph_max_us : k == 6 ? r->faults : r->pan_us);
         }
         fputc(']', f);
     }

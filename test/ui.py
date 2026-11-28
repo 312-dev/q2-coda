@@ -3123,6 +3123,11 @@ def frame_log(binary, work):
                       len(work_us) == len(made) == len(slowest) == len(faults) == len(dt) and all(w > 0 for w in work_us) and
                       any(m > 0 and g > 0 for m, g in zip(made, slowest)) and all(g == 0 for m, g in zip(made, slowest) if not m),
                       f'{len(work_us)} {len(made)} {len(slowest)} of {len(dt)}; made {sum(made)}, slowest {max(slowest or [0])} us')
+        pan = s.get('frame_log_pan_us', [])
+        good &= check("each frame logged has its pan's time (the refresh wait in it), inside its work time, so a late frame's own "
+                      'cost is its work less its pan',
+                      len(pan) == len(work_us) and any(p > 0 for p in pan) and all(p <= w for p, w in zip(pan, work_us)),
+                      f'{len(pan)} of {len(work_us)}; pan max {max(pan or [0])} us')
         good &= check("a gap in the first turns after the start is counted apart (start_late), not as a motion's late frame",
                       isinstance(s.get('start_late'), int), str(s.get('start_late')))
         good &= check('each tick is timed to the first frame shown after it, inside a refresh or two on the host',
