@@ -1260,7 +1260,7 @@ def test_the_tap_s_layout_is_peq_h_s():
         assert re.search(rf'#define {name} (\w+)', ours).group(1) == re.search(rf'#define {name} (\w+)', peq).group(1), name
 
 
-# ---- Car Remote's fields (docs/playd.md#car-remote): what coda-rc reads of the now and queue files ----
+# ---- Car Remote's fields (docs/playd.md#what-it-talks-to): what coda-rc reads of the now and queue files ----
 
 def queue_file(root, wait=1.0):
     time.sleep(wait)  # written with the now file, at most every NOW_EVERY_MS
