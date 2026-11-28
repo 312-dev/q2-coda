@@ -11,7 +11,9 @@ key in the card's adb_keys authenticates, that its copy on /mnt/data serves whil
 the card's file does; shell:, exec: (byte for byte), sync: push and pull, and that the services the patch removes
 are refused. A key `adb keygen` makes is checked too when adb and openssl are installed. q2adb-gadget
 (patch/adb_gadget.sh) runs under the host's sh against a directory tree, with mount, umount, mountpoint and
-usleep stubbed: the gadget it makes, park, unpark, and that a parked gadget is never bound. adb over Wi-Fi: the
+usleep stubbed: the gadget it makes, park, unpark, and that a parked gadget is never bound. tools/uac_tone.sh, the
+USB audio desk test, against a stand-in /proc, dmesg and aplay: that it plays only while the computer streams, with
+the kernel's ring buffer full. adb over Wi-Fi: the
 same adbd with --tcp on a loopback port, driven by tools/vamp.py's client (authorization, no UI socket, the
 Smart Wi-Fi use file, exec:, q2remote's commands through vamp, push and pull, the 8-connection cap), and
 q2adb-wifi (patch/adb_wifi.sh) under the host's sh with stand-ins for adbd and q2adb-mdns; with BUILD, its
@@ -591,6 +593,71 @@ def gadget_checks():
                and gadget('audio', 'try', 'x').returncode == 2)
 
 
+def uac_tone_checks():
+    """tools/uac_tone.sh, the USB audio desk test (docs/usb-audio.md#the-desk-test), under the host's sh: a stand-in
+    /proc (the gadget's card and PCM, a fixed uptime of 100 s), a dmesg that prints a file, an aplay that notes its
+    calls. On a Q2 up a while the kernel's ring buffer is full, so a new line pushes the oldest out and the count
+    of lines stays the same; device run 5 missed the computer's stream START so, and took a STOP line's rate for
+    a recording. $UAC_TONE runs another copy of the script (a broken one must fail these)."""
+    script = os.environ.get('UAC_TONE', str(ROOT/'tools/uac_tone.sh'))
+    old = [f'[ {i:10.6f}] hyn: touch {i}' for i in range(40)]
+    def line(t, text):
+        return f'[ {t:10.6f}] {text}'
+    start = line(101, 'UAC2: playback stream START, srate=48000')
+    stop = line(105, 'UAC2: playback stream STOP, srate=48000')
+    def run(wait, lines=(), after=0.0, stop_on_play=False, grow=False):
+        with tempfile.TemporaryDirectory(prefix='q2-uac-tone-') as d:
+            d = pathlib.Path(d)
+            proc, tmp, bin = d/'proc', d/'tmp', d/'bin'
+            sub = proc/'asound/card1/pcm0p/sub0'
+            for p in (sub, tmp, bin):
+                p.mkdir(parents=True)
+            (proc/'uptime').write_text('100.00 50.00\n')
+            (proc/'asound/cards').write_text(' 0 [ecodecsoundcard]: x\n 1 [UAC2Gadget     ]: UAC2_Gadget - UAC2_Gadget\n')
+            (sub/'status').write_text('state: RUNNING\nhw_ptr : 0\nappl_ptr : 0\navail : 0\n')
+            (sub/'hw_params').write_text('rate: 48000 (48000/1)\n')
+            (tmp/'tone-48000.wav').write_bytes(b'RIFF')
+            ring, calls = d/'dmesg.txt', d/'aplay.calls'
+            ring.write_text('\n'.join(old) + '\n')
+            def push(new):  # each new line pushes the oldest out, unless the ring is still filling (grow)
+                cur = ring.read_text().splitlines()
+                (d/'ring.n').write_text('\n'.join(cur[0 if grow else len(new):] + list(new)) + '\n')
+                os.replace(d/'ring.n', ring)
+            stubs = {'dmesg': f'cat "{ring}"', 'usleep': 'sleep 0.1',
+                     'aplay': f'echo "$*" >> "{calls}"\n' + (f'tail -n +2 "{ring}" > "{d}/r.n"; echo "{stop}" >> "{d}/r.n"; '
+                                                             f'mv "{d}/r.n" "{ring}"\n' if stop_on_play else '') +
+                              'sleep 1.2'}  # past the script's 500 ms check of the stream
+            for name, body in stubs.items():
+                (bin/name).write_text('#!/bin/sh\n' + body + '\n')
+                (bin/name).chmod(0o755)
+            timer = threading.Timer(after, push, (lines,))
+            if lines:
+                timer.start()
+            env = dict(os.environ, PATH=f'{bin}:{os.environ["PATH"]}', UAC_PROC=str(proc), UAC_TMP=str(tmp),
+                       UAC_LOG=str(d/'log.txt'))
+            r = subprocess.run(['sh', script, str(wait), 'tone'], env=env, capture_output=True, text=True, timeout=60)
+            timer.cancel()
+            return r, calls.read_text().splitlines() if calls.exists() else []
+    r, played = run(5, (line(101, 'UAC2: u_audio_set_playback_srate: host set srate 48000'), start), after=1.5)
+    expect('uac_tone: a START in a full ring buffer starts the plays, at its rate',
+           'the computer records at 48000 Hz' in r.stdout and len(played) == 2
+           and all(c.endswith('tone-48000.wav') for c in played), r.stdout + str(played))
+    expect('uac_tone: the count of kernel lines is logged', f'kernel lines {len(old)}' in r.stdout, r.stdout)
+    r, played = run(3, (line(101, 'UAC2: playback stream STOP, srate=48000'),), after=1.0)
+    expect('uac_tone: a STOP alone is not a recording', r.returncode == 1 and not played
+           and 'did not start recording within 3 s (last stream line: STOP 48000)' in r.stdout, r.stdout + str(played))
+    r, played = run(3, (line(101, 'UAC2: playback stream STOP, srate=48000'),), after=1.0, grow=True)
+    expect('uac_tone: a STOP alone is not a recording while the ring buffer fills', r.returncode == 1 and not played,
+           r.stdout + str(played))
+    r, played = run(2, (line(99, 'UAC2: playback stream START, srate=48000'),), after=0.2)
+    expect('uac_tone: a START stamped before it began does not count', r.returncode == 1 and not played,
+           r.stdout + str(played))
+    r, played = run(2, (start,), after=0.5, stop_on_play=True)
+    expect('uac_tone: a STOP while playing is logged and no play follows it', len(played) == 1
+           and 'stream stopped by 100.00: STOP 48000' in r.stdout
+           and 'play 2: the stream is not running (last stream line: STOP 48000)' in r.stdout, r.stdout + str(played))
+
+
 def wrapper_checks():
     from build import adb_wrapper
     with tempfile.TemporaryDirectory(prefix='q2-adb-wrap-') as d:
@@ -839,6 +906,7 @@ def main(argv):
     if '--qemu' in args:
         i = args.index('--qemu'); qemu = args[i + 1]; del args[i:i + 2]
     gadget_checks()
+    uac_tone_checks()
     wrapper_checks()
     wifi_checks()
     if args:  # BUILD's adbd, with BUILD's libraries
