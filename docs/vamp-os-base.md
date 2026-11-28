@@ -223,9 +223,9 @@ The first run of Vamp OS on the owner's Q2, by [card boot](#card-boot) alone: no
 **On the computer.**
 
 1. `tools/mac/q2env python3 tools/vampos.py build --out runs/card` (or a sweep's `runs/z1`), then `tools/mac/q2env python3 tools/vampos.py compose --image runs/card/vampos.squashfs --zip "$HOME/q2-stock/Q2 Firmware V1.36.zip" --out runs/card/composed.squashfs`.
-2. A `--dev` build of today's Vamp from this branch (`tools/ci/rebuild.py --dev`), installed by the usual update. Boot it once with no `.vamp/os` on the card: it behaves as before and `/mnt/data/vamp/handoff.log` does not exist.
+2. A `--dev` build of today's Vamp that carries the hook and `squashfuse_ll` (`feat/card-boot-hook`, merged into `integ/vamp-dev`), installed by the usual update; `adb shell 'ls -l /usr/bin/q2vampos /usr/bin/squashfuse_ll'` shows both. Boot it once with no `.vamp/os` on the card: it behaves as before and `/mnt/data/vamp/handoff.log` does not exist.
 3. Back up `/mnt/data`: `adb shell 'tar -C /mnt -cf - data' > q2-data-$(date +%Y%m%d).tar; tar tf q2-data-*.tar | grep -E 'config.ini|database.db|bluetooth'`.
-4. Read the unit: `adb shell 'cat /proc/devices | grep loop; ls /dev/loop0'`. No loop device: the card boot cannot work; stop.
+4. Read the unit: `adb shell 'grep -E "loop" /proc/devices; ls -l /dev/loop0 /dev/fuse; grep -E "fuse|squashfs" /proc/filesystems'`. The owner's Q2 has no loop device (2026-11-27), so the image is mounted by `squashfuse_ll` over FUSE ([boot: VampOS card boot](boot.md#vampos-card-boot)): `/dev/fuse` (10, 229) and `fuse` must be there. Neither a loop device nor FUSE: the card boot cannot work; stop.
 5. The card: `adb push runs/card/composed.squashfs /mnt/mmc/.vamp/os/vampos.squashfs`, then `adb shell 'cd /mnt/mmc/.vamp/os && sha256sum vampos.squashfs > vampos.squashfs.sha256 && sha256sum -c vampos.squashfs.sha256'` (or `tools/vampos.py card --image ... --card CARD` with the card in the computer).
 6. A fallback first: `adb shell 'echo 0 > /mnt/mmc/.vamp/os/vampos.squashfs.sha256; touch /mnt/mmc/.vamp/os/boot-once'; adb reboot`. Today's Vamp comes up, `boot-once` is gone, and `adb shell cat /mnt/data/vamp/handoff.log` has the SHA-256 line. Put the right `.sha256` back (step 5).
 7. The boot: `adb shell touch /mnt/mmc/.vamp/os/boot-once; adb reboot`. Stock's splash, a black screen, then `q2ui`'s Home: its selected row Arterial red (no accent saved), the page light from 7:00 to 19:00 by the saved zone (Light Mode Auto). adb stays up: its shell is stock's, outside the image, so the image's tools run as `chroot /tmp/vamp-os-root CMD`.
@@ -234,7 +234,8 @@ The first run of Vamp OS on the owner's Q2, by [card boot](#card-boot) alone: no
 
 | # | Command | Expect | Tells |
 | --- | --- | --- | --- |
-| 1 | `cat /mnt/data/vamp/handoff.log; tail -20 /mnt/data/vamp/boot.log` | the chroot started; rcS's lines through the services | the hand-off |
+| 1 | `cat /mnt/data/vamp/handoff.log; tail -20 /mnt/data/vamp/boot.log` | `no loop device: the image is mounted by squashfuse_ll over FUSE`, the chroot started; rcS's lines through the services | the hand-off |
+| 1a | `p=$(cat /tmp/vamp-os-fuse.pid); grep ' /tmp/vamp-os-root ' /proc/mounts; cat /proc/$p/oom_score_adj; grep -E 'VmRSS\|VmHWM' /proc/$p/status; free` | `fuse.squashfuse_ll ro,...,allow_other` (no `nosuid`), `-1000`, the daemon's resident memory (expected a few MB) and what is left of the 115 MB | the FUSE mount and its cost |
 | 2 | `ps \| grep -E 'runsv\|q2(ui\|player\|playd\|libd\|sysd\|netd\|btd\|pkgd)'` | each running once | the services |
 | 3 | `$A /run/vamp/sys.sock Q2SYS/1 battery heat jack` | `battery level=` near today's, `heat off` (today's `q2guard` keeps it), `jack po= bal=` as plugged | the CW2015, the jacks' GPIO class |
 | 4 | `$A /run/vamp/sys.sock Q2SYS/1 'screen off'`, then `'screen on'`; a short press of Power | the panel dark, then lit, both ways | Readiness 3 |
@@ -247,7 +248,11 @@ The first run of Vamp OS on the owner's Q2, by [card boot](#card-boot) alone: no
 | 11 | `$A /run/vamp/sys.sock Q2SYS/1 find`, then press any key | the jingle with the screen lit, stopped at the key | Find My Vamp's PWM |
 | 12 | `logread 2>/dev/null \| tail -50; dmesg \| tail -50` | no service restarting in a loop | |
 
+Sound checks (7, 8) wait for a day the owner can listen; the rest stand.
+
 8. Come back: `adb reboot`. Today's Vamp starts (`boot-once` was spent); `cat /mnt/data/vamp/handoff.log` has this boot's lines. If adb is gone, hold Power 3 s (`q2sysd`'s power off, which in a card boot reaches stock's `init`), or longer for the PMIC's cut-off. If today's Vamp does not come up, the step 3 tar has the data and [First boot on a Q2](#first-boot-on-a-q2)'s step 1 is the way back.
+If the screen freezes and adb's shell answers but the image's commands hang or fail with `Transport endpoint is not connected`, the daemon has gone: the supervisor should already have rebooted (its line in `handoff.log`); if it did not, that is a finding, and `adb reboot` comes back.
+
 9. Keep the evidence: `adb pull /mnt/data/vamp/` and the answers above, into the needs-a-Q2 rows they settle.
 
 ## First boot on a Q2
