@@ -1150,9 +1150,9 @@ static int ly_utf8(const unsigned char *s, size_t n) {
 }
 
 /* A text of n bytes (what a file or tag held, at most LYRIC_MAX of them) as UTF-8 without a byte-order mark, in a new
- * NUL-ended buffer: UTF-8 as it is, else from GB18030 as today's firmware reads it. ponytail: where the image has no
- * GB18030 converter (today's image carries no glibc gconv modules) or the text is not GB18030 either, its bytes go as
- * they are; copying glibc's GB18030.so and gconv-modules into the image (os/) lifts it. A character cut by the 64 KB limit is dropped. */
+ * NUL-ended buffer: UTF-8 as it is, else from GB18030 as today's firmware reads it, through glibc's GB18030 gconv
+ * module (the image carries that one alone, os/configs/vamp_q2_defconfig). Text that is not GB18030 either goes as its
+ * bytes are. A character cut by the 64 KB limit is dropped. */
 static char *ly_text(const char *in, size_t n) {
     char *out = malloc(2 * n + 8);
     if (!out) return 0;

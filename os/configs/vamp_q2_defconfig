@@ -22,6 +22,11 @@ BR2_REPRODUCIBLE=y
 BR2_TARGET_TZ_INFO=y
 BR2_TARGET_LOCALTIME=""
 
+# glibc's GB18030 converter alone, with a gconv-modules naming it, for q2libd's lyrics in GB18030
+# (docs/platform/library.md#lyrics): iconv_open fails without it. The whole set would be about 8 MB.
+BR2_TOOLCHAIN_GLIBC_GCONV_LIBS_COPY=y
+BR2_TOOLCHAIN_GLIBC_GCONV_LIBS_LIST="GB18030"
+
 # No init system package: BusyBox init with this tree's inittab and rcS, runit's applets for the services.
 BR2_INIT_NONE=y
 BR2_SYSTEM_BIN_SH_BUSYBOX=y

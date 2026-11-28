@@ -30,7 +30,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark), `accent-blue` (with --card-boot: the accent saved Blue), `carrd-off` (no q2carrd), `carrd-card` (with --card-boot: q2carrd's run script not waiting on a card boot), `seed-off` (rcS without the random seed's mix-in), `lo-off` (rcS without the loopback interface), `lo-card` (with --card-boot: lo brought up over today's Vamp's network). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark), `accent-blue` (with --card-boot: the accent saved Blue), `carrd-off` (no q2carrd), `carrd-card` (with --card-boot: q2carrd's run script not waiting on a card boot), `seed-off` (rcS without the random seed's mix-in), `lo-off` (rcS without the loopback interface), `lo-card` (with --card-boot: lo brought up over today's Vamp's network), `gconv-off` (no GB18030 gconv module: q2libd's GB18030 lyrics go as their bytes). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -154,6 +154,10 @@ def check_image(build, fs, manifest, perturb=None):
     size = image.stat().st_size
     check(size <= vamp_os.ROOTFS_ROOM, f'image is {size:,} bytes, within mtd2\'s {vamp_os.ROOTFS_ROOM:,}')
     check(not (fs/'vendor').exists(), 'no /vendor in the base image')
+    gconv = fs/'usr/lib/gconv'
+    check((gconv/'GB18030.so').is_file() and (gconv/'gconv-modules').is_file() and
+          any(l.split()[1:3] == ['GB18030//', 'INTERNAL'] for l in (gconv/'gconv-modules').read_text().splitlines()
+              if l.startswith('module')), 'glibc\'s GB18030 gconv module and its gconv-modules line, for q2libd\'s lyrics')
     check(os.readlink(fs/'module_driver') == '/vendor/module_driver' and os.readlink(fs/'firmware') == '/vendor/firmware',
           '/module_driver and /firmware point into /vendor')
     stock = {d for d, _ in manifest.values()}
@@ -540,23 +544,29 @@ def launch_check(fs):
 
 
 def lib_check(fs):
-    """q2libd's Q2LIB/1 in the booted image (docs/platform/library.md#q2lib1-the-library-socket): its caps, and the
-    card's one song (song1.wav, scanned for play_check) asked by id, as a client of the socket"""
+    """q2libd's Q2LIB/1 in the booted image (docs/platform/library.md#q2lib1-the-library-socket): its caps, the
+    card's one song (song1.wav, scanned for play_check) asked by id, as a client of the socket, and its GB18030
+    song1.lrc answered as UTF-8, which needs the image's gconv module (with no converter the bytes go as they are)"""
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(15)
         s.connect(str(fs/'run/vamp/lib.sock'))
-        f = s.makefile('rw')
+        f = s.makefile('rw', encoding='utf-8', errors='backslashreplace')
         out = []
         for line in ('Q2LIB/1', 'caps', 'song 1'):
             f.write(line + '\n')
             f.flush()
             out.append(f.readline().strip())
+        f.write('lyrics 1\n')
+        f.flush()
+        lyrics = [f.readline().strip() for _ in range(3)]
         s.close()
     except OSError as e:
         return check(False, f'q2libd: Q2LIB/1 on /run/vamp/lib.sock ({e!r})')
     check(out[:2] == ['Q2LIB/1 ok', 'caps songs song albums artists genres playlists playlist search art watch lyrics'] and
           out[2].startswith('song id=1 title=song1 ') and out[2].endswith(' time=60 source=card'), f'q2libd: Q2LIB/1 answers on the image ({out})')
+    check(lyrics == ['lyrics id=1 kind=line source=file lines=1', 'line at=1000 text=\u4f60\u597d words=', 'ok'],
+          f'q2libd: a GB18030 .lrc answered as UTF-8 through the image\'s gconv ({lyrics})')
 
 
 def set_carremote(data, on):
@@ -728,6 +738,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         r.write_text(r.read_text().replace('&& card=--card-boot', '&& card='))
     if perturb == 'zone-off':  # no zone table: rcS's q2sysd zone and the service set none
         (fs/'usr/share/vamp/timezones').unlink()
+    if perturb == 'gconv-off':  # no GB18030 converter: q2libd's GB18030 lyrics go as their bytes
+        (fs/'usr/lib/gconv/GB18030.so').unlink()
     if perturb == 'sysd-off':  # no q2sysd
         (fs/'etc/sv/q2sysd/run').write_text('#!/bin/sh\nexec sleep 3600\n')
     if perturb == 'playd-off':  # no q2playd
@@ -768,6 +780,8 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     db.commit()
     db.close()
     wav(fs/'mnt/mmc/song1.wav', seconds=60)
+    # its sidecar lyrics in GB18030, which q2libd answers as UTF-8 through glibc's gconv module (lib_check)
+    (fs/'mnt/mmc/song1.lrc').write_bytes('[00:01.00]\u4f60\u597d\n'.encode('gb18030'))
     # an API 0 card app for the launcher (launch_check): its run script starts its loop in the background, as
     # q2-subsonic's does, and the loop notes the caps line it found
     navi = fs/'mnt/mmc/.navi'
@@ -966,7 +980,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark', 'accent-blue', 'carrd-off', 'carrd-card', 'seed-off', 'lo-off', 'lo-card'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark', 'accent-blue', 'carrd-off', 'carrd-card', 'seed-off', 'lo-off', 'lo-card', 'gconv-off'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()
