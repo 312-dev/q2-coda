@@ -1,7 +1,7 @@
 /* q2ui's start: options, the library, the panel, the first page, then the loop (ui.c).
  *
  *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--icons DIR]
- *          [--limit N] [--motion 0|1] [--living 0|1] [--living-fps N] [--reduce-motion] [--light]
+ *          [--limit N] [--motion 0|1] [--wheel-scroll follow|tick] [--living 0|1] [--living-fps N] [--reduce-motion] [--light]
  *          [--panel-bits 8|6|5|565]
  *          [--panel-mode 24|keep] [--panel-mem FILE]
  *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--pan-blocks]
@@ -167,6 +167,8 @@ static void parse(int argc, char **argv) {
             opt.limit = atoi(v), ++i;
         else if (!strcmp(a, "--motion"))
             list_motion = atoi(v) != 0, ++i;
+        else if (!strcmp(a, "--wheel-scroll"))
+            list_wheel_follow = strcmp(v, "tick") != 0, ++i;
         else if (!strcmp(a, "--living"))
             list_living = atoi(v) != 0, ++i;
         else if (!strcmp(a, "--living-fps"))
@@ -482,7 +484,9 @@ static int key_code(const char *name) {
  * api (every answer Vamp OS's services owe in, up to 2 s of real time; ui/api.c) | told FILE (the status row's states) |
  * touch X Y | move X Y | lift (a finger on the upright screen, as ui/input.c reads hyn_ts) |
  * swipe X0 Y0 X1 Y1 MS (a finger down, moved a frame at a time over MS, lifted) |
- * spin N DPS (N ticks, one a frame, the wheel turning at DPS degrees a second; a tick's is 0).
+ * spin N DPS (N ticks, one a frame, the wheel turning at DPS degrees a second; a tick's is 0) |
+ * wheel N UNITS (a finger on the wheel, then UNITS of travel a frame for N frames, clockwise when positive, read as
+ * the device's events are: ticks, tugs and speed; it stays down) | wheel lift.
  * Each input goes in with the next frame. */
 static void script_said(const char *line) {
     if (trace) fprintf(trace, "t=%llu said %s\n", (unsigned long long)fake_us, line);
@@ -516,6 +520,16 @@ static int script(const char *path) {
                 input_t in = { IN_TICK, tx > 0 ? 1 : -1, 0, (unsigned)(fake_us / 1000u), 0, 0, ty };
                 script_frame(&in, 1);
             }
+        } else if (sscanf(line, "wheel %d %d", &tx, &ty) == 2) {
+            static int wx = 100;
+            for (int i = 0; i <= tx; ++i) { /* down at wx, then ty units a frame for tx frames */
+                if (i) wx = ((wx - ty - 1) % 200 + 200) % 200 + 1;
+                input_t in[8];
+                script_frame(in, input_wheel_feed(wx, 1, (unsigned)(fake_us / 1000u), in, 8));
+            }
+        } else if (!strncmp(line, "wheel lift", 10)) {
+            input_t in[8];
+            script_frame(in, input_wheel_feed(100, 0, (unsigned)(fake_us / 1000u), in, 8));
         } else if (sscanf(line, "tug %319s", arg) == 1) {
             input_t in = { IN_TUG, 0, (float)atof(arg), ms };
             script_frame(&in, 1);

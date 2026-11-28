@@ -4,7 +4,9 @@
  * What moves, each by the frame's clock on a spring that keeps its speed across a new target:
  *  - the scroll: a tick still moves the selection a whole row, and when that takes the list a row
  *    on, the rows glide there (GLIDE_S), sub-pixel, the incoming row sliding into view; a tick
- *    mid-glide retargets from where the list is, so a fast spin keeps gliding;
+ *    mid-glide retargets from where the list is, so a fast spin keeps gliding; while the wheel turns,
+ *    the glide's target goes on between ticks by the tug's share of the next tick's rows (follow), so a
+ *    steady turn scrolls evenly;
  *  - the platter (the selection's bar), which slides from row to row and never jumps;
  *  - the lean: while the finger turns the wheel short of its next tick the platter leans toward
  *    the row it is heading for, tilts as a tvOS card does, grows and gleams, and a tick kicks it
@@ -134,6 +136,7 @@
 #define AZ_POINTER 7     /* its pointer this long towards it */
 
 int list_motion = 1;
+int list_wheel_follow = 1;
 
 struct rowc {
     int index; /* -1: empty */
@@ -154,6 +157,11 @@ struct ui_list {
     spring_t scroll, bar, lean, press, knob;
     unsigned everything_seen; /* list_rows_changed's count when this list last read its rows again */
     float tug;
+    /* the wheel's run of ticks (follow): when the last tick came and the rows it took, how many came each within
+     * FOLLOW_MS of the last, when the last tug came, and the scroll follow added to scroll.to for it */
+    unsigned tick_ms, tug_ms;
+    int ticks_run, tick_step;
+    double follow_px;
     int pressed, moving;
     int grab; /* the ROW_SLIDER row the wheel sets, -1 none */
     uint64_t t, press_at, sb_at, mq_at;
@@ -314,23 +322,52 @@ static void kick(ui_list *l) {
     ui_again();
 }
 
-static void retarget(ui_list *l) {
+/* The first row under the pinned ones that keeps sel in sight, from top */
+static int top_for(const ui_list *l, int sel, int top) {
     int p = l->src.pinned;
     /* on a pinned row the rows under it are at their top: the wheel reaches a pinned row from the
      * first of them, whether it stopped there on the way or a fast turn passed over it */
-    if (l->top < p || l->sel < p) l->top = p;
+    if (top < p || sel < p) top = p;
     /* a caption the selected row grows to takes the whole rows it needs under it, so its foot stays on or above the
      * list's end (patch/settings_pages.c cap_step, nav/lists.c list_grown_foot) */
-    int under = l->sel == l->cap_open ? ((int)cap_full(l) + l->row_h - 1) / l->row_h : 0;
-    if (l->sel >= p) {
-        if (l->sel < l->top) l->top = l->sel;
-        if (l->sel + under >= l->top + l->rows) l->top = l->sel + under - l->rows + 1;
+    int under = sel == l->cap_open ? ((int)cap_full(l) + l->row_h - 1) / l->row_h : 0;
+    if (sel >= p) {
+        if (sel < top) top = sel;
+        if (sel + under >= top + l->rows) top = sel + under - l->rows + 1;
     }
     int last = l->n - l->rows;
-    if (l->sel + under - l->rows + 1 > last) last = l->sel + under - l->rows + 1;
-    if (l->top > last) l->top = last > p ? last : p;
-    l->scroll.to = (double)((l->top - p) * l->row_h);
+    if (sel + under - l->rows + 1 > last) last = sel + under - l->rows + 1;
+    if (top > last) top = last > p ? last : p;
+    return top;
+}
+
+static void retarget(ui_list *l) {
+    l->top = top_for(l, l->sel, l->top);
+    l->scroll.to = (double)((l->top - l->src.pinned) * l->row_h);
+    l->follow_px = 0;
     l->bar.to = bar_to(l);
+}
+
+/* --wheel-scroll follow: while the wheel turns (a second tick FOLLOW_MS or less after the one before), the rows are
+ * taken the tug's share of the way to where the next tick would put them, so between ticks they go on at the
+ * finger's speed and a steady turn scrolls them evenly, not in a surge at each tick. Only the scroll's target moves:
+ * the selection, the click and the rows' rest on whole rows stay the ticks'. A single tick from rest takes the list
+ * its row and no further; a tug FOLLOW_MS old (the finger still on the ring) and the finger's leaving (a tug of 0)
+ * give the share back, so the rows ease to a whole row. */
+#define FOLLOW_MS 300u
+static void follow(ui_list *l, unsigned ms) {
+    double px = 0;
+    if (list_wheel_follow && list_motion && !ui_reduce_motion && l->tug != 0 && l->ticks_run >= 2 && l->tick_step > 0 &&
+        ms - l->tick_ms <= FOLLOW_MS && ms - l->tug_ms < FOLLOW_MS && l->grab < 0 && !l->glide_s) {
+        int dir = l->tug > 0 ? 1 : -1, next = l->sel + dir * l->tick_step;
+        next = next < 0 ? 0 : next >= l->n ? l->n - 1 : next;
+        px = (double)fabsf(l->tug) * (double)((top_for(l, next, l->top) - l->top) * l->row_h);
+    }
+    if (px) ui_wake_ms(FOLLOW_MS); /* to give it back if no tug comes, the rows perhaps at rest meanwhile */
+    if (px == l->follow_px) return;
+    l->scroll.to += px - l->follow_px;
+    l->follow_px = px;
+    kick(l);
 }
 
 static unsigned row_text_flags(ui_list *l, int i) {
@@ -1009,7 +1046,7 @@ static int row_at(ui_list *l, int x, int y) {
  * a row in sight when it would leave (no click: the wheel's clicks are a row's each, a drag's are not). */
 static void drag_to(ui_list *l, double s) {
     int p = l->src.pinned, old = l->sel;
-    spring_set(&l->scroll, s);
+    spring_set(&l->scroll, s), l->follow_px = 0;
     double top = s < 0 ? 0 : s > scroll_max(l) ? scroll_max(l) : s;
     int first = p + (int)ceil(top / l->row_h - 0.25), last = first + l->rows - 1;
     last = last >= l->n ? l->n - 1 : last;
@@ -1066,7 +1103,7 @@ static void list_touch(ui_list *l, const input_t *e) {
         l->touch.y0 = e->y, l->touch.at = ui_time();
         if (l->touch.row >= 0 && l->src.held) ui_wake_ms(KEY_HOLD_MS);
         if (l->moving && l->glide_s) { /* a finger on coasting rows stops them where they are */
-            spring_set(&l->scroll, l->scroll.x);
+            spring_set(&l->scroll, l->scroll.x), l->follow_px = 0;
             l->touch.dragging = 1, l->touch.ref_y = e->y, l->touch.ref_scroll = l->scroll.x, l->touch.row = -1;
         }
         l->glide_s = 0;
@@ -1162,11 +1199,15 @@ void list_event(ui_list *l, const input_t *e) {
             l->az_letter = az_of(c->row.title);
             ui_mark(az_rect());
         }
+        l->ticks_run = l->ticks_run && e->ms - l->tick_ms <= FOLLOW_MS ? l->ticks_run + 1 : 1;
+        l->tick_ms = e->ms, l->tick_step = step == WA_LETTER ? 0 : step;
+        l->tug = 0, follow(l, e->ms); /* the tick took the share; the tug after it gives the next one */
     } else if (e->type == IN_TUG) {
         if (!list_motion || ui_reduce_motion) return;
         float a = clampf(fabsf(e->share), 0, 1);
-        l->tug = e->share;
+        l->tug = e->share, l->tug_ms = e->ms;
         l->lean.to = (e->share < 0 ? -1.0f : 1.0f) * (1 - (1 - a) * (1 - a)) * LEAN_PX;
+        follow(l, e->ms);
         kick(l);
     } else if (e->type == IN_KEY_DOWN && e->value == KEY_UI_CENTRE) {
         l->pressed = 1, l->press.to = -PRESS_SINK, l->lean.to = 0;
@@ -1249,6 +1290,7 @@ void list_step(ui_list *l) {
     l->t = now;
     double scroll = l->scroll.x;
     int moving = 0;
+    if (l->follow_px != 0) follow(l, (unsigned)(now / 1000u)); /* a tug grown old gives its share back */
     if (l->moving) {
         moving |= spring_step(&l->scroll, dt, l->glide_s ? l->glide_s : GLIDE_S, 1);
         moving |= spring_step(&l->bar, dt, BAR_S, 1);
