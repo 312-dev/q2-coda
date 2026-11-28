@@ -45,7 +45,8 @@ def sbc_kbps(rate, blocks, subbands, pool, joint=True):
 class Rig:
     procs: list = []
 
-    def __init__(self, d):
+    def __init__(self, d, extra=None):
+        """extra: more -D defines for the helper, over the rig's own (VampOS's build, vampos())"""
         self.d = d
         (d / 'bin').mkdir()
         (d / 'data').mkdir()
@@ -77,7 +78,8 @@ class Rig:
         defs = {'QG_RUN': f'"{d}/run"', 'QG_DATA': f'"{d}/data"', 'QG_BIN': f'"{d}/bin/"', 'QG_ASK_S': '2',
                 'QG_GIVEUP_MS': '3000', 'QG_ARRIVE_MS': '3000', 'QG_OUT_WAIT_MS': '1500',
                 'QG_MAIN_SOURCE': f'"echo MAIN source >> {self.log}"', 'QG_MAIN_STOCK': f'"echo MAIN stock >> {self.log}"',
-                'QG_HOTSPOT': f'"{d}/bin/q2-hotspot"', 'QG_HOTSPOT_CHECK_MS': '1000', 'QG_SPOT': f'"{d}/spot"'}
+                'QG_HOTSPOT': f'"{d}/bin/q2-hotspot"', 'QG_HOTSPOT_CHECK_MS': '1000', 'QG_SPOT': f'"{d}/spot"',
+                **(extra or {})}
         S.run(CC + ['-DCODA_HOST', *(f'-D{k}={v}' for k, v in defs.items()), '-o', str(self.helper),
                     str(SOURCE), '-I', str(ROOT / 'patch'), '-l:libdbus-1.so.3'], check=True)
         self.main = S.Popen(['/usr/bin/python3', str(fake), 'main', str(d / 'main.ctl'), str(self.log)], env=self.env)
@@ -540,6 +542,50 @@ def run(rig, d):
     check('SIGTERM: the state file goes (reads as off)', not (d / 'run.state').exists())
 
 
+def vampos_defines():
+    """The -D defines os/package/q2-guest builds the image's q2-guest with (its Q2_GUEST_DEFINES line)."""
+    import shlex
+    mk = (ROOT / 'os/package/q2-guest/q2-guest.mk').read_text()
+    line = re.search(r'^Q2_GUEST_DEFINES = (.*)$', mk, re.M)
+    if not line:
+        fails('os/package/q2-guest/q2-guest.mk has no Q2_GUEST_DEFINES line')
+        return {}
+    return {k: v for k, _, v in (w[2:].partition('=') for w in shlex.split(line.group(1)))}
+
+
+def vampos(rig, d):
+    """VampOS's build: the one supervised bluealsa carries the sink role, so no second daemon starts, the main daemon
+    is never restarted, and a guest's stream on the main daemon is relayed without -B."""
+    (d / 'data/config').write_text("enabled=1\nname=Gray's Q2\nallow=ask\nleave=resume\nhotspot=0\n"
+                                   'hotspot_pass=tulip-river-42\n')
+    (d / 'data/trusted').write_text(f"{PHONE}\t0\t1700000000\tAlex's Pixel\n")
+    for mac, name in ((PHONE, "Alex's Pixel"), (CAR, 'BMW 6R81')):
+        rig.send('main', f'device {mac} {name}')
+    rig.send('main', f'pcm {CAR} SBC 48000 {SBC_48K}')
+    rig.start_helper()
+    rig.until('starts on, idle, the car found', state='idle', enabled='1', outmac=CAR)
+    time.sleep(3)  # past QG_OUT_WAIT_MS and QG_RESPAWN_MS, when stock's build has started its sink daemon
+    check('no second bluealsa: the image\'s one daemon has the sink role', not rig.seen('SINKD'))
+    check('the main daemon is left to its supervisor', not rig.seen('MAIN'))
+    rig.send('main', f'pcmin {PHONE} SBC 48000 {SBC_48K}')
+    rig.expect(f'APLAY -D bluealsa:DEV={CAR},PROFILE=a2dp {PHONE}',
+               "a Trusted Guest's stream on the main daemon: relayed to the car, no -B")
+    rig.until('... playing', state='playing', status='playing', guest="Alex's Pixel")
+
+
+def test_vampos():
+    """q2-guest as os/package/q2-guest builds it, against Vamp's bluealsa 5.0.0 stand-in"""
+    os.environ['Q2_FAKE_BLUEALSA'] = 'own'
+    with tempfile.TemporaryDirectory(prefix='q2-guest-vampos-') as tmp:
+        d = pathlib.Path(tmp)
+        rig = Rig.__new__(Rig)
+        try:
+            rig.__init__(d, vampos_defines())
+            vampos(rig, d)
+        finally:
+            rig.close()
+
+
 def test_conformance():
     """docs/platform/guest.md's transcripts against q2-guest's Q2GUEST/1 socket (--socket), each block on a daemon
     started afresh from the same settings and Trusted Guests, beside the stand-in BlueZ with no device"""
@@ -569,5 +615,7 @@ def test_conformance():
 
 if __name__ == '__main__':
     main()
+    print('== the VampOS build')
+    test_vampos()
     test_conformance()
     print('ok   docs/platform/guest.md\'s transcripts')

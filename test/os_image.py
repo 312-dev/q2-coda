@@ -208,11 +208,18 @@ def check_image(build, fs, manifest, perturb=None):
     q2_iroh = fs/'usr/bin/q2-iroh'
     check(os.access(q2_iroh, os.X_OK) and hashlib.sha256(q2_iroh.read_bytes()).hexdigest() == iroh.PIN[0],
           "Car Remote across networks: tools/iroh.py's pinned q2-iroh")
-    check(services == ['adb-wifi', 'adbd', 'bluealsa', 'bluetoothd', 'bt-attach', 'dbus', 'q2-airplay', 'q2btd', 'q2carrd', 'q2dacloop', 'q2dlnad', 'q2gate', 'q2libd',
+    check(services == ['adb-wifi', 'adbd', 'bluealsa', 'bluetoothd', 'bt-attach', 'dbus', 'q2-airplay', 'q2-guest', 'q2btd', 'q2carrd', 'q2dacloop', 'q2dlnad', 'q2gate', 'q2libd',
                        'q2netd', 'q2pkgd', 'q2pkgd-confirm', 'q2playd', 'q2player', 'q2scrobd', 'q2sendd', 'q2sysd', 'q2ui'] and all(os.access(fs/'etc/sv'/s/'run', os.X_OK) for s in services),
           f'services: {", ".join(services)}')
     check(os.access(fs/'usr/bin/q2sendd', os.X_OK) and os.access(fs/'usr/bin/q2send', os.X_OK) and (fs/'etc/sv/q2sendd/down').exists()
           and any(fs.glob('usr/lib/libssl.so*')), "LocalSend: q2sendd, today's q2send, OpenSSL's libssl, and its service down at boot")
+    guest = fs/'usr/bin/q2-guest'
+    guest_bin = guest.read_bytes() if guest.exists() else b''
+    check(os.access(guest, os.X_OK) and (fs/'usr/bin/q2-hotspot').read_bytes() == (ROOT/'patch/q2_hotspot.sh').read_bytes()
+          and b'bluealsa2' not in guest_bin and b'a2dp-sink' not in guest_bin
+          and '--socket /run/vamp/guest.sock' in (fs/'etc/sv/q2-guest/run').read_text() and not (fs/'etc/sv/q2-guest/down').exists(),
+          "Guest Play: q2-guest serving /run/vamp/guest.sock, up at boot, built for the one bluealsa (no second daemon,"
+          " no restart of the main one), and patch/q2_hotspot.sh as q2-hotspot")
     check(os.readlink(fs/'etc/passwd') == '/run/vamp/passwd' and os.readlink(fs/'etc/group') == '/run/vamp/group'
           and (fs/'etc/passwd.base').read_text().startswith('root:x:0:0:') and (fs/'etc/group.base').read_text().startswith('root:x:0:'),
           "/etc/passwd and /etc/group are links into /run/vamp, the image's own users in the .base files")

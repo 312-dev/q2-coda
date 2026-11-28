@@ -77,6 +77,7 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | `q2dlnad` | `/usr/bin/q2dlnad` ([dlnad](dlnad.md)): the DLNA renderer, listening only while `[SYSSET] DLNA=1` (stock's switch, off by default) | Q2PLAY/1 (tried every 2 s) |
 | `q2sendd` | `/usr/bin/q2sendd` ([LocalSend](vamp-os-services.md#localsend)): LocalSend's receive side, today's `q2send` with its questions over Q2UI/1. Down at boot (its `down` file) | the LocalSend page's `sv up` |
 | `q2carrd` | `/usr/bin/q2carrd` ([carrd](carrd.md)): Car Remote, today's `coda-rc` run while `[Q2POD] CARREMOTE` is 1, its pairing card asked over Q2UI/1, and `q2-iroh` while Wi-Fi has a link; nothing on a card boot | `config.ini`'s switch (looked at once a second) |
+| `q2-guest` | `/usr/bin/q2-guest --socket /run/vamp/guest.sock` ([Q2GUEST/1](platform/guest.md)): Guest Play, `q2-hotspot` its hotspot; idle while its own switch (`/mnt/data/q2-guest/config`) is off. Built for the one `bluealsa` above, which has the sink role: no second daemon | the system bus |
 
 ## Where the services say things
 

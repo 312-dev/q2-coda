@@ -1,0 +1,12 @@
+#!/bin/sh
+# q2-guest (docs/platform/guest.md): Guest Play, Q2GUEST/1 on /run/vamp/guest.sock for q2ui. It reads its own switch
+# (/mnt/data/q2-guest/config) and does nothing while Guest Play is off; BlueZ and bluealsa are taken when they come.
+. /usr/libexec/vamp/log
+if [ ! -S /run/dbus/system_bus_socket ]; then
+    step "q2-guest: no system bus yet"
+    exit 1
+fi
+mkdir -p /run/vamp /mnt/data/q2-guest
+step "q2-guest: start"
+exec 2>&1
+exec /usr/bin/q2-guest --socket /run/vamp/guest.sock

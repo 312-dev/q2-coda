@@ -221,6 +221,8 @@ def command(line):
         objs[w[1]] = Device(w[1], ' '.join(w[2:]))
     elif w[0] == 'pcm':  # pcm MAC CODEC RATE CFGHEX: a stream to the Q2 (sink) or, on main, an outbound one
         alsa.add(w[1], role == 'sink', w[2], w[3], w[4])
+    elif w[0] == 'pcmin':  # pcmin MAC CODEC RATE CFGHEX: a stream to the Q2 on this daemon, as VampOS's one bluealsa has
+        alsa.add(w[1], True, w[2], w[3], w[4])
     elif w[0] == 'unpcm':
         alsa.remove(w[1])
     elif w[0] == 'player':  # player MAC: its MediaPlayer1 appears

@@ -7,7 +7,7 @@ Design for five features the owner kept in VampOS's scope ([roadmap: Scope](vamp
 | Scrobbling | `patch/nav/playback_power.c` (the listen), `patch/scrobble.c` (the upload, demo's libcurl) | `q2scrobd`: a Q2PLAY/1 watcher writing the same `.scrobbler.log`; the upload a second step | nothing | **yes: built** ([below](#scrobbling)) |
 | LocalSend | `patch/localsend_core.c` (protocol), `localsend.c`, `localsend_ui.c` (demo's side) | today's `q2send` on the image's OpenSSL, run by `q2sendd`, which asks its questions over Q2UI/1 | `q2ui` serving Q2UI/1 ([notices](platform/notices.md)) and a LocalSend page that starts it | **the receive side built** ([below](#localsend)); asks nothing until `q2ui` serves the socket |
 | AirPlay sender | the `q2-airplay` card app (cliairplay) and the PEQ tap `/tmp/q2cast` | the card app as a `service` package; `q2player` writes the tap, `q2playd` is its host | nothing in this repository: the app's release with an API 1 manifest | **yes: built** ([q2playd: AirPlay](playd.md#airplay)) |
-| Guest Play | `q2-guest` (BlueZ D-Bus, a second bluealsa), `patch/guest.c` (pausing the owner's music) | `q2-guest` as a service, its pause and resume through Q2PLAY/1 | Bluetooth from source (BlueZ 5.88, bluez-alsa: `feat/bluez-own`, `feat/bluealsa-own`) | no: M2 |
+| Guest Play | `q2-guest` (BlueZ D-Bus, a second bluealsa), `patch/guest.c` (pausing the owner's music) | `q2-guest` as a service, its pause and resume through Q2PLAY/1 | Bluetooth from source (BlueZ 5.88, bluez-alsa: `feat/bluez-own`, `feat/bluealsa-own`), in the image | **the daemon built and run** ([Q2GUEST/1](platform/guest.md)); no `q2ui` page yet |
 | DLNA/UPnP renderer | stock's DMR inside `demo` (`dmrAction*`) | `q2dlnad`: a UPnP MediaRenderer (SSDP, the three services' SOAP) handing a URI to `q2playd` as a source | nothing: Q2PLAY/1's `source` and `focus` are built | **yes: built** ([q2dlnad](dlnad.md)) |
 
 ## Rules for all five
@@ -52,7 +52,7 @@ The card app needs a copy of what the Q2 plays. `q2player`'s DSP chain (`player/
 
 ## Guest Play
 
-`q2-guest` already talks to BlueZ and bluealsa over D-Bus and decides on its own; demo's part is pausing the owner's music while a guest plays and resuming it after, which is Q2PLAY/1's `pause` and `resume`. Started with `--socket`, it serves its commands and state to `q2ui` as [Q2GUEST/1](platform/guest.md), which says when the UI pauses and resumes. It waits for Bluetooth from source (M2), because VampOS will not carry stock's bluetoothd.
+`q2-guest` already talks to BlueZ and bluealsa over D-Bus and decides on its own; demo's part is pausing the owner's music while a guest plays and resuming it after, which is Q2PLAY/1's `pause` and `resume`. Started with `--socket`, it serves its commands and state to `q2ui` as [Q2GUEST/1](platform/guest.md), which says when the UI pauses and resumes. The image carries it (`os/package/q2-guest`, `etc/sv/q2-guest`) on its own BlueZ and its one bluealsa, which has the sink role, so this build starts no second bluealsa ([Q2GUEST/1: Status](platform/guest.md)).
 
 ## DLNA/UPnP renderer
 

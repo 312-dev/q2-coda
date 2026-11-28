@@ -1,0 +1,7 @@
+config BR2_PACKAGE_Q2_GUEST
+	bool "q2-guest"
+	depends on BR2_PACKAGE_VAMP_BLUEALSA
+	select BR2_PACKAGE_DBUS
+	help
+	  Guest Play (docs/platform/guest.md): today's q2-guest, serving Q2GUEST/1 on
+	  /run/vamp/guest.sock to q2ui, and q2-hotspot, the hotspot script it runs.

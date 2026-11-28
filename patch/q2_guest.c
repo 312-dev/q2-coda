@@ -1,7 +1,8 @@
 /* q2-guest: Guest Play's system side (docs/internals.md#guest-play).
  *
- * A guest's phone streams to the Q2 (A2DP sink, a second bluealsa daemon, "org.bluealsa.sink"), and
- * bluealsa-aplay plays it on to the car or headset the Q2 plays to, or the jack. This daemon
+ * A guest's phone streams to the Q2 (A2DP sink, a second bluealsa daemon, "org.bluealsa.sink";
+ * on VampOS the one daemon's own sink role, QG_SINKD), and bluealsa-aplay plays it on to the car
+ * or headset the Q2 plays to, or the jack. This daemon
  * decides who may: it asks the owner (through the state file the UI reads, answered by commands on
  * a FIFO), keeps the Trusted Guests, opens Let a Guest Connect (discoverable under the Guest Play
  * name, with its own pairing agent), forwards the guest's track information to the car through
@@ -14,7 +15,7 @@
  * and bluealsa block for at most QG_CALL_MS. */
 #include "coda_rc_sys.h"
 
-#ifndef CODA_HOST
+#if !defined(CODA_HOST) && !defined(CODA_LIBC)
 int fork(void), dup2(int, int), execv(const char *, char *const[]), waitpid(int, int *, int),
     setsid(void);
 int mkfifo(const char *, unsigned), system(const char *);
@@ -178,7 +179,12 @@ static void sock_changed(void); /* the state written: watchers get it */
     "pidof bluetoothd >/dev/null || exit 0; R=; for p in $(pidof bluealsa); do "                   \
     "a=\"$(tr '\\0' ' ' </proc/$p/cmdline) \"; case \"$a\" in *' -B '*) continue;; esac; "         \
     "case \"$a\" in " kill_when "; esac; done; [ \"$R\" ] && (" QG_BIN "bluealsa2 &); exit 0"
-#ifndef QG_MAIN_SOURCE /* the tests name their own */
+/* The second daemon, the sink role's: 0 where the main daemon has the sink role too (VampOS's one bluealsa,
+ * os/package/q2-guest), so a guest's PCM is the main daemon's. */
+#ifndef QG_SINKD
+#define QG_SINKD 1
+#endif
+#ifndef QG_MAIN_SOURCE /* the tests and VampOS's build name their own */
 #define QG_MAIN_SOURCE QG_MAIN_LOOP("*a2dp-source*) ;; *) kill $p; R=1;;")
 #define QG_MAIN_STOCK QG_MAIN_LOOP("*a2dp-source*) kill $p; R=1;;")
 #endif
@@ -586,11 +592,13 @@ static void stop_child(int *pid) {
     *pid = 0;
 }
 
+#if QG_SINKD
 static void sinkd_start(void) {
     char *argv[] = { QG_BIN "bluealsa", "-B", "sink", "-p", "a2dp-sink", "-c", "AAC", 0 };
     qg.sinkd = spawn(argv);
     qg.sinkd_at = qg_ms();
 }
+#endif
 
 static void aplay_start(void) {
     char dev[96];
@@ -1523,10 +1531,12 @@ static void tick(void) {
         aplay_start();
     if (qg.playing && !strcmp(qg.guest.source, "spotify")) spot_read();
     /* the sink role once the car or headset had its chance to connect first */
+#if QG_SINKD
     if (qg.enabled && qg.bluez_up && qg.main_up && !qg.sinkd && !*qg.reconnect &&
         now - qg.sinkd_at >= QG_RESPAWN_MS &&
         (*qg.out.mac || now - qg.main_up_at >= QG_OUT_WAIT_MS))
         sinkd_start();
+#endif
     if (qg.hotspot_up && now - qg.hotspot_at >= QG_HOTSPOT_CHECK_MS) hotspot_check();
     if (qg.playing && qg.resend_at && now >= qg.resend_at) qg.resend_at = 0, notify_car(1);
     notify_car(0);
