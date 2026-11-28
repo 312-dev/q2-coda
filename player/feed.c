@@ -29,6 +29,7 @@
 #define FEED_RING (FEED_RATE / 10) /* frames: 100 ms */
 #define FEED_PIPE 4096          /* the FIFO's bytes, 23 ms: what the source runs ahead by (F_SETPIPE_SZ) */
 #define FEED_IDLE_MS 300
+#define FEED_GAP_MS 100 /* a drop this far behind its count starts it again: the source paused, not a late wakeup */
 #define FRAME 4 /* 16-bit stereo */
 
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
@@ -71,6 +72,7 @@ static void put(const uint8_t *b, unsigned n) {
 static void *reader(void *arg) {
     int fd = (int)(intptr_t)arg;
     uint8_t b[4096];
+    struct timespec due = {0, 0}; /* the dropped sound's end so far, on the monotonic clock */
     for (;;) {
         /* no timeout: the write end held here means no end of file, so the thread sleeps until a source writes */
         struct pollfd p = {fd, POLLIN, 0};
@@ -83,14 +85,22 @@ static void *reader(void *arg) {
             ssize_t r = read(fd, b, sizeof b);
             if (r > 0) put(b, (unsigned)r);
         } else if (idle >= FEED_IDLE_MS) {
-            /* nobody takes the frames: dropped at the source's rate (each read waited out for as long as it plays),
-             * so the source is neither held nor sped up */
+            /* nobody takes the frames: dropped at the source's rate, each read waited out until the end of all the
+             * sound dropped since the drop began (an absolute time, so a late wakeup is not added to the next: a
+             * sleep each as long as its read played came back 5 ms late on average, holding a 3 s source 0.6 s),
+             * so the source is neither held nor sped up; FEED_GAP_MS behind, the source paused and the count starts again */
             ssize_t r = read(fd, b, sizeof b);
             if (r > 0) {
                 pthread_mutex_lock(&mu);
                 heard_at = mono_ms();
                 pthread_mutex_unlock(&mu);
-                usleep((useconds_t)((int64_t)r / FRAME * 1000000 / FEED_RATE));
+                struct timespec now;
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                int64_t behind = ((int64_t)now.tv_sec - due.tv_sec) * 1000000000 + now.tv_nsec - due.tv_nsec;
+                if (behind > (int64_t)FEED_GAP_MS * 1000000) due = now; /* a source that stopped writing for a while */
+                int64_t ns = due.tv_nsec + (int64_t)r / FRAME * 1000000000 / FEED_RATE;
+                due.tv_sec += (time_t)(ns / 1000000000), due.tv_nsec = (long)(ns % 1000000000);
+                while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &due, NULL) == EINTR) {}
             }
         } else {
             usleep(5000); /* the ring is full and the car is taking it: wait for room */

@@ -3302,7 +3302,9 @@ def test_car_feed_reader_sleeps_while_no_source_writes(player, songs, tmp):
 
 def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, tmp):
     """The car's way not the output (Bluetooth's): the feed's frames are read and dropped at the source's own rate,
-    so a source writing 3 s of sound is done in about 3 s, never held, and nothing reaches any PCM."""
+    so a source writing 3 s of sound is done in about 3 s, never held, and nothing reaches any PCM. About 3.2 s: the
+    ring's 100 ms and the pipe's taken at once, FEED_IDLE_MS (300 ms) before the drop, the rest at the rate. A drop
+    paced by a sleep as long as each read played, late wakeups added up, took 3.6 to 3.9 s here."""
     car, feed = tmp/'feed5.audio', tmp/'feed5.fifo'
     src, f = tone(3.0), Feeder(feed)
     steps = [(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (6.5, None)]
@@ -3310,7 +3312,7 @@ def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, t
     assert names == [], names
     assert len(f.runs) == 1, 'the source finished'
     took = f.runs[0][1] - f.runs[0][0]
-    assert 2.5 < took < 3.8, f'{took:.2f} s for 3 s of sound'
+    assert 2.9 < took < 3.45, f'{took:.2f} s for 3 s of sound'
     return f'3 s of sound dropped in {took:.2f} s'
 
 
