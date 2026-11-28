@@ -4,6 +4,7 @@ what it sends the player for each command from q2ui's FIFO and list file and fro
 song ends, is cut or fails, what it writes for q2ui in /tmp/coda-rc.now, and what Q2PLAY/1's watchers are told.
 The player's side, the real q2player against q2playd, is test/os_image.py's boot. Run it as python3 test/playd.py
 (pytest). Q2PLAYD_SOURCE builds another copy of q2playd.c, to show a broken one fails here."""
+import ctypes as C
 import os
 import urllib.parse
 import pathlib
@@ -37,8 +38,10 @@ def build(out):
     lib = next(pathlib.Path('/usr/lib').glob('*-linux-gnu/libsqlite3.so.0'))
     src = out/'q2playd.c'
     src.write_bytes(SOURCE.read_bytes())
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-I', str(conformance.PERM), *(['-isystem', str(inc[-1])] if inc else []),
-                    '-o', str(out/'q2playd'), str(src), str(lib)], check=True)
+    peq = [str(ROOT/'patch'/f) for f in ('peq.c', 'hash.c', 'peq_level.c')]  # the EQ state, as playd/Makefile links it
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', '-I', str(conformance.PERM), '-I', str(ROOT/'patch'),
+                    *(['-isystem', str(inc[-1])] if inc else []), '-o', str(out/'q2playd'), str(src),
+                    '-DPEQ_HOST', '-DPEQ_ROOT=""', *peq, str(lib), '-lm'], check=True)
     return out/'q2playd'
 
 
@@ -2947,6 +2950,147 @@ def test_a_click_goes_to_the_player_and_not_under_a_source(run):
     assert a.line() == 'ok'
     a.say('click wheel')
     assert a.line() == 'err click', 'a source owns the output'
+
+
+# ---- the EQ switch (docs/playd.md#the-eq-switch) ----
+
+class Band(C.Structure):  # patch/peq_types.h, as test/peq.py mirrors it
+    _fields_ = [('enabled', C.c_int), ('type', C.c_int), ('frequency', C.c_double), ('gain', C.c_double), ('q', C.c_double)]
+
+
+class Preset(C.Structure):
+    _fields_ = [('count', C.c_int), ('bypass', C.c_int), ('preamp', C.c_double), ('bands', Band * 30),
+                ('balance', C.c_double), ('automatic', C.c_int), ('spare', C.c_int)]
+
+
+class EqState(C.Structure):
+    _fields_ = [('mode', C.c_int), ('hold', C.c_int), ('peq', Preset), ('eq3', Preset)]
+
+
+EQ_OFF, EQ_3, EQ_PEQ = 0, 1, 2
+SETEQ = ('mcl-seteq', '|'.join(['0.000000'] * 10) + '|1')  # patch/peq_ui.c peq_stock_eq: stock's call, its flag 1
+
+
+@pytest.fixture(scope='session')
+def level(tmp_path_factory):
+    """patch/peq_level.c's peq_headroom as the editor links it, for the cut a state should get (built with q2playd's
+    -std=c11, which keeps the compiler from fusing a multiply and add: another build's last bit can differ)"""
+    out = tmp_path_factory.mktemp('level')
+    subprocess.run(['cc', '-std=c11', '-DPEQ_HOST', '-DPEQ_ROOT=""', '-O2', '-shared', '-fPIC',  # q2playd's flags: one rounding '-I', str(ROOT/'patch'),
+                    *(str(ROOT/'patch'/f) for f in ('peq.c', 'hash.c', 'peq_level.c')), '-lm', '-o', str(out/'level.so')], check=True)
+    lib = C.CDLL(str(out/'level.so'))
+    lib.peq_headroom.argtypes, lib.peq_headroom.restype = [C.POINTER(Preset)], C.c_double
+    return lib
+
+
+def eq_boost(mode=EQ_OFF, hold=0, automatic=0, preamp=0.0):
+    """an EQ state whose PEQ is one +6 dB peak at 1 kHz, its preamp as given"""
+    s = EqState(mode=mode, hold=hold)
+    s.peq.count, s.peq.preamp, s.peq.automatic = 1, preamp, automatic
+    s.peq.bands[0] = Band(1, 0, 1000.0, 6.0, 1.0)
+    s.eq3.count = 3
+    for i, f in enumerate((100.0, 1000.0, 10000.0)):
+        s.eq3.bands[i] = Band(1, 0, f, 0.0, 0.7)
+    return s
+
+
+def eq_write(root, s):
+    (root/'mnt/data/peq-active').write_bytes(b'Q2PEQ03\0' + bytes(s))
+
+
+def eq_read(root):
+    data = (root/'mnt/data/peq-active').read_bytes()
+    assert data[:8] == b'Q2PEQ03\0' and len(data) == 8 + C.sizeof(EqState)
+    return EqState.from_buffer_copy(data[8:])
+
+
+def ini_key(root, key):
+    m = re.search(rf'^{key}=(\S*)$', (root/'mnt/data/config.ini').read_text(), re.M)
+    return m and m.group(1)
+
+
+def test_the_eq_switch_turns_peq_on_and_off_as_control_center_s_circle(run):
+    """peq_ui.c eq_toggle and eq_commit: Off to PEQ (the EQ page's Enabled switch), back to Off; the state saved, the
+    stock switch's [PLAYSET] EQFLAG written, the player told with stock's call"""
+    root, pl = run
+    a = api(root)
+    a.say('eq')
+    assert a.line() == 'eq on=0 mode=off', 'no state yet: Off'
+    a.say('eq on')
+    assert a.line() == 'ok'
+    assert eq_read(root).mode == EQ_PEQ and eq_read(root).hold == 0 and ini_key(root, 'EQFLAG') == '1'
+    a.say('eq')
+    assert a.line() == 'eq on=1 mode=peq'
+    pl.pump()
+    assert [g for g in pl.got if g[0] == 'mcl-seteq'] == [SETEQ]
+    a.say('eq on')
+    assert a.line() == 'ok'
+    pl.pump()
+    assert [g for g in pl.got if g[0] == 'mcl-seteq'] == [SETEQ], 'on already: nothing changes'
+    a.say('eq off')
+    assert a.line() == 'ok'
+    assert eq_read(root).mode == EQ_OFF and ini_key(root, 'EQFLAG') == '0'
+    pl.pump()
+    assert [g for g in pl.got if g[0] == 'mcl-seteq'] == [SETEQ, SETEQ]
+    a.say('eq loud')
+    assert a.line() == 'err eq loud'
+
+
+def test_the_eq_on_saves_auto_s_cut_for_every_rate(run, level):
+    """peq_ui.c eq_commit's auto_level, patch/peq_level.c's: a PEQ never picked (0) is Auto, its preamp the cut for
+    every standard rate, the same number the editor saves; hold is the open page's and goes (the state written while
+    q2playd runs, as today's Vamp's page would have left it)"""
+    root, pl = run
+    want = level.peq_headroom(C.byref(eq_boost().peq))
+    assert want < -3, want
+    eq_write(root, eq_boost(EQ_OFF, hold=1, automatic=0))
+    a = api(root)
+    a.say('eq on')
+    assert a.line() == 'ok'
+    s = eq_read(root)
+    assert (s.mode, s.hold, s.peq.automatic, s.peq.preamp) == (EQ_PEQ, 0, 1, want)
+
+
+@pytest.mark.parametrize('prepare', [lambda root: eq_write(root, eq_boost(EQ_OFF, automatic=2, preamp=1.5))])
+def test_a_picked_preamp_is_kept(run):
+    root, pl = run
+    a = api(root)
+    a.say('eq on')
+    assert a.line() == 'ok'
+    s = eq_read(root)
+    assert (s.mode, s.peq.automatic, s.peq.preamp) == (EQ_PEQ, 2, 1.5)
+
+
+@pytest.mark.parametrize('prepare', [lambda root: eq_write(root, eq_boost(EQ_3))])
+def test_the_3eq_playing_reads_on_and_the_switch_turns_it_off(run):
+    """eq_toggle from the 3EQ: Off, as Control Center's circle turns it (peq_ui.c q2eq_poll's note)"""
+    root, pl = run
+    a = api(root)
+    a.say('eq')
+    assert a.line() == 'eq on=1 mode=3eq'
+    a.say('eq off')
+    assert a.line() == 'ok'
+    assert eq_read(root).mode == EQ_OFF
+
+
+@pytest.mark.parametrize('prepare', [lambda root: eq_write(root, eq_boost(EQ_PEQ, hold=1, automatic=1, preamp=-1.0))])
+def test_at_start_a_hold_goes_and_auto_is_the_cut_for_every_rate(run, level):
+    """peq_ui.c peq_boot: Off's comparison preamp cannot survive a restart, and an Auto saved by another version
+    becomes the cut for every rate before anything plays"""
+    root, pl = run
+    s = eq_read(root)
+    assert (s.mode, s.hold, s.peq.automatic, s.peq.preamp) == (EQ_PEQ, 0, 1, level.peq_headroom(C.byref(eq_boost().peq)))
+
+
+def test_an_eq_state_not_saved_is_an_error_and_nothing_changes(run):
+    root, pl = run
+    (root/'mnt/data/peq-active.tmp').mkdir()
+    a = api(root)
+    a.say('eq on')
+    assert a.line() == 'err eq on'
+    assert not (root/'mnt/data/peq-active').exists() and ini_key(root, 'EQFLAG') is None
+    pl.pump()
+    assert not [g for g in pl.got if g[0] == 'mcl-seteq']
 
 
 # ---- a song played while it arrives (docs/playd.md#a-song-played-while-it-arrives) ----

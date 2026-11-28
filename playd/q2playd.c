@@ -35,6 +35,12 @@
 #include <unistd.h>
 
 #include "q2perm.h" /* perm/: the permission check */
+#include "peq_types.h" /* patch/: the EQ state */
+
+/* patch/peq.c and patch/peq_level.c, linked as the player links peq.c (playd/Makefile): the EQ state demo's editor
+ * keeps in /mnt/data/peq-active, read and written as it reads and writes it */
+int eq_load_from(const char *path, eq_state *s), eq_save_to(const char *path, const eq_state *s);
+int eq_auto_level(eq_state *s);
 
 #define QUEUE_MAX 20000  /* ids one play may queue (q2ui's PLAY_MAX, coda_rc_shim.c CR_LIST_MAX) */
 #define CLIENTS 8        /* Q2PLAY/1 connections at once */
@@ -583,6 +589,44 @@ static void volume_load(void) {
 }
 
 /* KEY=v in [SECTION], the rest of the file as it was */
+static void ini_set(const char *section, const char *key, int v);
+
+/* ---- the EQ switch (docs/playd.md#the-eq-switch): Control Center's EQ circle, as patch/peq_ui.c has it ---- */
+static const char *eq_rel = "/mnt/data/peq-active";
+
+/* the mode playing: EQ_OFF with no state saved, as demo reads it (eq_load's defaults) */
+static int eq_mode(void) {
+    eq_state s;
+    eq_load_from(path(eq_rel), &s);
+    return s.mode;
+}
+
+/* peq_ui.c eq_toggle and eq_commit: on, PEQ as the EQ page's Enabled switch turns it on (a mode on already stays);
+ * off, Off; the hold the open page's. Saved with PEQ's Auto as the cut for every rate, the stock switch's [PLAYSET]
+ * EQFLAG written (today's Vamp's boot puts the filter in only when it is set) and the player told with stock's call.
+ * -1 when the state is not saved: nothing changes. */
+static int eq_switch(int on) {
+    eq_state s;
+    eq_load_from(path(eq_rel), &s);
+    if ((s.mode != EQ_OFF) == on) return 0;
+    s.mode = on ? EQ_PEQ : EQ_OFF, s.hold = 0;
+    eq_auto_level(&s);
+    if (!eq_save_to(path(eq_rel), &s)) return -1;
+    ini_set("PLAYSET", "EQFLAG", on);
+    player_send("mcl-seteq", "0.000000|0.000000|0.000000|0.000000|0.000000|0.000000|0.000000|0.000000|0.000000|0.000000|1");
+    return 0;
+}
+
+/* peq_ui.c peq_boot, at the start: Off's comparison preamp (hold) belongs to a page, which cannot survive a restart,
+ * and an Auto saved by another version becomes the cut for every rate before anything plays */
+static void eq_boot(void) {
+    eq_state s;
+    if (!eq_load_from(path(eq_rel), &s)) return;
+    int changed = eq_auto_level(&s);
+    if (s.hold) s.hold = 0, changed = 1;
+    if (changed && !eq_save_to(path(eq_rel), &s)) logf_("%s: not saved", eq_rel);
+}
+
 static void ini_set(const char *section, const char *key, int v) {
     char *t = read_all(path("/mnt/data/config.ini")), tmp[340], line[64], head[64], k[40];
     if (!t) return;
@@ -3333,7 +3377,7 @@ static void client_line(struct client *c, char *line) {
         return;
     }
     if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click");
+        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq");
     } else if (!strncmp(line, "source ", 7)) {
         client_say(c, source_take((int)(c - cl), line + 7) ? "err source" : "ok");
     } else if (!strcmp(line, "focus")) {
@@ -3361,6 +3405,11 @@ static void client_line(struct client *c, char *line) {
          * only while the queue's player owns the output, as clicker.c sends it only while the Library's does */
         if (player < 0 || src.on) client_say(c, "err click");
         else player_send("mcl-click", line + 6), client_say(c, "ok");
+    } else if (!strcmp(line, "eq")) {
+        int m = eq_mode();
+        client_say(c, "eq on=%d mode=%s", m != EQ_OFF, m == EQ_PEQ ? "peq" : m == EQ_3 ? "3eq" : "off");
+    } else if (!strcmp(line, "eq on") || !strcmp(line, "eq off")) {
+        client_say(c, eq_switch(line[4] == 'n') ? "err %s" : "ok", line);
     } else if (!strcmp(line, "watch")) {
         c->watch = 1;
         client_say(c, "ok");
@@ -3558,6 +3607,7 @@ int main(int argc, char **argv) {
     cmdq_fd = open(path(cmdq_rel), O_RDWR | O_NONBLOCK | O_CLOEXEC); /* RDWR: never an EOF when a writer leaves */
     if (listen_fd < 0) return 1;
     volume_load();
+    eq_boot();
     likes_sync();
     memory_restore();
     now_write();

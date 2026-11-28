@@ -60,7 +60,7 @@ class Service:
         c.close()
 
     def asked(self):
-        return [l for l in self.lines if l not in ('status', 'jack', 'battery', 'now', 'output', 'devices', 'networks')]
+        return [l for l in self.lines if l not in ('status', 'jack', 'battery', 'now', 'output', 'eq', 'devices', 'networks')]
 
 
 CONFIG = '[SYSSET]\nTIME24H=0\nLIGHTNESS=60\n[PLAYSET]\nMAXVOLUME=80\n[Q2POD]\nCARREMOTE=1\nSMARTWIFI=1\nUSBPICK=2\nLIGHTNESS=10\n'  # a key read from its own section
@@ -98,7 +98,7 @@ def gate(request, binary, tmp_path):
                        'device addr=AA:BB:CC:DD:EE:01 name=Buds%20Pro kind=headphones paired=1 connected=1 battery=80\n'
                        'device addr=AA:BB:CC:DD:EE:02 name=Car%0AKit kind=car paired=1 connected=0 battery=-1\nok'}),
         'play': Service(root, 'play', 'Q2PLAY/1', {'now': 'now title=A artist=B album=C state=1 pos=3 len=10 volume=37 id=1',
-                                                  'output': 'output dac'}),
+                                                  'output': 'output dac', 'eq': 'eq on=0 mode=off'}),
     }
     p = subprocess.Popen([str(binary), '--root', str(root)], stderr=subprocess.PIPE, text=True)
     end = time.monotonic() + 5
@@ -165,8 +165,18 @@ def test_the_switches_and_settings_are_set_as_demo_sets_them(gate):
                  'GAPLESS=0', 'XFADE=1', 'CARREMOTE=0', 'SMARTWIFI=0', 'LIGHTNESS=40'):
         assert f'\n{line}\n' in c, (line, c)
     assert 'LIGHT=9' not in c, 'a value out of its range refused'
+    assert s['play'].asked() == ['eq on'], s['play'].asked()  # the EQ circle: q2playd's (docs/playd.md#the-eq-switch)
     assert c.index('[PLAYSET]') < c.index('GAPLESS=0') < c.index('[Q2POD]'), 'in its own section'
     assert c.index('[IPOD]') < c.index('LIGHT=2'), 'a missing section added'
+
+
+def test_the_eq_slot_is_q2playd_s_switch(gate):
+    """control_center.c q2ui_cc_state's eq: on while the 3EQ or PEQ plays (g_equalizer_flag), Q2PLAY/1 eq's on"""
+    root, s, ctl = gate
+    s['play'].answers['eq'] = 'eq on=1 mode=3eq'
+    assert until(lambda: '\neq=1\n' in text(root, 'q2ui.status')), text(root, 'q2ui.status')
+    send(ctl, 'set eq 0')
+    assert until(lambda: 'eq off' in s['play'].asked()), s['play'].asked()
 
 
 def test_a_search_lists_the_networks_the_joined_first_with_stock_s_levels(gate):

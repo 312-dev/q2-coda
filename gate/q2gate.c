@@ -329,6 +329,7 @@ static int set(const char *name, int v) {
     if (!strcmp(name, "night") && v >= 0 && v <= 2) return ini_set("Q2POD", "NIGHTSHIFT", v);
     if (!strcmp(name, "nightk") && v >= 2000 && v <= 5000 && !(v % 100)) return ini_set("Q2POD", "NIGHTK", v);
     if (!strcmp(name, "gapless")) return ini_set("PLAYSET", "GAPLESS", !!v); /* q2playd reads it again */
+    if (!strcmp(name, "eq")) return ask_ok(PLAY, v ? "eq on" : "eq off", 3); /* q2playd's switch, EQFLAG too */
     if (!strcmp(name, "xfade")) return ini_set("Q2POD", "XFADE", !!v);
     if (!strcmp(name, "bright") && v >= 0 && v <= 100) {
         snprintf(cmd, sizeof cmd, "brightness %d", v);
@@ -398,7 +399,8 @@ static void tick(void) {
     char sys_jack[160] = "", sys_bat[200] = "", net[400] = "", bt[600] = "", play[2800] = "", out[160] = "", *devl = malloc(8192);
     int have_net = !ask(NET, "status", net, sizeof net, 2), have_bt = !ask(BT, "status", bt, sizeof bt, 2);
     ask(SYS, "jack", sys_jack, sizeof sys_jack, 2), ask(SYS, "battery", sys_bat, sizeof sys_bat, 2);
-    ask(PLAY, "now", play, sizeof play, 2), ask(PLAY, "output", out, sizeof out, 2);
+    char eq[60] = "";
+    ask(PLAY, "now", play, sizeof play, 2), ask(PLAY, "output", out, sizeof out, 2), ask(PLAY, "eq", eq, sizeof eq, 2);
     char state[24] = "", kind[24] = "", ssid[33] = "";
     int jack = field_int(sys_jack, "po", 0) == 1 || field_int(sys_jack, "bal", 0) == 1, wired = jack && !strncmp(out, "output dac", 10);
     listening = jack || (*out && strncmp(out, "output dac", 10));
@@ -414,10 +416,10 @@ static void tick(void) {
     char s[2048];
     snprintf(s, sizeof s,
              "out=%s\nbt=%s\nbtbatt=%d\nrelay=none\nlock=0\nsync=0\nsyncpm=0\noffline=0\nnet=1\nclock24=%d\n"
-             "wifi=%d\nbton=%d\nbtbusy=0\nairplay=0\ncar=%d\nsmart=%d\neq=0\nusb=%s\ncable=%d\nbright=%d\nvol=%d\nvolmax=%d\n",
+             "wifi=%d\nbton=%d\nbtbusy=0\nairplay=0\ncar=%d\nsmart=%d\neq=%d\nusb=%s\ncable=%d\nbright=%d\nvol=%d\nvolmax=%d\n",
              wired ? "wire" : "other", slot, !strcmp(slot, "headset") ? field_int(bt, "battery", -1) : -1,
              ini_get("SYSSET", "TIME24H", 1) != 0, wifi, bton, ini_get("Q2POD", "CARREMOTE", 0) == 1,
-             ini_get("Q2POD", "SMARTWIFI", 0) == 1, picks[pick >= 0 && pick < 6 ? pick : 0], field_int(sys_bat, "cable", 0) == 1,
+             ini_get("Q2POD", "SMARTWIFI", 0) == 1, field_int(eq, "on", 0) == 1, picks[pick >= 0 && pick < 6 ? pick : 0], field_int(sys_bat, "cable", 0) == 1,
              ini_get("SYSSET", "LIGHTNESS", 50), field_int(play, "volume", 0), ini_get("PLAYSET", "MAXVOLUME", 100));
     put("/tmp/q2ui.status", s, last_status, sizeof last_status);
 

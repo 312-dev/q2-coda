@@ -22,7 +22,9 @@
 | `like L ID` | `ok`: song ID (0 the song playing) liked (L 1) or not (L 0); asking for what it is already is `ok`; `err like` otherwise |
 | `album N ID` | `ok`: song ID's album made a favourite (N 5), which likes its songs, or not (N 0), which takes them out; `err album` for another N or no such song |
 | `click wheel`, `click button`, `click beep` | `ok`: the Clicker's click mixed into what the player plays ([q2playd: Key Tone](../playd.md#key-tone)); `err click` while a source holds the player or with no player |
-| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click` |
+| `eq` | `eq on=O mode=M`: O 1 while an EQ plays; M `off`, `3eq` (the three-band EQ) or `peq` (the parametric EQ) |
+| `eq on`, `eq off` | `ok`: the EQ switch, Control Center's EQ circle ([q2playd: The EQ switch](../playd.md#the-eq-switch)). `on` plays the parametric EQ, or keeps an EQ already playing; `off` plays none. `err eq on` or `err eq off` when the state cannot be saved |
+| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq` |
 
 ## Ratings
 
@@ -77,7 +79,7 @@ The holder is told, by a line between answers, when it loses the player for any 
 > Q2PLAY/1
 < Q2PLAY/1 ok
 > caps
-< caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click
+< caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq
 > now
 < ~ now title= artist= album= state=0 pos=0 len=0 volume=\d+ id=0
 > play 1 0 3
@@ -105,6 +107,10 @@ The holder is told, by a line between answers, when it loses the player for any 
 < err volume 101
 > click wheel
 < ok
+> eq off
+< ok
+> eq
+< eq on=0 mode=off
 > output
 < output dac
 > output bluetooth

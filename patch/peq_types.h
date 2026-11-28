@@ -15,9 +15,9 @@ enum { PEQ_PK, PEQ_LS, PEQ_HS, PEQ_LP, PEQ_HP, PEQ_BP, PEQ_NO, PEQ_AP, PEQ_TYPES
  * type: PEQ_* (firmware before the pass, notch, band-pass and all-pass types reads only 0 to 2).
  * balance: dB, above 0 turns the left channel down, below 0 the right (v2 only).
  * automatic: the preamp is 1 Auto (preamp holds the loudest cut over the standard PCM rates, kept
- * so by demo: peq_ui.c headroom), 2 picked (an import's own preamp too), 0 never picked (saved
- * before 1.3.6: PEQ_PRESET_V2 bytes, or imported before 1.4.4), which the UI takes as Auto. Every
- * preamp plays as saved. */
+ * so by demo and Vamp OS's q2playd: peq_level.c peq_headroom), 2 picked (an import's own preamp
+ * too), 0 never picked (saved before 1.3.6: PEQ_PRESET_V2 bytes, or imported before 1.4.4), which
+ * the UI takes as Auto. Every preamp plays as saved. */
 typedef struct {
     int enabled, type;
     double frequency, gain, q;
