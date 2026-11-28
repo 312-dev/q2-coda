@@ -3117,6 +3117,19 @@ def frame_log(binary, work):
                      0 < len(dt) == len(sc) == len(fl) <= 256 and len(dt) == min(s['frames'], 256), f'{len(dt)} {len(sc)} {len(fl)} of {s["frames"]}')
         moved = [b - a for a, b in zip(sc, sc[1:]) if a is not None and b is not None and b != a]
         good &= check("twelve ticks down 400 songs scroll the list on, frame by frame", len(moved) > 5 and all(m > 0 for m in moved), str(moved[:12]))
+        work_us, made, slowest, faults = (s.get('frame_log_' + k, []) for k in ('work_us', 'glyphs', 'glyph_max_us', 'faults'))
+        good &= check("each frame logged has its work time, the glyphs it made, its slowest glyph's time and its major faults; text scrolled "
+                      'in makes glyphs, and a frame that made none has no slowest',
+                      len(work_us) == len(made) == len(slowest) == len(faults) == len(dt) and all(w > 0 for w in work_us) and
+                      any(m > 0 and g > 0 for m, g in zip(made, slowest)) and all(g == 0 for m, g in zip(made, slowest) if not m),
+                      f'{len(work_us)} {len(made)} {len(slowest)} of {len(dt)}; made {sum(made)}, slowest {max(slowest or [0])} us')
+        pan = s.get('frame_log_pan_us', [])
+        good &= check("each frame logged has its pan's time (the refresh wait in it), inside its work time, so a late frame's own "
+                      'cost is its work less its pan',
+                      len(pan) == len(work_us) and any(p > 0 for p in pan) and all(p <= w for p, w in zip(pan, work_us)),
+                      f'{len(pan)} of {len(work_us)}; pan max {max(pan or [0])} us')
+        good &= check("a gap in the first turns after the start is counted apart (start_late), not as a motion's late frame",
+                      isinstance(s.get('start_late'), int), str(s.get('start_late')))
         good &= check('each tick is timed to the first frame shown after it, inside a refresh or two on the host',
                       s['latency_n'] >= 10 and 0 < s['latency_us_mean'] < 40000 and sum(s['latency_hist_ms'].values()) == s['latency_n'],
                       f"{s['latency_n']} inputs, mean {s['latency_us_mean']} us, max {s['latency_us_max']}, {s['latency_hist_ms']}")
