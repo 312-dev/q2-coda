@@ -554,6 +554,10 @@ def gadget_checks():
         r = gadget('audio', 'rehearse', '1')
         expect('audio rehearse: the gadget made again as it was, no audio, and back', r.returncode == 0
                and until(lambda: said('USB adb back')) and audio_off() and bound(), log.read_text())
+        r = gadget('audio', 'rehearse', '1')
+        k = gadget('audio', 'keep')
+        expect('audio rehearse then keep: the watchdog stands down and audio stays off, not remembered', k.returncode == 0
+               and until(lambda: said('kept')) and until(audio_off) and not (data/'q2adb.audio').exists())
         # adbd never writing its descriptors again: no USB adb after the try, so the watchdog restarts the Q2
         (ffs/'ep1').unlink()
         (run/'log').write_text('')

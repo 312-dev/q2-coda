@@ -64,7 +64,7 @@ With audio the gadget is another device to Windows, which keys its drivers on ve
 ```sh
 q2adb-gadget audio try 120   # on for 120 s under a watchdog, not remembered
 q2adb-gadget audio keep      # within the 120 s, over the adb that came back: stays on, and remembered
-q2adb-gadget audio rehearse 120   # the gadget made again as it was (no audio), under the same watchdog
+q2adb-gadget audio rehearse 120   # the gadget made again as it was (no audio), same watchdog; keep only stands it down
 q2adb-gadget audio on        # on, remembered for every boot (/mnt/data/q2adb.audio)
 q2adb-gadget audio off       # adb alone, forgotten
 ```

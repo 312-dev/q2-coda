@@ -14,7 +14,7 @@
 #           computer's microphone, in the same gadget (a second gadget directory is refused). on and off
 #           remember the choice ($DATA/q2adb.audio) for every setup after; each makes the gadget again,
 #           which drops USB adb for the seconds adbd takes to come back. try is on, not remembered, under
-#           a watchdog: unless keep (which remembers it) comes within S seconds (90), it goes back to adb
+#           a watchdog: unless keep (which remembers a try's audio) comes within S seconds (90), it goes back to adb
 #           alone, and if USB adb is still not back 30 s after that, the Q2 restarts. rehearse is try with
 #           the gadget made again as it was, no audio: the remake alone, under the same watchdog. Each
 #           returns once its work has detached (adbd's end ends the shell that ran it), and every step is
@@ -282,7 +282,9 @@ audio)
     fi
     case "$2" in
     keep)
-        : > "$RUN/q2adb.audio.keep"; : > "$DATA/q2adb.audio"; rm -f "$RUN/q2adb.audio.try"
+        # the watchdog stands down; a try's audio is remembered from now on, a rehearsal changes nothing
+        : > "$RUN/q2adb.audio.keep"
+        [ -f "$RUN/q2adb.audio.try" ] && { : > "$DATA/q2adb.audio"; rm -f "$RUN/q2adb.audio.try"; }
         Q2ADB_SAY=1 say "keep"
         ;;
     on|off) detach work audio "$2" ;;
