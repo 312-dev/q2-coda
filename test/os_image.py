@@ -257,10 +257,11 @@ def play_check(fs, said, deadline, log, data):
     while time.monotonic() < end and not songs:  # q2libd's scan of the card (a bind mount, so in /proc/mounts)
         try:
             import sqlite3
-            songs = sqlite3.connect(lib).execute('select id, fileurl, time from songtable').fetchall() if lib.exists() else []
+            songs = sqlite3.connect(lib).execute('select id, fileurl, time_end - time from songtable').fetchall() if lib.exists() else []
         except Exception:
             songs = []
         time.sleep(0.5)
+    # the length is time_end less time, stock's CUE end and start (docs/libd.md#the-two-databases)
     check(songs == [(1, '/mnt/mmc/song1.wav', 60)], f'q2libd: the card scanned into /mnt/data/vamp/library.db through FFmpeg ({songs})')
     connected = False
     while time.monotonic() < deadline and not connected:
