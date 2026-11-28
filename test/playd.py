@@ -415,7 +415,7 @@ def test_q2play1_free_text_is_percent_encoded_and_cannot_forge_a_field(run):
     pl.pump()
     a.say('now')
     line = a.line()
-    assert '\n' not in line and line.count(' state=') == 1 and line.count('=') == 8
+    assert '\n' not in line and line.count(' state=') == 1 and line.count('=') == 10
     got = fields(line)
     assert (got['title'], got['artist'], got['album']) == ('Cut state=2 id=9 50%\nsecond line', 'A "B" C', 'x=y')
     assert (got['state'], got['id']) == ('1', '6')
