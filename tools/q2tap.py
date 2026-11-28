@@ -96,6 +96,7 @@ class Tap:
             self.lost += n
         hold = int(self.fmt.rate * self.hold_s) * fb
         if len(self.pending) > hold:
+            assert self.sink is not None  # frames come after a format, which opened the sink
             self.sink.write(bytes(self.pending[:len(self.pending) - hold]))
             del self.pending[:len(self.pending) - hold]
 
@@ -155,16 +156,19 @@ class Player:  # pragma: no mutate block
         cmd = [ffplay, '-v', 'error', '-nodisp', '-autoexit', '-f', fmt.ffmpeg(), '-ar', str(fmt.rate),
                '-ch_layout', layout, '-i', '-']
         self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        stdin = self.p.stdin
+        assert stdin is not None  # stdin=PIPE
+        self.stdin = stdin
 
     def write(self, data):
         try:
-            self.p.stdin.write(data)
+            self.stdin.write(data)
         except BrokenPipeError:
             pass
 
     def close(self):
         try:
-            self.p.stdin.close()
+            self.stdin.close()
         except BrokenPipeError:
             pass
         self.p.wait()

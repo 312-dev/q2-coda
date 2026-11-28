@@ -25,6 +25,7 @@ already trusts is trusted here too."""
 import base64
 import getpass
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -39,6 +40,7 @@ import struct
 import subprocess
 import sys
 import time
+import typing
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import q2remote  # noqa: E402  the Q2's commands (shot, input, log, prof...): vamp is their transport
@@ -796,9 +798,10 @@ def audio(dev, a, say=None, player=None):
     try:
         if adb:
             p = subprocess.Popen([adb, 'exec-out', TAP_READ], stdout=subprocess.PIPE)
+            out = typing.cast(io.BufferedReader, p.stdout)  # stdout=PIPE: buffered, so read1 takes what has come
             try:
                 while not done(None):
-                    part = p.stdout.read1(1 << 16)
+                    part = out.read1(1 << 16)
                     if not part:
                         break
                     tap.feed(part)
