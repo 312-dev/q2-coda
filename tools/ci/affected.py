@@ -207,10 +207,15 @@ class Plan:
 
     def everything(self, why):
         """unit, fw and patch whole, every other suite of the gate's merge tier, every suite a rule here plans
-        (gate.PLANNED) and smoke: what a narrower plan could run, and what the merge queue then runs."""
+        (gate.PLANNED), every script gate.SCRIPTS declares runnable, and smoke: what a narrower plan could run, and
+        what the merge queue then runs."""
         self.unit, self.fw, self.patch = ALL, ALL, ALL
         self.other.update({*gate.MERGE} - {'unit', 'fw', 'patch'}, gate.PLANNED, {SMOKE})
+        # every script gate.SCRIPTS says can run here, and a line in why for each it says cannot, so a log shows
+        # what --all left out and why
+        self.other.update(gate.declared())
         self.why.append(why)
+        self.why.extend(f'not run: {n}: {v}' for n, v in gate.SCRIPTS.items() if isinstance(v, str))
 
     def add(self, suite, parts, why):
         current = getattr(self, suite)

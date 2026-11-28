@@ -302,6 +302,12 @@ def other_suite(path, py):
     return Suite(path, [py, path, *args], needs_build=any('{build}' in a or '{stockfs}' in a for a in args), heavy=True)
 
 
+def declared():
+    """Every script SCRIPTS says can run here, but test/patch.py, which is the patch suite: what an everything plan
+    and a release run besides their tier."""
+    return {n for n, v in SCRIPTS.items() if isinstance(v, list) and n != 'test/patch.py'}
+
+
 def skip_reason(path):
     """Why other_suite(path) is None."""
     args = SCRIPTS.get(path)
@@ -326,6 +332,8 @@ def suites_for(plan, only, py, logs, tier=None):
     out = {}
     if everything(plan):
         out = {n: named_suite(n, py, logs) for n in TIERS[tier or ('release' if plan is None else 'merge')]}
+        if plan is None and not tier:  # a release: every declared script too, as an everything plan names them
+            out |= {n: named_suite(n, py, logs) for n in sorted(declared()) if n not in out}
         for o in plan['other'] if plan else ():  # a test/X.py the branch changed runs itself, whatever else
             if o not in out and o not in OPTIONAL:
                 out[o] = named_suite(o, py, logs)
