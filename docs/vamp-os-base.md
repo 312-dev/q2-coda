@@ -175,6 +175,7 @@ Measured on the MacBook Pro (M-series, `tools/mac/q2env`'s native arm64 image, t
 | | |
 | --- | --- |
 | `vampos.squashfs` | 16,404,480 bytes (15.6 MiB), 22% of mtd2's 72 MiB (`ROOTFS_ROOM`), at `1f034c79` (2026-11-27, with Bluetooth and LocalSend's OpenSSL: 13,873,152 bytes before OpenSSL) |
+| glibc's GB18030 gconv module, for q2libd's lyrics | 167,936 bytes of the image (199,972 bytes unpacked; 20,217,856 bytes before it, 20,385,792 after, 2026-11-28); the whole gconv set would be about 8 MB |
 | Composed, with `/vendor` | 18,513,920 bytes (17.7 MiB) |
 | Largest files | `libcrypto.so.3` 4.8 MB (OpenSSL, for LocalSend's `q2send`), `q2player` 3.2 MB (FFmpeg and mbedTLS inside), `q2libd` 3.0 MB, `libgio` 2.3 MB, `libc.so.6` 2.0 MB, `bluetoothd` 1.8 MB, `libssl.so.3` 1.1 MB, `sqlite3` (the shell) 1.9 MB, `libsqlite3` 1.2 MB, `libasound` 1.2 MB, `busybox` 1.1 MB, the two Inter faces 0.8 MB, `q2ui` 0.2 MB |
 | A full build from an empty build directory, downloads cached | 929 s and 909 s (two runs, `make clean` before each, `BR2_JLEVEL=4`, niced), most of it the toolchain (binutils, GCC twice, glibc) |
