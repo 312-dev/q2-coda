@@ -62,26 +62,22 @@ static int hold_key;
 static void (*hold_fn)(void);
 void ui_on_hold(int key, void (*fn)(void)) { hold_key = key, hold_fn = fn; }
 /* A finger that lands above PULL_Y and goes PULL_PX down: pull_fn, on every page (stock's pull-down,
- * on_wm_tsmove_fun: g_pressdown_y under 31, 20 px down); the rest of that touch is nobody's. */
+ * on_wm_tsmove_fun: g_pressdown_y under 31, 20 px down), given the move that crossed and every event
+ * of that touch after it, its lift too, so what it opens can follow the finger; no page sees them. */
 #define PULL_Y 31
 #define PULL_PX 20
-static void (*pull_fn)(void);
+static void (*pull_fn)(const input_t *e);
 static struct {
     int y0, pulled;
 } pull;
-void ui_on_pull(void (*fn)(void)) { pull_fn = fn; }
+void ui_on_pull(void (*fn)(const input_t *e)) { pull_fn = fn; }
 static int pulled(const input_t *e) {
     if (e->type == IN_TOUCH_DOWN) pull.y0 = e->y, pull.pulled = 0;
     if (e->type < IN_TOUCH_DOWN) return 0;
-    int was = pull.pulled;
-    if (e->type == IN_TOUCH_UP) pull.pulled = 0;
-    if (was) return 1;
-    if (e->type == IN_TOUCH_MOVE && pull_fn && pull.y0 < PULL_Y && e->y - pull.y0 >= PULL_PX) {
-        pull.pulled = 1;
-        pull_fn();
-        return 1;
-    }
-    return 0;
+    if (!pull.pulled && !(e->type == IN_TOUCH_MOVE && pull_fn && pull.y0 < PULL_Y && e->y - pull.y0 >= PULL_PX)) return 0;
+    pull.pulled = e->type != IN_TOUCH_UP;
+    pull_fn(e);
+    return 1;
 }
 void (*ui_clicker)(int button);
 void ui_click(int button) {
@@ -146,20 +142,21 @@ int ui_quitting(int *code) {
 }
 void ui_stats_reset(void) { memset(&ui_stats, 0, sizeof ui_stats); }
 
-/* The top page as it is now, whole, into a canvas of its own (no status row: that stays put over
- * a slide). */
-static uint32_t *snapshot(void) {
+/* The page `down` under the top (0 the top) as it is now, whole, into a canvas of its own (no
+ * status row: that stays put over a slide). */
+static uint32_t *snapshot_at(int down) {
     uint32_t *buf = malloc(SCREEN_W * SCREEN_H * sizeof *buf);
     rect_t all = { 0, 0, SCREEN_W, SCREEN_H };
     if (!buf) return 0;
     uint32_t *screen = canvas_swap(buf);
     ui_painting = 1;
     clip_set(all);
-    stack[depth - 1].page->draw(stack[depth - 1].st, all);
+    stack[depth - 1 - down].page->draw(stack[depth - 1 - down].st, all);
     ui_painting = 0;
     canvas_swap(screen);
     return buf;
 }
+static uint32_t *snapshot(void) { return snapshot_at(0); }
 static void slide_end(void) {
     free(slide.from), free(slide.to);
     slide.from = slide.to = 0, slide.dir = 0;
@@ -176,9 +173,10 @@ static void slide_start(int dir, uint32_t *from) {
     again = 1;
 }
 
-/* The screen as it is now, whole: the top page and the status row over it (a sheet's page behind); 0 with no memory. */
-uint32_t *ui_snapshot_screen(void) {
-    uint32_t *buf = depth ? snapshot() : 0;
+/* The screen as it is now, whole: the top page and the status row over it (a sheet's page behind); 0 with no memory.
+ * ui_snapshot_under is the same with the page under the top (what a sheet going away uncovers). */
+static uint32_t *screen_at(int down) {
+    uint32_t *buf = depth > down ? snapshot_at(down) : 0;
     if (!buf) return 0;
     rect_t all = { 0, 0, SCREEN_W, SCREEN_H };
     uint32_t *screen = canvas_swap(buf);
@@ -189,6 +187,8 @@ uint32_t *ui_snapshot_screen(void) {
     canvas_swap(screen);
     return buf;
 }
+uint32_t *ui_snapshot_screen(void) { return screen_at(0); }
+uint32_t *ui_snapshot_under(void) { return screen_at(1); }
 int ui_status_hidden;
 static int still; /* the next push or pop has no slide: the page moves itself (a sheet) */
 void ui_push_still(const ui_page *p, void *arg) {

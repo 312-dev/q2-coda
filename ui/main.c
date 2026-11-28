@@ -276,7 +276,8 @@ static void at_rest(void) {
 /* a question asked with the screen dark lights it, as a wake would: demo's, down its pipe (patch/q2ui_gate.c) */
 static void wake_screen(void) { player_line("wake", 0); }
 
-/* Return held, or a finger pulled down from the top edge, on any page: Control Center, unless it is on top already */
+/* Return held on any page: Control Center, unless it is on top already (a finger pulled down from the top edge is
+ * page_control.c's control_pull) */
 static void control_center(void) {
     char route[256];
     ui_route(route, sizeof route);
@@ -533,7 +534,7 @@ int main(int argc, char **argv) {
     config_open();
     art_sync = opt.script || opt.bench; /* covers read in place: a script's pictures and a bench's times repeat */
     ui_on_hold(KEY_UI_RETURN, control_center);
-    ui_on_pull(control_center);
+    ui_on_pull(control_pull);
     if (opt.script) {
         int code = script(opt.script);
         fb_close();

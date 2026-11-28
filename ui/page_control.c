@@ -1,6 +1,11 @@
 /* Control Center (docs/oled-design.md#control-center), q2ui's own while it has the screen: opened
  * on any page by a finger pulled down from the top edge (ui.c ui_on_pull) or by holding Return
- * (main.c), closed by Return or a swipe up. Drawn as demo's sheet is
+ * (main.c), closed by Return or a swipe up. It comes down from the top and goes back up: pulled, its
+ * foot follows the finger (an interactive transition: control_pull), and let go it settles open, or
+ * back up when let go short of a third of the way down unless flung down (FLING_PX_S); Return held
+ * drops it from the top and Return or a swipe up sends it back up, each over DROP_US, cubic out. While
+ * it moves it is two pictures, the sheet whole with its status row and the screen under it, placed by
+ * rows each frame; under Reduce Motion it stands or goes at once (a finger still pulls it). Drawn as demo's sheet is
  * (patch/control_center.c cc_paint, the numbers its CC_* are): under the status row, a block of
  * six circles two by three, each named under it (Wi-Fi, Bluetooth / AirPlay, Car / Smart Wi-Fi,
  * EQ); at the right Now Playing (the cover, title and artist over the transport), and under it the
@@ -96,6 +101,9 @@
 #define SLIDE_PX 10
 #define SWIPE_PX 20
 #define WRITE_MS 30
+#define DROP_US 260000 /* the sheet's fall open or rise away over the whole screen, cubic out (the menu sheet's rise) */
+#define FLING_PX_S 300 /* a pull let go moving faster than this opens (down) or closes (up) wherever it is */
+#define FLING_STALE_US 100000 /* a finger still this long before its lift is let go at rest */
 
 enum { WIFI, BT, AIRPLAY, CAR, SMART, EQ, NOW, BRIGHT, VOLUME, USB, STOPS, PREV = STOPS, PLAY, NEXT };
 static const struct {
@@ -127,8 +135,17 @@ struct cc_st {
     struct {
         int on, stop, x0, y0, moved, dragging, held, want; /* want: a dragged level not yet sent, -1 none */
         uint64_t at, sent_at;
+        float finger; /* a dragged slider's place under the finger, 0 to 1 */
     } touch;
+    /* coming down or going up: the sheet's foot on the screen (SCREEN_H open), a finger holding it, or a settle from
+     * `from` to `to` begun at t0 over dur; the pull's last move (y, when) and its speed down in px/s; the sheet whole and
+     * the screen under it while it moves */
+    float reveal, from, to, vy, last_y;
+    int pulling, moving;
+    uint64_t t0, dur, last_t;
+    uint32_t *sheet, *behind;
 };
+static struct cc_st *live; /* the open sheet, 0 none */
 
 static int told_int(const char *key, int def) {
     char v[16];
@@ -176,10 +193,36 @@ static void *cc_open(void *arg) {
     s->grab = -1, s->t = ui_time(), s->wifi = wifi_glyph(), s->cable = cable(), s->loaded = loaded();
     spring_set(&s->fill[0], level(s, BRIGHT) / 100.0), spring_set(&s->fill[1], level(s, VOLUME) / 100.0);
     s->now_seen = now_seq(), s->cover_seen = now_cover_seq();
+    s->reveal = SCREEN_H;
+    live = s;
     ui_again();
     return s;
 }
-static void close_for(void) { ui_pop(); }
+static void close_for(void) { ui_pop_still(); } /* at once: a page of its own comes next */
+static void sheet_make(struct cc_st *s);
+/* a settle from where the sheet is to `to` (SCREEN_H open, 0 gone), over DROP_US's share of the way; at once under
+ * Reduce Motion or with no pictures to move */
+static void settle(struct cc_st *s, float to) {
+    float way = to - s->reveal;
+    way = (way < 0 ? -way : way) / SCREEN_H;
+    s->from = s->reveal, s->to = to, s->t0 = ui_time(), s->moving = 1;
+    s->dur = ui_reduce_motion || !list_motion || !s->sheet || !s->behind ? 0 : (uint64_t)(DROP_US * (way < 0.3f ? 0.3f : way));
+    ui_mark_all(), ui_again();
+}
+/* at rest open: the pictures go and the loop draws the status row again */
+static void arrive(struct cc_st *s) {
+    free(s->sheet), free(s->behind);
+    s->sheet = s->behind = 0, s->reveal = SCREEN_H;
+    ui_status_hidden = 0;
+    ui_mark_all();
+}
+/* Return or a swipe up: back up the way it came, uncovering the page under it */
+static void leave(struct cc_st *s) {
+    if (s->moving || s->pulling) return;
+    s->behind = ui_snapshot_under();
+    sheet_make(s);
+    settle(s, 0);
+}
 
 static void act(struct cc_st *s, int i) {
     if (i == AIRPLAY || i == USB) { /* demo's pages: the sheet goes first, as demo's dialog_quit */
@@ -252,6 +295,13 @@ static int touch(struct cc_st *s, const input_t *e) {
     if (!s->touch.moved && (abs(dx) >= SLIDE_PX || abs(dy) >= SLIDE_PX))
         s->touch.moved = 1, s->touch.dragging = slider && abs(dx) > abs(dy);
     if (s->touch.dragging) {
+        /* the fill under the finger in this frame (direct manipulation: no ease while it is down), the level sent at
+         * WRITE_MS's pace */
+        rect_t r = box(s->touch.stop);
+        float top = (s->touch.stop == VOLUME ? told_int("volmax", 100) : 100) / 100.0f;
+        s->touch.finger = clampf((float)(e->x - r.x) / (float)r.w, 0, 1);
+        spring_set(&s->fill[s->touch.stop - BRIGHT], s->touch.finger < top ? s->touch.finger : top);
+        ui_mark((rect_t){ r.x - RING, r.y - RING + s->dy, r.w + 2 * RING, r.h + 2 * RING });
         s->touch.want = level_at(s->touch.stop, e->x);
         drag_send(s, e->type == IN_TOUCH_UP);
         if (s->touch.want >= 0) ui_wake_ms(WRITE_MS);
@@ -260,7 +310,7 @@ static int touch(struct cc_st *s, const input_t *e) {
     s->touch.on = 0;
     if (s->touch.held || s->touch.dragging) return 0;
     if (s->touch.moved) {
-        if (dy <= -SWIPE_PX && -dy > abs(dx)) return ui_pop(), 1; /* a swipe up closes the sheet, as demo's */
+        if (dy <= -SWIPE_PX && -dy > abs(dx)) return leave(s), 1; /* a swipe up closes the sheet, as demo's */
         return 0;
     }
     int i = s->touch.stop;
@@ -288,13 +338,14 @@ static int wake(struct cc_st *s) {
 
 static void cc_event(void *st, const input_t *e) {
     struct cc_st *s = st;
+    if (s->moving || s->pulling) return; /* coming or going: no input */
     if (e->type >= IN_TOUCH_DOWN) {
         touch(s, e); /* touch never brings the ring */
         return;
     }
     if (e->type == IN_KEY_UP && e->value == KEY_UI_RETURN) {
         if (s->grab < 0) {
-            ui_pop();
+            leave(s);
             return;
         }
         s->grab = -1, wake(s);
@@ -331,6 +382,22 @@ static int spring_dy(const struct cc_st *s) {
 }
 static void cc_step(void *st) {
     struct cc_st *s = st;
+    if (s->moving) {
+        float p = s->dur ? (float)(ui_time() - s->t0) / (float)s->dur : 1;
+        s->reveal = p >= 1 ? s->to : s->from + (s->to - s->from) * ease_cubic_out(p);
+        ui_mark_all();
+        if (p < 1) {
+            ui_again();
+            return;
+        }
+        s->moving = 0;
+        if (s->to <= 0) {
+            ui_pop_still(); /* gone */
+            return;
+        }
+        arrive(s);
+    }
+    if (s->pulling) return;
     if (s->touch.on && !s->touch.moved && !s->touch.held && s->touch.stop >= 0 && s->touch.stop <= EQ &&
         ui_time() - s->touch.at >= QUICK_HOLD_MS * 1000u) {
         s->touch.held = 1;
@@ -340,7 +407,7 @@ static void cc_step(void *st) {
     if (s->touch.dragging) drag_send(s, 0);
     float dt = (float)(ui_time() - s->t) / 1e6f;
     s->t = ui_time();
-    if (!s->landed && !ui_sliding()) s->landed = ui_time(); /* at rest open: the landing starts */
+    if (!s->landed && !ui_sliding() && s->reveal >= SCREEN_H) s->landed = ui_time(); /* at rest open: the landing starts */
     int dy = spring_dy(s), landing = s->landed && ui_time() - s->landed < SPRING_MS * 1000u && !ui_reduce_motion && list_motion;
     if (dy != s->dy) /* the blocks' band, from 2 px short of rest to the foot */
         s->dy = dy, ui_mark((rect_t){ 0, Y0 - RING - 2, SCREEN_W, SCREEN_H - (Y0 - RING - 2) });
@@ -357,6 +424,7 @@ static void cc_step(void *st) {
             ui_wake_ms((unsigned)((s->set_at[i] + WANT_HOLD_US - ui_time()) / 1000u) + 1);
     }
     for (int k = 0; k < 2; ++k) {
+        if (s->touch.on && s->touch.dragging && s->touch.stop == BRIGHT + k) continue; /* under the finger (touch) */
         s->fill[k].to = level(s, BRIGHT + k) / 100.0;
         if (spring_moving(&s->fill[k])) {
             rect_t r = box(BRIGHT + k);
@@ -407,8 +475,7 @@ static void text_at(run_t *run, int face, int px, const char *str, int max, floa
     run_draw(run, right ? x - run->w : x, (float)cy - (float)px / 2, rgb, 256);
 }
 
-static void cc_draw(void *st, rect_t r) {
-    struct cc_st *s = st;
+static void paint(struct cc_st *s, rect_t r) {
     int shown = ring_on(s), dy = s->dy, light = ui_light != 0;
     uint32_t block = tok(TOK_RAISED), off = tok(TOK_OFF), canvas_rgb = tok(TOK_CANVAS);
     fill(r, canvas_rgb);
@@ -480,7 +547,40 @@ static void cc_draw(void *st, rect_t r) {
     }
     fill_round((rectf_t){ SCREEN_W / 2 - GRAB_W / 2, GRAB_Y + dy, GRAB_W, GRAB_H }, 2.5f, 0, light ? GRAB_RGB_L : GRAB_RGB, 1, 0);
 }
-static void cc_close(void *st) { free(st); }
+static void cc_draw(void *st, rect_t r) {
+    struct cc_st *s = st;
+    if (s->reveal >= SCREEN_H || !s->sheet || !s->behind) {
+        paint(s, r);
+        return;
+    }
+    /* coming or going: the sheet's foot rows over the screen under it */
+    int foot = (int)(s->reveal + 0.5f);
+    for (int y = r.y; y < r.y + r.h; ++y) {
+        const uint32_t *from = y < foot ? s->sheet + (y + SCREEN_H - foot) * SCREEN_W : s->behind + y * SCREEN_W;
+        memcpy(canvas + y * SCREEN_W + r.x, from + r.x, (size_t)r.w * sizeof *canvas);
+    }
+}
+/* the sheet whole at rest, its status row over it, for the frames it moves; the loop's status row off meanwhile */
+static void sheet_make(struct cc_st *s) {
+    rect_t all = { 0, 0, SCREEN_W, SCREEN_H };
+    if (!s->sheet) s->sheet = malloc(SCREEN_W * SCREEN_H * sizeof *s->sheet);
+    if (!s->sheet) return;
+    uint32_t *screen = canvas_swap(s->sheet);
+    ui_painting = 1;
+    clip_set(all);
+    paint(s, all);
+    status_draw(all);
+    ui_painting = 0;
+    canvas_swap(screen);
+    ui_status_hidden = 1;
+}
+static void cc_close(void *st) {
+    struct cc_st *s = st;
+    if (s->sheet || s->behind) ui_status_hidden = 0;
+    free(s->sheet), free(s->behind);
+    if (live == s) live = 0;
+    free(s);
+}
 static void cc_shown(void *st) {
     (void)st;
     ui_mark_all();
@@ -494,8 +594,58 @@ static void cc_select(void *st, int sel) {
 }
 static int cc_trace(void *st, char *out, size_t room) {
     struct cc_st *s = st;
-    return snprintf(out, room, "sel=%d ring=%d grab=%d land=%d", s->focus, ring_on(s), s->grab >= 0, s->dy);
+    int finger = s->touch.on && s->touch.dragging ? (int)(s->touch.finger * 1000 + 0.5f) : -1;
+    return snprintf(out, room, "sel=%d ring=%d grab=%d land=%d reveal=%d finger=%d fill0=%d fill1=%d", s->focus, ring_on(s),
+                    s->grab >= 0, s->dy, (int)(s->reveal + 0.5f), finger, (int)(s->fill[0].x * 1000 + 0.5),
+                    (int)(s->fill[1].x * 1000 + 0.5));
 }
 const ui_page page_control = { "control", cc_open, cc_event, cc_step, cc_draw, cc_close, cc_shown, cc_where, cc_select, cc_trace };
 
-void control_push(void) { ui_push(&page_control, 0); }
+/* Return held: the sheet dropped from the top over the screen as it is */
+void control_push(void) {
+    uint32_t *behind = ui_snapshot_screen();
+    ui_push_still(&page_control, 0);
+    struct cc_st *s = live;
+    if (!s) {
+        free(behind);
+        return;
+    }
+    s->behind = behind, s->reveal = 0;
+    sheet_make(s);
+    settle(s, SCREEN_H);
+}
+/* A finger pulled down from the top edge (ui.c ui_on_pull): the move that crossed opens the sheet with its foot under
+ * the finger, each move after takes it there, and the lift settles it open or back up by where it is and how fast it
+ * was moving. A pull over a sheet already open is nobody's. */
+void control_pull(const input_t *e) {
+    struct cc_st *s = live;
+    if (!s) {
+        if (e->type != IN_TOUCH_MOVE) return;
+        uint32_t *behind = ui_snapshot_screen();
+        ui_push_still(&page_control, 0);
+        if (!(s = live)) {
+            free(behind);
+            return;
+        }
+        s->behind = behind, s->reveal = 0, s->pulling = 1, s->vy = 0, s->last_t = 0;
+        sheet_make(s);
+        if (!s->sheet || !s->behind) { /* no memory for the motion: it stands open at once */
+            s->pulling = 0;
+            arrive(s);
+            return;
+        }
+    } else if (!s->pulling)
+        return;
+    float y = clampf((float)e->y, 0, SCREEN_H);
+    uint64_t now = ui_time();
+    if (e->type == IN_TOUCH_MOVE) {
+        if (s->last_t && now > s->last_t) s->vy = (y - s->last_y) * 1e6f / (float)(now - s->last_t);
+        s->last_y = y, s->last_t = now, s->reveal = y;
+        ui_mark_all();
+        return;
+    }
+    if (e->type != IN_TOUCH_UP) return;
+    if (now - s->last_t > FLING_STALE_US) s->vy = 0; /* held still before the lift: no fling */
+    s->pulling = 0;
+    settle(s, s->vy > FLING_PX_S || (s->vy > -FLING_PX_S && s->reveal >= SCREEN_H / 3.0f) ? SCREEN_H : 0);
+}
