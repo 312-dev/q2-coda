@@ -4,7 +4,7 @@
  *          [--limit N] [--motion 0|1] [--wheel-scroll follow|tick] [--living 0|1] [--living-fps N] [--reduce-motion] [--light]
  *          [--panel-bits 8|6|5|565]
  *          [--panel-mode 24|keep] [--panel-mem FILE]
- *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--pan-blocks]
+ *          [--text awtk] [--page home|songs|now|lyrics|depth|gallery|card] [--stats FILE] [--bench] [--pan-blocks]
  *          [--frame-log N] [--fb-flush 0|1|2] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--ctl FD] [--playlist FILE]
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
@@ -311,6 +311,8 @@ static void state_restore(void) {
             if (strcmp(seg, opt.page)) break;
         } else if (!strcmp(seg, "now"))
             ui_push(&page_now, 0);
+        else if (!strcmp(seg, "lyrics"))
+            ui_push_still(&page_lyrics, 0);
         else if (!settings_route(seg) && !library_route(seg))
             break;
         ui_select_top(atoi(colon + 1));
@@ -359,6 +361,8 @@ static void first_page(void) {
         ui_push(&page_home, 0);
     else if (!strcmp(opt.page, "now"))
         ui_push(&page_now, 0);
+    else if (!strcmp(opt.page, "lyrics"))
+        ui_push(&page_now, 0), ui_push_still(&page_lyrics, 0); /* no slide: Now Playing has not stepped yet */
     else if (!strcmp(opt.page, "depth"))
         ui_push(&page_depth, 0);
     else if (!strcmp(opt.page, "gallery"))
@@ -570,6 +574,7 @@ static int script(const char *path) {
             now_read();
         } else if (!strncmp(line, "api", 3) && (line[3] == '\n' || !line[3])) {
             api_wait(2000); /* every answer from Vamp OS's services in, a script's clock stopped meanwhile */
+            lyrics_wait(2000);
         } else if (sscanf(line, "told %319s", arg) == 1) {
             FILE *o = fopen(arg, "w"); /* the status row's states as it reads them */
             if (o) fputs(status_told_text(), o), fclose(o);

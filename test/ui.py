@@ -2767,7 +2767,7 @@ class Service:
                 out = self.answers.get(line, self.answers.get(word, ['ok']))
                 if out and isinstance(out[0], list):  # answers in turn, the last kept
                     out = out.pop(0) if len(out) > 1 else out[0]
-                c.sendall(''.join(x + '\n' for x in out).encode())
+                c.sendall(''.join(x + '\n' for x in out).encode('utf-8', 'surrogateescape'))  # raw bytes as \udcXX
 
     def close(self):
         self.s.close()
@@ -2822,6 +2822,78 @@ def api_play(binary, work):
         if svc:
             svc.close()
     return good & api_checks(runs, sent, ' mode ' in play_caps + ' ') & api_window(binary, work, play_caps)
+
+
+def save_png(picture, path):
+    """A script's picture as a PNG (no Pillow here)."""
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+    rows = b''.join(b'\0' + picture.rgb[y * W * 3:(y + 1) * W * 3] for y in range(H))
+    pathlib.Path(path).write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', W, H, 8, 2, 0, 0, 0)) +
+                                   chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
+
+
+GB18030 = b'\xc4\xe3\xba\xc3'  # two Han characters in GB18030: ill-formed as UTF-8, as q2libd sends a file it could not convert
+LYRICS = {
+    'word': ['lyrics id=2 kind=word source=file lines=3', 'line at=500 text=Hello%20world words=500:0,1500:6',
+             'line at=2000 text=' + GB18030.decode('utf-8', 'surrogateescape') + ' words=', 'line at=4000 text=Again words=', 'ok'],
+    'line': ['lyrics id=2 kind=line source=file lines=3', 'line at=0 text=First%20line words=',
+             'line at=1000 text=Second%20line%2C%20long%20enough%20to%20wrap%20onto%20another%20row words=',
+             'line at=3000 text=Third%20line words=', 'ok'],
+    'plain': ['lyrics id=2 kind=plain source=tag lines=2', 'line at=-1 text=Line%20one words=', 'line at=-1 text=Line%20two words=', 'ok'],
+    'none': ['err none'],
+}
+
+
+def lyrics_page(binary, work):
+    """The lyrics page (ui/page_lyrics.c) over Q2LIB/1's `lyrics ID` (ui/lyrics.c), the song paused one second in: the
+    playing line is the last started, a word-timed one lit part way between its word marks, line-timed whole; untimed
+    lyrics have no playing line; a song with none says so; text that is not UTF-8 is drawn as one U+FFFD each ill-formed
+    sequence. A swipe to the left on Now Playing opens it. Q2UI_PAGES=DIR saves the pictures there as lyrics-KIND.png."""
+    good = True
+    now = 'now title=Song artist=Ann album=First state=2 pos=1 len=200 volume=40 id=2'
+    want_fffd = GB18030.decode('utf-8', 'replace').count('\ufffd')
+    rows = {}
+    for kind, answer in LYRICS.items():
+        held = {}
+
+        def start(d, held=held, answer=answer):
+            (d/'vamp').mkdir()
+            held['play'] = Service(d/'vamp/play.sock', 'Q2PLAY/1', {'caps': [PLAY_CAPS], 'now': [now], 'rating 0': ['err none']})
+            held['lib'] = Service(d/'vamp/lib.sock', 'Q2LIB/1', {'lyrics 2': answer})
+        trace, pictures, _, _ = script(binary, work, 20, ['api', 'rest', 'run 300', 'api', 'run 300', 'rest', 'shot @lyrics.ppm'], '--api-dir', '@vamp',
+                                       '--api', 'auto', '--page', 'lyrics', queue=True, before=start)
+        rows[kind] = trace[-1] if trace else {}
+        asked = [x for x in held['lib'].lines if x.startswith('lyrics')]
+        good &= check(f'the lyrics page asks Q2LIB/1 for the playing song\'s lyrics once ({kind})', asked == ['lyrics 2'], asked)
+        for svc in held.values():
+            svc.close()
+        if os.environ.get('Q2UI_PAGES') and 'lyrics' in pictures:
+            save_png(pictures['lyrics'], pathlib.Path(os.environ['Q2UI_PAGES'])/f'lyrics-{kind}.png')
+    w, ln, pl, no = (rows[k] for k in ('word', 'line', 'plain', 'none'))
+    good &= check('word-timed lyrics: three lines, the first playing one second in, lit part way between its word marks',
+                  w.get('kind') == 4 and w.get('lines') == 3 and w.get('sel') == 0 and 0 < w.get('lit', 0), str(w))
+    good &= check(f'a line that is not UTF-8 is drawn with one U+FFFD each ill-formed sequence ({want_fffd})',
+                  w.get('fffd') == want_fffd, str(w.get('fffd')))
+    good &= check('line-timed lyrics: the second line playing one second in, lit whole',
+                  ln.get('kind') == 3 and ln.get('sel') == 1 and ln.get('lit', 0) > 100, str(ln))
+    good &= check('untimed lyrics have no playing line and stand from the top', pl.get('kind') == 2 and pl.get('sel') == -1
+                  and pl.get('scroll') == 0 and pl.get('lines') == 2, str(pl))
+    good &= check("a song with no lyrics: none held, the page says so", no.get('kind') == 0 and no.get('lines') == 0, str(no))
+    held = {}
+
+    def start(d, held=held):
+        (d/'vamp').mkdir()
+        held['play'] = Service(d/'vamp/play.sock', 'Q2PLAY/1', {'caps': [PLAY_CAPS], 'now': [now], 'rating 0': ['err none']})
+        held['lib'] = Service(d/'vamp/lib.sock', 'Q2LIB/1', {'lyrics 2': LYRICS['line']})
+    trace, _, _, _ = script(binary, work, 20, ['api', 'rest', 'swipe 300 160 100 160 200', 'rest', 'run 300', 'api', 'run 300', 'rest'],
+                            '--api-dir', '@vamp', '--api', 'auto', '--page', 'now', queue=True, before=start)
+    for svc in held.values():
+        svc.close()
+    good &= check('a swipe to the left on Now Playing opens the lyrics', bool(trace) and trace[-1].get('lines') == 3, str(trace[-1:]))
+    return good
 
 
 def api_checks(runs, sent, mode):
@@ -3632,6 +3704,8 @@ def main():
             good &= scripts(binary, work)
         if not only or 'pages' in only:
             good &= pages(binary, work)
+        if not only or 'lyrics' in only:
+            good &= lyrics_page(binary, work)
         if not only or 'live' in only:
             good &= live(binary, work)
             good &= live_stats(binary, work)

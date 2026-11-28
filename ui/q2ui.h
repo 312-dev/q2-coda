@@ -572,6 +572,7 @@ void now_open(void);              /* watch for changes; a change wakes the loop 
 void now_read(void);
 const ui_now *now_get(void);
 unsigned now_seq(void);           /* moves when anything of it changed */
+int now_pos_ms(void);              /* the playing position, ms, gone on by the clock since it was read */
 int now_watched(void);            /* whether changes are being watched for (the stats file says) */
 const image_t *now_cover(void);   /* the playing song's cover, 0 with none */
 /* ---- art.c: album covers for rows, Cover Flow's thumbnails on the card ---- */
@@ -600,6 +601,31 @@ int api_screen_dark(void);            /* Q2SYS/1's screen: 1 dark, 0 lit, -1 no 
 int api_sys_send(const char *verb);   /* a command to Q2SYS/1 (`screen on`); 0 sent */
 int api_screen(int on);               /* Q2SYS/1 `screen on` or `screen off`; 0 sent, -1 off Vamp OS */
 int api_told(char *out, size_t room); /* the status row's states from Q2SYS/1, Q2BT/1 and Q2NET/1 as /tmp/q2ui.status has them; 0 off Vamp OS */
+
+/* ---- lyrics.c: a song's lyrics, Q2LIB/1's `lyrics ID` ---- */
+enum { LYR_NONE, LYR_ASKING, LYR_PLAIN, LYR_LINE, LYR_WORD };
+#define LYRICS_ANSWER_MAX (512u * 1024u) /* q2libd reads 64 KB of text at most; percent-encoded, three times that */
+typedef struct {
+    int ms;      /* the word's start */
+    unsigned at; /* its first byte in the line's text */
+} lyr_mark;
+typedef struct {
+    int at;              /* the line's start, ms; -1 untimed */
+    unsigned text, len;  /* its text in lyrics_t.text, well-formed UTF-8 */
+    unsigned mark, marks; /* its word marks in lyrics_t.mark */
+} lyr_line;
+typedef struct {
+    int kind, id, n, marks;
+    lyr_line *line;
+    lyr_mark *mark;
+    char *text;
+    size_t text_len;
+} lyrics_t;
+const lyrics_t *lyrics_for(int id); /* song id's lyrics, asked when another song's are held; LYR_ASKING until they come */
+unsigned lyrics_seq(void);          /* moves when what lyrics_for holds changes */
+const lyrics_t *lyrics_held(void);  /* what lyrics_for holds, asking for nothing */
+void lyrics_wait(unsigned ms);      /* a script's wait for the answer asked for, up to ms */
+int lyrics_line_at(const lyrics_t *l, int ms);
 
 /* ---- player.c: the player, through demo while demo owns it ---- */
 int player_play(const int *ids, int n, int at, int shuffle); /* the list, starting at its song `at`; 0 sent */
@@ -646,7 +672,7 @@ typedef struct {
 void menu_push(const menu_t *m); /* the strings and rows must outlive the sheet */
 void library_push(void);
 int library_route(const char *name); /* open the Library's page of that route name; 1 when it was one */
-extern const ui_page page_home, page_now;
+extern const ui_page page_home, page_now, page_lyrics;
 /* Leave q2ui for a page of demo's it has not got (docs/ui-rewrite.md#cutover): demo opens the page
  * named, takes the screen, and starts q2ui again where it was when the page is left. */
 void ui_demo_page(const char *name);

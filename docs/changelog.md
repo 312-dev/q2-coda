@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - New UI (preview): on VampOS, swipe left on Now Playing for the song's lyrics, large, the line being sung centred and lit word by word (or line by line); turn the wheel to read ahead. Lyrics saved in a Chinese encoding show a replacement mark instead of garbled letters until VampOS converts them.
   - New UI (preview): it no longer writes its timing statistics to the player's internal storage once a second while a list moves or a song plays on Now Playing; they are kept in memory, sparing the flash, and the old file is removed.
   - Look: a connected Bluetooth headset shows the Bluetooth symbol alone in the status row, instead of headphones and a small battery; its battery level is on Settings > Bluetooth.
   - Look: while an app downloads, the status row shows an arrow dropping onto a small tray that fills in blue as it goes, instead of a ring with an arrow in it.

@@ -15,7 +15,8 @@
  * the wheel here or the side buttons, its level takes the bar's place for VOLUME_SHOW_US, white on
  * the same track, and the times stand aside (demo shows its own volume window then, which q2ui's
  * page is over). The cover is a card of layers (docs/ui-rewrite.md#cards): it lifts as the page
- * opens, settles smaller on pause, and each wheel tick pushes it. */
+ * opens, settles smaller on pause, and each wheel tick pushes it. A swipe to the left opens the song's lyrics
+ * (ui/page_lyrics.c). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,6 +76,7 @@ enum { STAGE_REST, STAGE_SHUFFLE, STAGE_REPEAT, STAGE_HEART };
  * started a scrub, turns the screen off (patch/nav/now_playing.c NP_HOLD_MS, patch/offsets.inc DOUBLE_CLICK_MS) */
 #define NP_HOLD_US 400000u
 #define DOUBLE_US 250000u
+#define LYRICS_SWIPE 60 /* px a finger travels left to open the lyrics */
 #define MODE_BOX 22 /* a mode's glyph's box (tools/art.py MODE_PX), the row's spacing's unit */
 
 struct now_st {
@@ -103,16 +105,9 @@ struct now_st {
     /* the radio's pill: on as last seen, and when it turned */
     int radio;
     uint64_t radio_at;
+    int touch_x, touch_y, touching; /* a finger down: where, for the swipe to the lyrics */
 };
 
-static int position_ms(void) {
-    const ui_now *n = now_get();
-    int pos = n->pos_ms;
-    /* between demo's writes of it the song goes on by the clock */
-    if (n->playing) pos += (int)((mono_us() - n->read_us) / 1000u);
-    if (n->len_s && pos > n->len_s * 1000) pos = n->len_s * 1000;
-    return pos;
-}
 static void *n_open(void *arg) {
     (void)arg;
     struct now_st *s = calloc(1, sizeof *s);
@@ -182,7 +177,7 @@ static void centre(struct now_st *s) {
         stage_set(s, stop_next(STAGE_REST, 1));
     } else if (s->stage == STAGE_REST) {
         if (!*n->title || !n->len_s) return;
-        s->scrub = 1, s->scrub_moved = 0, s->scrub_id = n->id, s->scrub_to = position_ms() / 1000;
+        s->scrub = 1, s->scrub_moved = 0, s->scrub_id = n->id, s->scrub_to = now_pos_ms() / 1000;
         s->key_at = ui_time();
         ui_wake_ms(STAGE_US / 1000u);
         cycle_mark();
@@ -206,6 +201,15 @@ static void centre(struct now_st *s) {
 static void n_event(void *st, const input_t *e) {
     struct now_st *s = st;
     if (e->type == IN_TICK) s->dc_armed = 0; /* the wheel turned between: no double (np_key) */
+    if (e->type == IN_TOUCH_DOWN) s->touching = 1, s->touch_x = e->x, s->touch_y = e->y;
+    if (e->type == IN_TOUCH_UP && s->touching) { /* a swipe to the left: the lyrics (ui/page_lyrics.c) */
+        int dx = s->touch_x - e->x, dy = e->y - s->touch_y;
+        s->touching = 0;
+        if (dx > LYRICS_SWIPE && abs(dy) < dx) {
+            ui_push(&page_lyrics, 0);
+            return;
+        }
+    }
     if (e->type == IN_KEY_UP && e->value == KEY_UI_RETURN) {
         if (s->scrub || s->stage != STAGE_REST) { /* np_cancel: the cycle ends, the page stays */
             scrub_end(s);
@@ -338,7 +342,7 @@ static void n_step(void *st) {
     now_cover();
     if (now_cover_seq() != s->cover_seen)
         s->cover_seen = now_cover_seq(), ui_mark(card_bounds(ART));
-    int pos = position_ms() / 1000;
+    int pos = now_pos_ms() / 1000;
     if (pos != s->pos_s) s->pos_s = pos, ui_mark((rect_t){ 0, BAR_Y - 2, SCREEN_W, 40 });
     if (n->playing) ui_wake_ms(250); /* the bar's next pixel and the times' next second */
 }
@@ -502,7 +506,7 @@ static void n_draw(void *st, rect_t r) {
         return;
     }
     /* the bar: its fill ends between pixels, so it creeps and never steps */
-    int pos = s->scrub ? s->scrub_to * 1000 : position_ms();
+    int pos = s->scrub ? s->scrub_to * 1000 : now_pos_ms();
     float share = n->len_s ? clampf((float)pos / ((float)n->len_s * 1000), 0, 1) : 0,
           end = BAR_H + (BAR_W - BAR_H) * share;
     fill_round((rectf_t){ BAR_X, BAR_Y, BAR_W, BAR_H }, 2, 0, tok(TOK_TRACK), 1, 0);

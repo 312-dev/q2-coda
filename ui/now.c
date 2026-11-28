@@ -131,3 +131,12 @@ void now_open(void) {
     if (ok) ui_watch(watch, changed);
     now_read();
 }
+
+/* The playing position, ms: between the writes of it the song goes on by the clock */
+int now_pos_ms(void) {
+    const ui_now *n = now_get();
+    int pos = n->pos_ms;
+    if (n->playing) pos += (int)((mono_us() - n->read_us) / 1000u);
+    if (n->len_s && pos > n->len_s * 1000) pos = n->len_s * 1000;
+    return pos;
+}
