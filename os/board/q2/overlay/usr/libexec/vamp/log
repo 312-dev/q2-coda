@@ -1,6 +1,22 @@
 # Sourced by rcS and the services' scripts. step MESSAGE: one line, the seconds since boot first, in
 # /run/vamp/boot.log, and in /mnt/data/vamp/boot.log too once rcS has the data partition (/run/vamp/keep), so a
 # boot can be read afterwards, from stock over adb if need be (docs/vamp-os-base.md#first-boot-on-a-q2).
+#
+# A service's script (runsv runs it as ./run) has its stdout and stderr, and so its program's once it execs, appended to
+# /run/vamp/services.log on the tmpfs: the console they would reach otherwise is the serial port, which nobody reads
+# on a card boot (docs/vamp-os-base.md#where-the-services-say-things). At each start a log over 256 KB is copied to
+# services.log.1 and emptied in place (an O_APPEND writer carries on at the new end), so the two hold about 512 KB plus
+# what is written between two starts. ponytail: a talkative daemon that never restarts grows it unchecked; a size
+# check in a long-running process (q2sysd's second tick) would lift that.
+case $0 in
+./run)
+    if [ -f /run/vamp/services.log ] && [ "$(wc -c < /run/vamp/services.log)" -gt 262144 ]; then
+        cp /run/vamp/services.log /run/vamp/services.log.1 && : > /run/vamp/services.log
+    fi
+    exec >> /run/vamp/services.log 2>&1
+    ;;
+esac
+
 step() {
     local t rest
     read -r t rest < /proc/uptime

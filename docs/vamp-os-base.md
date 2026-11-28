@@ -52,7 +52,7 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | `q2libd` | `/usr/bin/q2libd` ([q2libd](libd.md)): the card's songs into `/mnt/data/vamp/library.db` and the signed-in apps' catalogues into `/mnt/mmc/.vamp/catalogue.db`, `q2ui` restarted in place after each; Q2LIB/1 on `/run/vamp/lib.sock` | the card's mount |
 | `q2playd` | `/usr/bin/q2playd` ([q2playd](playd.md)): the server on `/tmp/sock_play`, the queue, what plays; `q2ui`'s command queue and now file, and Q2PLAY/1 | `/mnt/data/vamp/library.db` for a card song's file, the card's `.vamp/catalogue.db` for a server song's |
 | `q2player` | `/usr/bin/q2player`, built as every Vamp image's (Car Audio's output on) against this image's alsa-lib, FFmpeg 7.1.5 and mbedTLS | `q2playd` on `/tmp/sock_play` (it waits for it up to 5 s, then `finish` waits 10 s before the next try) |
-| `q2sysd` | `/usr/bin/q2sysd` ([q2sysd](sysd.md)): the power key (a press: the screen off or on; held 3 s: power off), the backlight, the battery (`/run/vamp/battery`), the time zone and the RTC, Q2SYS/1 | the input devices with `KEY_POWER`, `/sys/class/backlight`, the CW2015 |
+| `q2sysd` | `/usr/bin/q2sysd` ([q2sysd](sysd.md)): the power key (a press: the screen off or on; held 3 s: power off), the backlight, the battery (`/run/vamp/battery`), the time zone and the RTC, Q2SYS/1 | the input devices with `KEY_POWER`, the backlight (`/sys/class/backlight`, or on the Q2 stock's PWM on `/dev/jz_pwm`: [q2sysd: The backlight](sysd.md#the-backlight)), the CW2015 |
 | `q2gate` | `/usr/bin/q2gate` ([q2gate](gate.md)): `q2ui`'s settings pipe (`/run/vamp/ui.ctl`) turned into Vamp API 1's words, and the status, Wi-Fi and Bluetooth files `q2ui` reads kept from the services | the four services' sockets |
 | `dbus` | `dbus-daemon --system` ([Bluetooth](#bluetooth)), its machine id made on `/run` each boot | nothing |
 | `bt-attach` | Shanling's `/vendor/bin/rtk_hciattach -n -s 115200 ttyS0 rtk_h5`, which loads the radio's Bluetooth firmware and makes `hci0` | `/dev/ttyS0` and the H5 module; on a card boot an `hci0` already there is left to the outer system |
@@ -67,6 +67,12 @@ Then init starts `runsvdir`, which starts the services below ([`/etc/sv`](../os/
 | `q2dlnad` | `/usr/bin/q2dlnad` ([dlnad](dlnad.md)): the DLNA renderer, listening only while `[SYSSET] DLNA=1` (stock's switch, off by default) | Q2PLAY/1 (tried every 2 s) |
 | `q2sendd` | `/usr/bin/q2sendd` ([LocalSend](vamp-os-services.md#localsend)): LocalSend's receive side, today's `q2send` with its questions over Q2UI/1. Down at boot (its `down` file) | the LocalSend page's `sv up` |
 | `q2carrd` | `/usr/bin/q2carrd` ([carrd](carrd.md)): Car Remote, today's `coda-rc` run while `[Q2POD] CARREMOTE` is 1, its pairing card asked over Q2UI/1; nothing on a card boot | `config.ini`'s switch (looked at once a second) |
+
+## Where the services say things
+
+Each service's script sources `/usr/libexec/vamp/log`, which sends the script's stdout and stderr, and so its program's once it execs, to `/run/vamp/services.log` on the tmpfs: every `q2netd:`, `q2sysd:` or `wpa_supplicant` line is there. Without it they reach `runsvdir`'s output, the console, which is the serial port: on the first two card boots on the owner's Q2 every service's word was lost to it. At each service start a log over 256 KB is copied to `services.log.1` and emptied in place, so the two stay near 512 KB. rcS's and the run scripts' own steps stay in `/run/vamp/boot.log` (and `/mnt/data/vamp/boot.log`).
+
+`/var/run` is a link to `../run`, the tmpfs, as Buildroot's sysv and systemd skeletons make it (`BR2_INIT_NONE` makes none, so a package's install left a directory on the read-only root): `wpa_supplicant` makes its control socket in `/var/run/wpa_supplicant`, and with a directory there it ended at once (`Read-only file system ... Failed to add interface wlan0`), which is why the first card boot's `q2netd` sat at `state=searching`.
 
 ## adb
 
@@ -246,7 +252,7 @@ The first run of VampOS on the owner's Q2, by [card boot](#card-boot) alone: not
 | 9 | `$A /run/vamp/net.sock Q2NET/1 status` with Wi-Fi on and a saved network | `state=connected` and an `ip=` | Readiness 13 |
 | 10 | `$A /run/vamp/bt.sock Q2BT/1 status devices` | `power=` as saved, the paired headset listed; connect it from its own button | Readiness 5 |
 | 11 | `$A /run/vamp/sys.sock Q2SYS/1 find`, then press any key | the jingle with the screen lit, stopped at the key | Find My Vamp's PWM |
-| 12 | `logread 2>/dev/null \| tail -50; dmesg \| tail -50` | no service restarting in a loop | |
+| 12 | `tail -50 /tmp/vamp-os-root/run/vamp/services.log; dmesg \| tail -50` | no service restarting in a loop | [where the services say things](#where-the-services-say-things) |
 
 Sound checks (7, 8) wait for a day the owner can listen; the rest stand.
 
@@ -254,6 +260,8 @@ Sound checks (7, 8) wait for a day the owner can listen; the rest stand.
 If the screen freezes and adb's shell answers but the image's commands hang or fail with `Transport endpoint is not connected`, the daemon has gone: the supervisor should already have rebooted (its line in `handoff.log`); if it did not, that is a finding, and `adb reboot` comes back.
 
 9. Keep the evidence: `adb pull /mnt/data/vamp/` and the answers above, into the needs-a-Q2 rows they settle.
+
+**The second card boot** (2026-11-28, image z22): the fallback and the boot as the first; the MCU took the click (`Q2SYS/1 click` answered `ok`, `q2sysd` holding no `/dev/jz_pwm`); no backlight class device, so [the backlight](sysd.md#the-backlight) is stock's PWM; Wi-Fi's cause and the lost service output as in [where the services say things](#where-the-services-say-things). One card boot reset itself about 6 minutes in, 3 minutes into a `Q2BT/1 status devices` ask that hung over adb, and came back to today's Vamp by itself; nothing recorded a cause (no pstore, nothing in `dmesg` or `boot.log`), and the same ask in the next card boot answered in a second, with 16 minutes up and memory flat. From the sources no path leads from `bt.sock` to `q2sysd`'s watchdog feed. Every card boot from now runs a watch script from the card (5 s: uptime, load, memory, each service's `wchan`, the kernel function it sleeps in, and `q2sysd`'s voluntary context switches, which stop rising if the loop that feeds the watchdog stalls), so another reset leaves its last state on the card.
 
 ## First boot on a Q2
 

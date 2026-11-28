@@ -9,6 +9,10 @@ test ! -e "$t/vendor"
 ln -sfn /vendor/module_driver "$t/module_driver"
 ln -sfn /vendor/firmware "$t/firmware"
 mkdir -p "$t/mnt/data" "$t/mnt/mmc"
+# /var/run a link to the /run tmpfs, as Buildroot's sysv and systemd skeletons have it (BR2_INIT_NONE's has none, so a
+# package's install leaves a directory there on the read-only root): wpa_supplicant's control socket is made under it
+rm -rf "$t/var/run"
+ln -sfn ../run "$t/var/run"
 # D-Bus's machine id (/etc/sv/dbus/run makes it each boot): /var/lib/dbus on the tmpfs, the root being read-only
 if [ -x "$t/usr/bin/dbus-daemon" ]; then
     mkdir -p "$t/var/lib"

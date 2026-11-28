@@ -212,6 +212,9 @@ def check_image(build, fs, manifest, perturb=None):
     check(os.readlink(fs/'etc/passwd') == '/run/vamp/passwd' and os.readlink(fs/'etc/group') == '/run/vamp/group'
           and (fs/'etc/passwd.base').read_text().startswith('root:x:0:0:') and (fs/'etc/group.base').read_text().startswith('root:x:0:'),
           "/etc/passwd and /etc/group are links into /run/vamp, the image's own users in the .base files")
+    # the root is read-only: /var/run must be the tmpfs, or wpa_supplicant cannot make its control socket (on the
+    # owner's Q2: "mkdir[ctrl_interface=/var/run/wpa_supplicant]: Read-only file system", Wi-Fi never up)
+    check(os.path.islink(fs/'var/run') and os.readlink(fs/'var/run') == '../run', '/var/run is a link to ../run, the tmpfs')
     check(not (fs/'etc/init.d').exists() or sorted(p.name for p in (fs/'etc/init.d').iterdir()) == ['rcK', 'rcS'],
           '/etc/init.d holds rcS and rcK alone')
     zones = (fs/'usr/share/vamp/timezones').read_text().splitlines() if (fs/'usr/share/vamp/timezones').exists() else []
@@ -245,9 +248,10 @@ def wav(path, seconds=1, rate=44100):
                      + b'data' + st.pack('<I', len(frames)) + frames)
 
 
-def play_check(fs, console, deadline, log, data):
+def play_check(fs, said, deadline, log, data):
     """(q2player connected, the song came back) through q2playd's Q2PLAY/1 socket in the booted image: a play of
-    song 1 (/mnt/mmc/song1.wav), and q2playd's word that q2player played it out or could not (no sound card here)."""
+    song 1 (/mnt/mmc/song1.wav), and q2playd's word that q2player played it out or could not (no sound card here),
+    read from said, the services' log (/run/vamp/services.log)."""
     lib = data/'vamp/library.db'
     end, songs = time.monotonic() + 60, []
     while time.monotonic() < end and not songs:  # q2libd's scan of the card (a bind mount, so in /proc/mounts)
@@ -260,7 +264,7 @@ def play_check(fs, console, deadline, log, data):
     check(songs == [(1, '/mnt/mmc/song1.wav', 60)], f'q2libd: the card scanned into /mnt/data/vamp/library.db through FFmpeg ({songs})')
     connected = False
     while time.monotonic() < deadline and not connected:
-        connected = b'q2playd: the player connected' in console.read_bytes() if console.exists() else False
+        connected = b'q2playd: the player connected' in said.read_bytes() if said.exists() else False
         time.sleep(0.5)
     sock = fs/'run/vamp/play.sock'
     try:
@@ -279,7 +283,7 @@ def play_check(fs, console, deadline, log, data):
     end = time.monotonic() + 40
     back = False
     while time.monotonic() < end and not back:
-        back = re.search(rb'q2playd: song 1 ended', console.read_bytes()) is not None
+        back = re.search(rb'q2playd: song 1 ended', said.read_bytes()) is not None if said.exists() else False
         time.sleep(0.5)
     return connected, replies == ['Q2PLAY/1 ok', 'ok'] and back, replies, reload
 
@@ -803,7 +807,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             time.sleep(0.5)
             drew = any(fb.read_bytes())
         if proc.poll() is None:
-            played = play_check(fs, work/'console.log', deadline, emu/'record', emu/'data' if card else fs/'mnt/data')
+            played = play_check(fs, fs/'run/vamp/services.log', deadline, emu/'record', emu/'data' if card else fs/'mnt/data')
         if adb and not card and proc.poll() is None:
             adb_checks(fs)
         if proc.poll() is None:
@@ -840,6 +844,11 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
                 o.kill()
             else:
                 o.close()
+    # each service's stdout and stderr in /run/vamp/services.log (usr/libexec/vamp/log), not the console: on a card
+    # boot that is the serial port, and the first card boot on the owner's Q2 lost every service's word to it
+    said = (fs/'run/vamp/services.log').read_bytes() if (fs/'run/vamp/services.log').exists() else b''
+    check(b'q2sysd: ' in said and b'input device(s)' in said and b'q2sysd: ' not in (work/'console.log').read_bytes(),
+          "the services' words in /run/vamp/services.log, not on the console")
     check(drew, 'q2ui drew into the framebuffer')
     check(bool(played) and played[0], 'q2player connected to q2playd' + ('' if played else ': not reached'))
     check(bool(played) and played[1], 'a song asked for over Q2PLAY/1 plays out through q2playd and q2player (alsa-lib\'s null card)'
@@ -848,7 +857,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         before, after, restarted = played[3]
         check(restarted, 'hot reload: q2ui ended from outside is started again within 5 s')
         check(before.get('state') == '2' and after.get('state') == '2' and before.get('id') == after.get('id') == '1'
-              and b'q2playd: the player went away' not in (work/'console.log').read_bytes().split(b'powering off')[0],  # before the hold's shutdown, which stops both
+              and b'q2playd: the player went away' not in said.split(b'powering off')[0],  # before the hold's shutdown, which stops both
               f'hot reload: q2playd keeps the song and q2player across q2ui\'s restart (state {before.get("state")} then '
               f'{after.get("state")}), and it plays out after')
     lines = (emu/'record').read_text().splitlines()
@@ -860,6 +869,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         logs.mkdir(parents=True, exist_ok=True)
         (logs/'timeline.txt').write_text(timeline)
         (logs/'console.log').write_bytes((work/'console.log').read_bytes())
+        (logs/'services.log').write_bytes(said)
     order = [s for s, _ in events]
 
     def at(pred):
