@@ -2726,6 +2726,25 @@ def api_status(binary, work):
                       diff and (min(diff), max(diff), len(diff)))
     return good
 
+
+def live_stats(binary, work):
+    """The stats file while the list moves, not only at rest (the coordinator's, 2026-11-28: a device read during a scroll
+    saw no update): written at most once a second as the loop runs, whole each time."""
+    run = Run(binary, work, 400)
+    try:
+        run.rest()
+        seen = []
+        threading = __import__('threading')
+        spin = threading.Thread(target=run.ticks, args=(40, 0.07))
+        spin.start()
+        for _ in range(3):
+            time.sleep(1.1)
+            seen.append(run.stats()['frames'])
+        spin.join()
+        return check('scrolling for 3 s, the stats file moves each second before the list rests', seen[0] < seen[1] < seen[2], seen)
+    finally:
+        run.end()
+
 def lit_folder(work, n):
     """A live run's folder made ahead (Run at=), so the backlight it reads is there from its start, lit."""
     d = folder(work, n)
@@ -3031,6 +3050,7 @@ def main():
             good &= pages(binary, work)
         if not only or 'live' in only:
             good &= live(binary, work)
+            good &= live_stats(binary, work)
             good &= routes(binary, work)
             good &= reload(binary, work)
             good &= swap(binary, work)

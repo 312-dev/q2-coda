@@ -58,6 +58,8 @@ extern uint64_t fb_panned_us; /* fb.c: when the last frame's pan was made */
 
 static void (*rest_hook)(void), (*stack_hook)(void);
 void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
+static void (*second_hook)(void);
+void ui_on_second(void (*fn)(void)) { second_hook = fn; }
 static int hold_key;
 static void (*hold_fn)(void);
 void ui_on_hold(int key, void (*fn)(void)) { hold_key = key, hold_fn = fn; }
@@ -456,6 +458,8 @@ int ui_run(void) {
         }
         showed = ui_frame(in, got);
         if (showed) rested = 0;
+        static uint64_t second_at; /* while it runs, once a second (the stats file, read live on a Q2) */
+        if (second_hook && mono_us() - second_at >= 1000000u) second_at = mono_us(), second_hook();
     }
     while (depth) {
         --depth;

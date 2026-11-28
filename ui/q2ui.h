@@ -272,6 +272,7 @@ extern int ui_reduce_motion;
 extern int ui_painting; /* 1 while a frame is drawn: marks and state changes are refused */
 int ui_run(void);       /* the loop, until ui_quit; the exit code */
 void ui_on_rest(void (*fn)(void));       /* called once each time the loop comes to rest */
+void ui_on_second(void (*fn)(void));     /* called at most once a second while the loop runs (frames or input) */
 void ui_on_stack(void (*fn)(void));      /* called when a page has opened or closed */
 void ui_on_hold(int key, void (*fn)(void)); /* a key held, on any page, is fn's and not the page's (Return: Control Center) */
 void ui_on_pull(void (*fn)(const input_t *e)); /* a finger pulled down from the screen's top edge, on any page: the
