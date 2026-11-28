@@ -52,7 +52,7 @@ The card app needs a copy of what the Q2 plays. `q2player`'s DSP chain (`player/
 
 ## Guest Play
 
-`q2-guest` already talks to BlueZ and bluealsa over D-Bus and decides on its own; demo's part is pausing the owner's music while a guest plays and resuming it after, which is Q2PLAY/1's `pause` and `resume`. It waits for Bluetooth from source (M2), because VampOS will not carry stock's bluetoothd.
+`q2-guest` already talks to BlueZ and bluealsa over D-Bus and decides on its own; demo's part is pausing the owner's music while a guest plays and resuming it after, which is Q2PLAY/1's `pause` and `resume`. Started with `--socket`, it serves its commands and state to `q2ui` as [Q2GUEST/1](platform/guest.md), which says when the UI pauses and resumes. It waits for Bluetooth from source (M2), because VampOS will not carry stock's bluetoothd.
 
 ## DLNA/UPnP renderer
 

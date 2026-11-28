@@ -7,9 +7,11 @@
  * name, with its own pairing agent), forwards the guest's track information to the car through
  * bluetoothd's shanling.bluez service and the car's buttons to the guest's phone. demo's payload
  * (patch/guest.c) starts it and does what only demo can: pause and resume the owner's music.
+ * Started with --socket PATH (VampOS), it also serves the same commands and fields as Q2GUEST/1
+ * on that socket (docs/platform/guest.md), the FIFO and the state file kept beside it.
  *
- * One thread: poll() on the bus, the FIFO and a 250 ms tick. Calls to BlueZ and bluealsa block for
- * at most QG_CALL_MS. */
+ * One thread: poll() on the bus, the FIFO, the socket's clients and a 250 ms tick. Calls to BlueZ
+ * and bluealsa block for at most QG_CALL_MS. */
 #include "coda_rc_sys.h"
 
 #ifndef CODA_HOST
@@ -124,6 +126,10 @@ int dbus_message_iter_close_container(DBusMessageIter *, DBusMessageIter *);
 #ifndef QG_SPOT /* librespot's status file and control socket (docs/internals.md#spotify) */
 #define QG_SPOT "/tmp/q2-librespot"
 #endif
+
+/* Q2GUEST/1, the socket VampOS's q2ui speaks (docs/platform/guest.md), when started with --socket */
+static int qg_trusted_dirty;  /* the Trusted Guests saved since watchers were last told */
+static void sock_changed(void); /* the state written: watchers get it */
 
 /* the timings; the tests shorten some */
 #define QG_TICK_MS 250
@@ -362,6 +368,7 @@ static void trusted_save(void) {
                                 qg.trusted[i].ask, qg.trusted[i].last, qg.trusted[i].name);
     mkdir(QG_DATA, 0755);
     write_whole(QG_TRUSTED, b, n, 1);
+    qg_trusted_dirty = 1; /* Q2GUEST/1's watchers are told after the answer */
 }
 
 static qg_trusted_t *trusted_find(const char *mac) {
@@ -745,6 +752,7 @@ static void state_write(void) {
     int m = snprintf(out, sizeof out, "seq=%u\n%s", ++qg.seq, b);
     write_whole(QG_STATE, out, (unsigned)m, 0);
     qg.written_at = qg_ms();
+    sock_changed();
 }
 
 static void event(const char *what, const char *name) {
@@ -1539,8 +1547,255 @@ static int name_has_owner(const char *name, char *owner, unsigned n) {
 
 static void on_term(int sig) { (void)sig, qg.quit = 1; }
 
-int main(void) {
+/* ---- Q2GUEST/1 (docs/platform/guest.md): the FIFO's commands and the state file's fields on a
+ * socket in the platform's common shape, for VampOS's q2ui. Served only with --socket PATH; without
+ * it nothing here runs, so today's Vamp (the FIFO and the state file, which stay) is unchanged ---- */
+
+#define QG_CLIENTS 8
+#define QG_CLIENT_LINE 512
+
+typedef struct {
+    int fd, hello, watch;
+    unsigned n;
+    char line[QG_CLIENT_LINE + 1];
+} qg_client_t;
+
+static qg_client_t qg_cl[QG_CLIENTS];
+static int qg_listen = -1;
+static const char *qg_sock_path;
+static unsigned qg_told_event; /* the event_seq watchers were last told */
+
+static void sock_say(qg_client_t *c, const char *s) {
+    unsigned n = (unsigned)strlen(s);
+    char b[4096 + 64];
+    if (n + 1 >= sizeof b) n = sizeof b - 2;
+    memcpy(b, s, n);
+    b[n++] = '\n';
+    if (c->fd >= 0 && write(c->fd, b, n) != (ssize_t)n) close(c->fd), c->fd = -1;
+}
+
+static void sock_enc(char *out, unsigned room, const char *in) {
+    static const char hex[] = "0123456789ABCDEF";
+    unsigned j = 0;
+    for (const unsigned char *p = (const unsigned char *)in; *p && j + 4 < room; ++p)
+        if (*p < 0x21 || *p == '%' || *p == '"' || *p == '=' || *p == 0x7f)
+            out[j++] = '%', out[j++] = hex[*p >> 4], out[j++] = hex[*p & 15];
+        else
+            out[j++] = (char)*p;
+    out[j] = 0;
+}
+
+static int sock_hex(char c) {
+    return c >= '0' && c <= '9' ? c - '0' : (c | 32) >= 'a' && (c | 32) <= 'f' ? (c | 32) - 'a' + 10 : -1;
+}
+
+/* Percent-decoded in place; 0 when the text holds a control byte once decoded. */
+static int sock_dec(char *s) {
+    char *o = s, *start = s;
+    for (; *s; ++s)
+        if (*s == '%' && sock_hex(s[1]) >= 0 && sock_hex(s[2]) >= 0)
+            *o++ = (char)(sock_hex(s[1]) << 4 | sock_hex(s[2])), s += 2;
+        else
+            *o++ = *s;
+    *o = 0;
+    for (const unsigned char *p = (const unsigned char *)start; *p; ++p)
+        if (*p < 0x20 || *p == 0x7f) return 0;
+    return 1;
+}
+
+/* `status` and its fields: the state file's lines but its seq and the one-shot fields, which are
+ * `event` lines on the socket (event, event_seq, eventname) or demo's alone (netdeny, netdeny_seq). */
+static void sock_status(char *out, unsigned room) {
+    unsigned j = (unsigned)snprintf(out, room, "status");
+    for (const char *l = qg.last; *l && j + 8 < room;) {
+        const char *nl = strchr(l, '\n'), *eq = strchr(l, '=');
+        if (!nl) break;
+        if (eq && eq < nl) {
+            char key[32], val[1024];
+            unsigned k = (unsigned)(eq - l), v = (unsigned)(nl - eq - 1);
+            if (k < sizeof key && v < sizeof val) {
+                memcpy(key, l, k), key[k] = 0;
+                memcpy(val, eq + 1, v), val[v] = 0;
+                if (strncmp(key, "event", 5) && strncmp(key, "netdeny", 7)) {
+                    char e[3 * sizeof val];
+                    sock_enc(e, sizeof e, val);
+                    j += (unsigned)snprintf(out + j, room - j, " %s=%s", key, e);
+                }
+            }
+        }
+        l = nl + 1;
+    }
+    if (j >= room) out[room - 1] = 0;
+}
+
+static void sock_watchers(const char *s) {
+    for (int i = 0; i < QG_CLIENTS; ++i)
+        if (qg_cl[i].fd >= 0 && qg_cl[i].watch) sock_say(&qg_cl[i], s);
+}
+
+static void sock_changed(void) {
+    if (qg_listen < 0) return;
+    char b[8192];
+    sock_status(b, sizeof b);
+    sock_watchers(b);
+    if (qg.event_seq != qg_told_event) {
+        char w[64], n[3 * QG_NAME];
+        qg_told_event = qg.event_seq;
+        sock_enc(w, sizeof w, qg.event);
+        sock_enc(n, sizeof n, qg.event_name);
+        snprintf(b, sizeof b, "event what=%s name=%s", w, n);
+        sock_watchers(b);
+    }
+}
+
+static void sock_flush(void) {
+    if (qg_trusted_dirty && qg_listen >= 0) sock_watchers("trusted changed");
+    qg_trusted_dirty = 0;
+}
+
+static int one_of(const char *s, const char *const *words) {
+    for (; *words; ++words)
+        if (s && !strcmp(s, *words)) return 1;
+    return 0;
+}
+
+/* One command: checked here, then done by command() as the FIFO's line would be. */
+static void sock_line(qg_client_t *c, char *l) {
+    if (!c->hello) {
+        if (!strcmp(l, "Q2GUEST/1"))
+            c->hello = 1, sock_say(c, "Q2GUEST/1 ok");
+        else
+            sock_say(c, "err version"), close(c->fd), c->fd = -1;
+        return;
+    }
+    static const char *const onoff[] = { "on", "off", 0 }, *const keys[] = { "play", "pause", "toggle", "next", "prev", 0 },
+                              *const allows[] = { "ask", "trusted", 0 }, *const leaves[] = { "resume", "stay", 0 },
+                              *const bare[] = { "on", "off", "open", "close", "stop", 0 };
+    char *arg = strchr(l, ' '), cmd[QG_CLIENT_LINE + 32];
+    if (arg) *arg++ = 0;
+    const char *err = 0;
+    *cmd = 0;
+    if (!strcmp(l, "caps") && !arg) {
+        sock_say(c, "caps status trusted watch on off open close answer stop key name allow leave hotspot forget ask rename");
+        return;
+    } else if (!strcmp(l, "status") && !arg) {
+        char b[8192];
+        state_write(); /* the state as it is now, not as of the last tick */
+        sock_status(b, sizeof b);
+        sock_say(c, b);
+        return;
+    } else if (!strcmp(l, "trusted") && !arg) {
+        for (int i = 0; i < qg.n_trusted; ++i) {
+            char m[3 * 48], n[3 * QG_NAME], b[512];
+            sock_enc(m, sizeof m, qg.trusted[i].mac);
+            sock_enc(n, sizeof n, qg.trusted[i].name);
+            snprintf(b, sizeof b, "guest mac=%s ask=%d last=%ld name=%s", m, qg.trusted[i].ask, qg.trusted[i].last, n);
+            sock_say(c, b);
+        }
+    } else if (!strcmp(l, "watch") && !arg)
+        c->watch = 1;
+    else if (one_of(l, bare))
+        err = arg ? "argument" : 0, snprintf(cmd, sizeof cmd, "%s", l);
+    else if (!strcmp(l, "answer")) {
+        static const char *const asked[] = { "once", "always", "decline", 0 }, *const replaced[] = { "keep", "replace", 0 };
+        if (one_of(arg, asked) && qg.ask)
+            snprintf(cmd, sizeof cmd, "%s", !strcmp(arg, "decline") ? "decline" : !strcmp(arg, "once") ? "allow-once" : "allow-always");
+        else if (one_of(arg, replaced) && qg.replace)
+            snprintf(cmd, sizeof cmd, "%s", arg);
+        else
+            err = one_of(arg, asked) || one_of(arg, replaced) ? "answer" : "argument";
+    } else if (!strcmp(l, "key"))
+        one_of(arg, keys) ? (void)snprintf(cmd, sizeof cmd, "key %s", arg) : (void)(err = "argument");
+    else if (!strcmp(l, "allow"))
+        one_of(arg, allows) ? (void)snprintf(cmd, sizeof cmd, "allow %s", arg) : (void)(err = "argument");
+    else if (!strcmp(l, "leave"))
+        one_of(arg, leaves) ? (void)snprintf(cmd, sizeof cmd, "leave %s", arg) : (void)(err = "argument");
+    else if (!strcmp(l, "name")) {
+        if (!arg || !sock_dec(arg) || strlen(arg) >= QG_NAME)
+            err = "argument";
+        else
+            snprintf(cmd, sizeof cmd, "name %s", arg);
+    } else if (!strcmp(l, "hotspot")) {
+        if (one_of(arg, onoff))
+            snprintf(cmd, sizeof cmd, "hotspot %s", arg);
+        else if (arg && !strncmp(arg, "pass ", 5) && sock_dec(arg + 5) && qg_pass_ok(arg + 5))
+            snprintf(cmd, sizeof cmd, "hotspot-pass %s", arg + 5);
+        else
+            err = arg && !strncmp(arg, "pass ", 5) ? "pass" : "argument";
+    } else if (!strcmp(l, "forget") || !strcmp(l, "ask") || !strcmp(l, "rename")) {
+        char *rest = arg ? strchr(arg, ' ') : 0;
+        if (rest) *rest++ = 0;
+        int args_ok = arg && (!strcmp(l, "forget") ? !rest
+                              : !strcmp(l, "ask")  ? rest && (!strcmp(rest, "0") || !strcmp(rest, "1"))
+                                                   : rest && *rest && sock_dec(rest) && strlen(rest) < QG_NAME);
+        if (!args_ok)
+            err = "argument";
+        else if (!trusted_find(arg))
+            err = "none";
+        else
+            snprintf(cmd, sizeof cmd, "%s %s%s%s", l, arg, rest ? " " : "", rest ? rest : "");
+    } else
+        err = "command";
+    if (err) {
+        char b[64];
+        snprintf(b, sizeof b, "err %s", err);
+        sock_say(c, b);
+        return;
+    }
+    if (*cmd) command(cmd);
+    sock_say(c, "ok");
+    state_write(); /* a change the command made reaches watchers after its answer */
+    sock_flush();
+}
+
+static void sock_open(const char *path) {
+    struct sockaddr_un a;
+    memset(&a, 0, sizeof a);
+    a.sun_family = AF_UNIX;
+    copy(a.sun_path, path, sizeof a.sun_path);
+    for (int i = 0; i < QG_CLIENTS; ++i) qg_cl[i].fd = -1;
+    unlink(path);
+    int s = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (s < 0) return;
+    if (bind(s, (const void *)&a, sizeof a) || chmod(path, 0600) || listen(s, QG_CLIENTS)) {
+        close(s);
+        return;
+    }
+    qg_listen = s, qg_sock_path = path;
+}
+
+static void sock_accept(void) {
+    int fd = accept(qg_listen, 0, 0);
+    if (fd < 0) return;
+    for (int i = 0; i < QG_CLIENTS; ++i)
+        if (qg_cl[i].fd < 0) {
+            memset(&qg_cl[i], 0, sizeof qg_cl[i]);
+            qg_cl[i].fd = fd;
+            return;
+        }
+    close(fd); /* the ninth */
+}
+
+static void sock_read(qg_client_t *c) {
+    char buf[512];
+    ssize_t got = read(c->fd, buf, sizeof buf);
+    if (got <= 0) {
+        close(c->fd), c->fd = -1;
+        return;
+    }
+    for (ssize_t i = 0; i < got && c->fd >= 0; ++i)
+        if (buf[i] == '\n') {
+            c->line[c->n] = 0;
+            c->n = 0;
+            sock_line(c, c->line);
+        } else if (c->n < QG_CLIENT_LINE)
+            c->line[c->n++] = buf[i];
+}
+
+int main(int argc, char **argv) {
     char pid[16];
+    for (int i = 1; i + 1 < argc; ++i)
+        if (!strcmp(argv[i], "--socket")) qg_sock_path = argv[i + 1];
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);
     signal(SIGHUP, on_term);
@@ -1581,13 +1836,21 @@ int main(void) {
     hotspot_apply();
     int bus_fd = -1;
     dbus_connection_get_unix_fd(qg.bus, &bus_fd);
+    if (qg_sock_path) sock_open(qg_sock_path);
     while (!qg.quit && dbus_connection_get_is_connected(qg.bus)) {
-        struct pollfd p[2] = { { bus_fd, POLLIN, 0 }, { qg.fifo, POLLIN, 0 } };
-        poll(p, 2, QG_TICK_MS);
+        struct pollfd p[3 + QG_CLIENTS] = { { bus_fd, POLLIN, 0 }, { qg.fifo, POLLIN, 0 }, { qg_listen, POLLIN, 0 } };
+        for (int i = 0; i < QG_CLIENTS; ++i) p[3 + i].fd = qg_listen < 0 ? -1 : qg_cl[i].fd, p[3 + i].events = POLLIN;
+        poll(p, 3 + QG_CLIENTS, QG_TICK_MS);
         dbus_connection_read_write(qg.bus, 0);
         while (dbus_connection_dispatch(qg.bus) == DBUS_DATA_REMAINS) {}
         fifo_read();
+        if (qg_listen >= 0) {
+            if (p[2].revents & POLLIN) sock_accept();
+            for (int i = 0; i < QG_CLIENTS; ++i)
+                if (p[3 + i].fd >= 0 && qg_cl[i].fd == p[3 + i].fd && p[3 + i].revents) sock_read(&qg_cl[i]);
+        }
         tick();
+        sock_flush();
         dbus_connection_flush(qg.bus);
     }
     if (qg.ask) ask_end(0, 0, "failed");
@@ -1599,5 +1862,6 @@ int main(void) {
     unlink(QG_STATE);
     unlink(QG_PID);
     unlink(QG_CMD);
+    if (qg_listen >= 0) unlink(qg_sock_path);
     return 0;
 }

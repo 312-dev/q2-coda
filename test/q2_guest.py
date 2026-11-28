@@ -19,6 +19,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CC = ['cc', '-Wall', '-Wextra', '-Werror']
+SOURCE = pathlib.Path(os.environ.get('Q2GUEST_SRC') or ROOT / 'patch/q2_guest.c')  # another copy, to show a gap fails
 PHONE, SAM, CAR = 'AA:BB:CC:DD:EE:01', 'AA:BB:CC:DD:EE:02', '11:22:33:44:55:66'
 SBC_48K = '11150235'  # 48 kHz joint stereo, 16 blocks, 8 subbands, bit pool 2 to 53
 AAC_256K = '40010483e800'  # MPEG-4 AAC LC, 44.1 kHz, stereo, VBR up to 256,000 bit/s (octets 3 to 5, less VBR's bit)
@@ -78,7 +79,7 @@ class Rig:
                 'QG_MAIN_SOURCE': f'"echo MAIN source >> {self.log}"', 'QG_MAIN_STOCK': f'"echo MAIN stock >> {self.log}"',
                 'QG_HOTSPOT': f'"{d}/bin/q2-hotspot"', 'QG_HOTSPOT_CHECK_MS': '1000', 'QG_SPOT': f'"{d}/spot"'}
         S.run(CC + ['-DCODA_HOST', *(f'-D{k}={v}' for k, v in defs.items()), '-o', str(self.helper),
-                    str(ROOT / 'patch/q2_guest.c'), '-l:libdbus-1.so.3'], check=True)
+                    str(SOURCE), '-I', str(ROOT / 'patch'), '-l:libdbus-1.so.3'], check=True)
         self.main = S.Popen(['/usr/bin/python3', str(fake), 'main', str(d / 'main.ctl'), str(self.log)], env=self.env)
         self.procs.append(self.main)
         self.expect('UP main')
@@ -143,8 +144,8 @@ class Rig:
         os.write(fd, (line + '\n').encode())
         os.close(fd)
 
-    def start_helper(self):
-        self.q2 = S.Popen([str(self.helper)], env=self.env)
+    def start_helper(self, *args):
+        self.q2 = S.Popen([str(self.helper), *args], env=self.env)
         self.procs.append(self.q2)
 
     def close(self):
@@ -539,5 +540,34 @@ def run(rig, d):
     check('SIGTERM: the state file goes (reads as off)', not (d / 'run.state').exists())
 
 
+def test_conformance():
+    """docs/platform/guest.md's transcripts against q2-guest's Q2GUEST/1 socket (--socket), each block on a daemon
+    started afresh from the same settings and Trusted Guests, beside the stand-in BlueZ with no device"""
+    sys.path.insert(0, str(ROOT / 'test'))
+    import conformance as C
+    os.environ.setdefault('Q2_FAKE_BLUEALSA', 'own')
+    with tempfile.TemporaryDirectory(prefix='q2-guest-api-') as tmp:
+        d = pathlib.Path(tmp)
+        rig = Rig.__new__(Rig)
+        try:
+            rig.__init__(d)
+            sock = d / 'guest.sock'
+            for block in C.blocks('guest.md'):
+                if getattr(rig, 'q2', None):
+                    rig.q2.terminate()
+                    rig.q2.wait(5)
+                (d / 'data/config').write_text('enabled=1\nname=Test Q2\nallow=ask\nleave=resume\nhotspot=0\n'
+                                               'hotspot_pass=tulip-river-42\n')
+                (d / 'data/trusted').write_text("AA:BB:CC:DD:EE:03\t0\t1700000000\tSam's iPhone\n")
+                rig.start_helper('--socket', str(sock))
+                rig.wait(sock.exists, 'the socket is there')
+                C.replay(sock, block)
+            C.check_coverage('guest.md')
+        finally:
+            rig.close()
+
+
 if __name__ == '__main__':
     main()
+    test_conformance()
+    print('ok   docs/platform/guest.md\'s transcripts')
