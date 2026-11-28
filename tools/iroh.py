@@ -2,7 +2,7 @@
 """q2-iroh, Car Remote's iroh sidecar (docs/remote.md#car-remote-across-networks), for the image.
 
 The binary is Rust (remote/iroh-sidecar), cross-built for the Q2 by remote/iroh-sidecar/q2/build.sh with Rust
-nightly (PIN's: nightly-2026-11-18, rustc 1.102.0-nightly 59cbdee2e) and iroh patched by
+nightly-2026-11-18 (rustc 1.102.0-nightly 59cbdee2e; build.sh's TOOLCHAIN names it) and iroh patched by
 q2/iroh-restun.patch. A firmware build needs no Rust: it takes the binary from the third-party cache, where it is
 kept under its SHA-256, and PIN below names the one to take and the crate it was built from. A changed crate stops the
 build until it is built and pinned again:
@@ -11,7 +11,7 @@ build until it is built and pinned again:
     python3 tools/iroh.py --check    # the pinned binary is in the cache and the crate is the pinned one
 
 `tools/build.py --build-iroh` builds it the same way inside a firmware build and uses what it made, pinned or
-not (it says when the pin is stale). Building needs what q2/build.sh says (nightly with rust-src, clang, lld,
+not (it says when the pin is stale). Building needs what q2/build.sh says (nightly-2026-11-18 with rust-src, clang, lld,
 llvm-ar, llvm-strip, the stock rootfs and the Codescape headers tools/thirdparty.py keeps); CARGO_HOME,
 RUSTUP_HOME and CARGO_TARGET_DIR are passed through."""
 import hashlib, os, pathlib, shutil, subprocess, sys
@@ -22,7 +22,7 @@ CACHE = pathlib.Path(os.environ.get('Q2_THIRDPARTY_CACHE') or pathlib.Path.home(
 
 # (the stripped binary's SHA-256, its size, crate_sha256() of the crate it was built from)
 PIN = ('ca356d46aa4ccb0d7386fdc33ec4eb26fa9e82e73bafb182b951070ac65c8f54', 5325056,
-       '6b9e543db5141b6c7a378d226772e181285c6f0552ff7544400f5b02564090a2')
+       '1e18ff1be30bd28a34449f665f9597dd078c2969b426c2f6154a6be2625bbb77')
 
 
 def crate_sha256():

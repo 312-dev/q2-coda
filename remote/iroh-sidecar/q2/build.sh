@@ -6,10 +6,12 @@
 # STOCK_LIB names a stock V1.36 rootfs's /lib (default: Q2_STOCKFS's, else the unpacked rootfs
 # tools/thirdparty.py keeps, as tools/player.py links against) and
 # GLIBC_INCLUDE glibc 2.28's NaN-2008 headers (default: the Codescape toolchain thirdparty.py
-# fetches). Needs Rust nightly with rust-src, clang, lld, llvm-ar and llvm-strip.
+# fetches). Needs Rust's nightly-2026-11-18 (TOOLCHAIN, the one tools/iroh.py's PIN was built with: another
+# nightly makes another binary, or none) with rust-src, clang, lld, llvm-ar and llvm-strip.
 # mipsel-q2-linux-gnu.json, q2-cc, q2-link, start.c and nonshared.c are DiamondBond/q2-librespot's
 # contrib/shanlingq2 files (MIT); q2-link also links a shared object without start.o.
 set -eu
+TOOLCHAIN=nightly-2026-11-18
 HERE=$(cd "$(dirname "$0")" && pwd)
 CRATE=$(cd "$HERE/.." && pwd)
 OUT=${1:-${CARGO_TARGET_DIR:-$CRATE/target}/q2}
@@ -44,14 +46,14 @@ rm -rf "$BUILD" "$OUT/iroh"
 mkdir -p "$BUILD"
 cp -a "$CRATE/Cargo.toml" "$CRATE/Cargo.lock" "$CRATE/src" "$BUILD/"
 cd "$BUILD"
-cargo +nightly fetch --locked
+cargo +"$TOOLCHAIN" fetch --locked
 IROH_SRC=$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/iroh-1.5.0 | head -1)
 cp -a "$IROH_SRC" "$OUT/iroh"
 patch -s -p1 -d "$OUT/iroh" < "$HERE/iroh-restun.patch"
 CC_mipsel_q2_linux_gnu="$HERE/q2-cc" \
 AR_mipsel_q2_linux_gnu=llvm-ar \
 CARGO_TARGET_MIPSEL_Q2_LINUX_GNU_LINKER="$HERE/q2-link" \
-cargo +nightly build --release -Zbuild-std=std,panic_abort -Zjson-target-spec \
+cargo +"$TOOLCHAIN" build --release -Zbuild-std=std,panic_abort -Zjson-target-spec \
     --config "patch.crates-io.iroh.path=\"$OUT/iroh\"" \
     --target "$HERE/mipsel-q2-linux-gnu.json"
 grep -q 'from_secs(300)' "$OUT/iroh/src/socket.rs" || { echo "q2-iroh: iroh-restun.patch not applied" >&2; exit 1; }
