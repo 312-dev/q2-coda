@@ -618,6 +618,12 @@ def adb_checks(fs, keys=None, closed_s=15, wait_s=30):
     want = (fs/'etc/vamp-release').read_bytes()
     check(got == want, f'adb: a trusted key gets in over Wi-Fi and reads the image\'s /etc/vamp-release{"" if got == want else ": " + repr(got)}')
     try:
+        ask = vamp.Device(dict(target), key).exec_out('q2ask /run/vamp/sys.sock Q2SYS/1 battery; echo rc=$?').decode(errors='replace')
+    except (OSError, vamp.AdbError, TimeoutError) as e:
+        ask = repr(e)
+    check(ask.startswith('Q2SYS/1 ok\nbattery level=') and ask.rstrip().endswith('rc=0'),
+          f'q2ask: a shell on the Q2 asks q2sysd for the battery (docs/vamp-os-base.md#first-card-boot) ({ask!r})')
+    try:
         vamp.Device(dict(target), other).exec_out('id')
         refused = False
     except (vamp.Unauthorized, vamp.AdbError, OSError, TimeoutError):

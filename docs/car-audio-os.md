@@ -16,7 +16,7 @@ Car Audio ([iphone-mode](iphone-mode.md#car-audio-in-the-image)) is kept in Vamp
 ## What is missing
 
 - **The car's cover**: `q2-iap` looks in Cover Flow's cache (`/mnt/mmc/.coverflow`) and the server covers; q2libd's covers (`/mnt/mmc/.vamp/covers/`, [libd: Covers](libd.md#covers)) are keyed otherwise, so a card song's cover reaches the car only through q2-iap's own ffmpeg path, which needs an `ffmpeg` the image does not have.
-- **Shuffle and repeat from the car** (`mode` on the command queue): `q2playd` has no `mode` verb.
+- **Shuffle and repeat from the car**: `q2-iap` reads them from the now file and sends the car no way to set them; `q2playd` takes `mode SHUFFLE REPEAT` on the command queue ([playd: The play mode](playd.md#the-play-mode)) should it send one.
 
 ## Tests
 

@@ -389,6 +389,34 @@ Declared in the manifest, each used by a Vamp feature first:
 
 Not extension points, on purpose: code loaded into `q2player` or `q2ui` (a plugin that crashes takes the music or the screen with it; EQ presets and themes are data instead), and kernel modules.
 
+## Migration readiness
+
+What the owner would lose or notice running Vamp OS by [card boot](vamp-os-base.md#card-boot) as a daily driver, as of 2026-11-27 (feat/vamp-os-base, `q2ui` at `Q2UI_COMMIT`), most felt first. **Missing**: not built. **Partial**: built, a part missing. **Device**: built and tested here; only a Q2 proves it. **Owner**: waits on an owner decision. The first card boot's checks are [First card boot](vamp-os-base.md#first-card-boot).
+
+| # | What | State | Detail |
+| --- | --- | --- | --- |
+| 1 | Sound from the headphone DAC with no `demo` | Device | `demo` powers the DAC and sets its PCM mode before each song (`dac_take`); whether `q2player`'s own `/dev/shanling_dac` handling is enough, and the volume law in dB ([playd: The volume](playd.md#the-volume)) |
+| 2 | The 4.4 mm and 3.5 mm outputs | Partial | Plugs are seen and an unplug pauses ([sysd: The jacks](sysd.md#the-jacks)); the switch between outputs (the headset-mode ioctl, the DAC's power, the song started again) is not built |
+| 3 | The screen going dark and lighting | Device | `bl_power`, the brightness scale, the double tap ([sysd: Needs a Q2](sysd.md#needs-a-q2)) |
+| 4 | The UI's pages | Partial | `q2ui` is the UI agent's: no Bluetooth page or pairing notice, no stars, album favourite or shuffle and repeat buttons yet (`q2playd` has their verbs), no Q2UI/1 asks served (LocalSend's accept, Car Remote's pairing card), no EQ page |
+| 5 | Bluetooth headphones | Partial | `q2btd` connects, routes and keeps levels ([btd](btd.md)); pairing a new headset needs the UI's notice; per-device settings, ear detection and the AirPods handshake missing |
+| 6 | Standby | Device | `mem` suspend with Vamp OS's services, its wake sources ([sysd](sysd.md#needs-a-q2)) |
+| 7 | Power off, battery, charging, Charge Limit | Device | Built ([sysd](sysd.md)); `poweroff` reaching the PMIC, `PE22` through the GPIO class |
+| 8 | Server songs | Partial | The catplay, offline copies, Download Ahead, a streamed queue at a restore; a song played while it arrives (`grow`), Retry and Skip missing ([playd](playd.md#what-is-missing)) |
+| 9 | Key Tone (the Clicker) | Missing | Stock's `cmd_mcu` and the MCU firmware load are `demo`'s; `q2sysd` has the buzzer through `/dev/jz_pwm` (Find My Vamp) but no click; the click in the headphones (`mcl-click`) is not sent |
+| 10 | Radio (`q2tuner`) | Missing | Not in the image; as a source of `q2playd` it needs `q2ui`'s page |
+| 11 | Online lyrics | Missing | Neither the lookup nor a page draws them |
+| 12 | Guest Play | Missing | `q2-guest` not packaged ([services](vamp-os-services.md#guest-play)) |
+| 13 | Wi-Fi, network time | Device | `q2netd` built; association and DHCP on the real radio ([netd](netd.md#needs-a-q2)) |
+| 14 | USB: storage, USB DAC, adb, Car Audio | Device | Built; the gadgets on the real controller ([sysd](sysd.md#needs-a-q2), [dacloop](dacloop.md#needs-a-q2), [car-audio-os](car-audio-os.md#needs-a-q2)) |
+| 15 | Car Remote | Partial | LAN and Bluetooth LE built ([carrd](carrd.md)); `scan` and `radio` missing; across networks (`q2-iroh`) is Rust: Owner |
+| 16 | CUE tracks | Missing | Neither `q2libd` nor `q2playd` splits a CUE sheet |
+| 17 | AAC files (M4A) | Owner | No C++ in the toolchain for the decoder (the owner's decision: off) |
+| 18 | Audiobooks, Podcasts | Owner | Deferred by the owner's ruling |
+| 19 | Updates | Partial | `q2pkgd download` fetches a release for the next card boot; installing to flash is not done on the owner's Q2 until a recovery is seen working |
+
+Built and tested here, so not on the list: the library and its server catalogues, playback, the queue, shuffle and repeat, gapless, Smart Crossfade, Mono and Swap L/R, ratings, likes, albums' hearts and the card's copy, play counts, Resume and Memory Playback, the Q2PLAY/1 and Q2LIB/1 sockets, scrobbling, the DLNA renderer, the AirPlay sender's host, LocalSend's receive side, Find My Vamp, heat, the watchdog, the clock, a low battery, Auto Standby and Auto Power Off.
+
 ## Milestones
 
 Each is shippable on its own and has a switch back. Order: what the owner uses every day first, then the foundation for others, then the system underneath. "Q2" marks work that needs a Q2 on a desk.

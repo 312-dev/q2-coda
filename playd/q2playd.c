@@ -224,8 +224,9 @@ static void player_send(const char *name, const char *arg) {
 }
 
 /* set-songurl or set-nexturl as demo's mclStartPlayer builds it (docs/player.md#commands): the start (ss, seconds), the
- * cache in KB by the file's kind and its fill percent, Gapless off (no preload in this slice), the Q2's hardware type
- * 17. */
+ * cache in KB by the file's kind and its fill percent, the Gapless setting, the Q2's hardware type 17; set-gapless as
+ * mclAutoChange sends it, its cache -1 and no hardware type. */
+static int gapless_on(void);
 static void send_song(const char *cmd, const char *file, int ss) {
     char url[1100], arg[1200];
     size_t j = 0;
@@ -237,8 +238,21 @@ static void send_song(const char *cmd, const char *file, int ss) {
     int cache = 512, fill = 20;
     if (dot && (!strcasecmp(dot, ".ape") || !strcasecmp(dot, ".flac"))) cache = 1024;
     if (dot && (!strcasecmp(dot, ".dff") || !strcasecmp(dot, ".dsf") || !strcasecmp(dot, ".iso"))) cache = 4096, fill = 50;
-    snprintf(arg, sizeof arg, "%s|ss=%d|%d|%d|0|17|90", url, ss, cache, fill);
+    if (!strcmp(cmd, "set-gapless")) snprintf(arg, sizeof arg, "%s|ss=%d|-1|%d|%d|90", url, ss, fill, gapless_on());
+    else snprintf(arg, sizeof arg, "%s|ss=%d|%d|%d|%d|17|90", url, ss, cache, fill, gapless_on());
     player_send(cmd, arg);
+}
+
+/* ---- Gapless (docs/playd.md#gapless) ----
+ * demo's mclAutoChange: with [PLAYSET] GAPLESS on, a song of 3 s or more less than 6 s from its end has the next song
+ * sent ahead as set-gapless, never a DSD file (.dsf, .dff, .iso) either side; the player opens it on its own thread and
+ * plays it at the end with nothing between, so the end's exit sends nothing (mclNextSong(1) only moves its index). Any
+ * other change of what plays next first sends mcl-closegapless, as stock's queue edits do. */
+#define GAPLESS_MIN_S 3
+#define GAPLESS_AHEAD_S 6
+static struct { int sent, at; } gl;
+static void gapless_forget(void) {
+    if (gl.sent) player_send("mcl-closegapless", "null"), gl.sent = 0;
 }
 
 /* The song at q.order[q.at] to the player: set-songurl when nothing plays, set-nexturl to cut the one that does. */
@@ -308,6 +322,7 @@ static void path_lookup_want(void) {
 static void resume_leave(void);
 static int start_from(int at, int ss) {
     resume_leave(); /* the song read before keeps its place; the one started is read anew */
+    gapless_forget();
     while (at >= 0 && at < q.n) {
         q.at = at;
         if (q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]])) {
@@ -340,6 +355,7 @@ static void source_end(const char *why);
 static void source_drop(void);
 
 static void stop(void) {
+    gapless_forget();
     if (q.loaded) {
         player_send("mcl-stop", "null");
         q.expect_cut = 1;
@@ -352,8 +368,11 @@ static void stop(void) {
 static void reshuffle(int first);
 static int pm_shuffle(void);
 
+static int gapless_took(void);
 static void ended(int error) {
     logf_("song %d %s", q.n && !q.paths ? q.ids[q.order[q.at]] : 0, error ? "did not play" : "ended");
+    if (!error && !src.on && gapless_took()) return; /* the player plays the preloaded song on alone */
+    gl.sent = 0;
     q.loaded = 0;
     if (src.on) { /* a source's URL: its holder is told and the queue given back */
         source_end(error ? "error" : "end");
@@ -378,7 +397,7 @@ static void ended(int error) {
     ++q.seq;
 }
 
-static void listen_tick(int sec, int len), resume_tick(int sec, int len);
+static void listen_tick(int sec, int len), resume_tick(int sec, int len), gapless_tick(int sec, int len);
 
 static void player_message(const char *name, const char *arg) {
     if (!strcmp(name, "player-status")) {
@@ -394,6 +413,7 @@ static void player_message(const char *name, const char *arg) {
             if (len != q.len_s) q.len_s = len, ++q.seq;
             if (pos * 1000 != q.pos_ms) q.pos_ms = pos * 1000, ++q.seq;
             listen_tick(pos, len), resume_tick(pos, len);
+            gapless_tick(pos, len);
         }
     }
 }
@@ -985,6 +1005,7 @@ static void reshuffle(int first) {
  * first, the rest drawn) or off (its own order, at the song playing). 0 set; -1 refused. */
 static int set_mode(int shuffle, int repeat) {
     if (shuffle < -1 || shuffle > 1 || repeat < -1 || repeat > 2) return -1;
+    gapless_forget();
     int on = shuffle >= 0 ? shuffle : pm_shuffle(), rep = repeat >= 0 ? repeat : pm_repeat();
     if (rep != 1 && pm.rep_off != (rep == 0)) pm.rep_off = rep == 0, ini_set("IPOD", "NPREPOFF", pm.rep_off);
     if (pm.shuf_one != on) pm.shuf_one = on, ini_set("IPOD", "NPSHUFONE", pm.shuf_one);
@@ -2447,6 +2468,7 @@ static void stream_take(unsigned seq, const char *m3u) {
         return;
     }
     char *keep = q.paths[q.at];
+    gapless_forget();
     for (int i = 0; i < q.np; ++i)
         if (i != q.at) free(q.paths[i]);
     q.paths[0] = keep, q.np = q.n = 1, q.at = 0;
@@ -2608,6 +2630,169 @@ static void memory_restore(void) {
     logf_("the kept queue: %d songs, song %d at %d s", kept, q.at + 1, sec);
 }
 
+static int gapless_on(void) { /* [PLAYSET] GAPLESS, read again when config.ini changes */
+    static long long stamp = -2;
+    static int on;
+    long long st = file_stamp(path("/mnt/data/config.ini"));
+    if (st != stamp) {
+        char *text = read_all(path("/mnt/data/config.ini"));
+        on = text ? ini_get(text, "PLAYSET", "GAPLESS", 0) == 1 : 0;
+        free(text), stamp = st;
+    }
+    return on;
+}
+
+static int dsd(const char *p) {
+    const char *dot = strrchr(p, '.');
+    return dot && (!strcasecmp(dot, ".dsf") || !strcasecmp(dot, ".dff") || !strcasecmp(dot, ".iso"));
+}
+
+/* the play order's index after the song playing, as the end would take it: the same song for Repeat One, the first
+ * again for Repeat All unshuffled (a shuffle is drawn again there), -1 for none known yet */
+static int gapless_next(void) {
+    if (pm.mode == 1) return q.at;
+    if (q.at + 1 < q.n) return q.at + 1;
+    return !q.paths && !q.shuffle && pm.mode == 3 && q.n ? 0 : -1;
+}
+
+/* index at's file into out, q's own fields as they were */
+static int peek_file(int at, char *out, size_t room) {
+    char title[sizeof q.title], artist[sizeof q.artist], album[sizeof q.album], file[sizeof q.file], row[sizeof q.row_url];
+    memcpy(title, q.title, sizeof title), memcpy(artist, q.artist, sizeof artist), memcpy(album, q.album, sizeof album);
+    memcpy(file, q.file, sizeof file), memcpy(row, q.row_url, sizeof row);
+    int ok = q.paths ? path_lookup(at) : song_lookup(q.ids[q.order[at]]);
+    if (ok) snprintf(out, room, "%s", q.file);
+    memcpy(q.title, title, sizeof title), memcpy(q.artist, artist, sizeof artist), memcpy(q.album, album, sizeof album);
+    memcpy(q.file, file, sizeof file), memcpy(q.row_url, row, sizeof row);
+    return ok;
+}
+
+static void gapless_tick(int sec, int len) {
+    char next[sizeof q.file];
+    int at;
+    if (gl.sent || src.on || !q.loaded || q.state != PLAYING || len < GAPLESS_MIN_S || sec < 0 || len - sec >= GAPLESS_AHEAD_S ||
+        !gapless_on() || (at = gapless_next()) < 0 || dsd(q.file) || !peek_file(at, next, sizeof next) || dsd(next))
+        return;
+    send_song("set-gapless", next, 0);
+    gl.sent = 1, gl.at = at;
+    logf_("next song sent ahead: %s", next);
+}
+
+/* the end of a song whose next was sent ahead: that one plays, nothing sent; 1 when it was */
+static int gapless_took(void) {
+    if (!gl.sent) return 0;
+    gl.sent = 0;
+    resume_leave();
+    q.at = gl.at, q.errors = 0;
+    if (q.paths ? path_lookup(q.at) : song_lookup(q.ids[q.order[q.at]]))
+        set_cover(q.paths ? -1 : q.ids[q.order[q.at]], q.paths || *q.row_url ? q.row_url : q.file);
+    q.state = PLAYING, q.pos_ms = 0, q.len_s = 0;
+    ++q.seq;
+    return 1;
+}
+
+/* ---- the player's shared words: Mono Audio, Swap L/R and Smart Crossfade (docs/playd.md#mono-swap-and-crossfade) ----
+ * As today's Vamp's crossfade.c: an int in a file of its own under /tmp, which q2player's chain maps read-only once it
+ * appears (player/dsp.c watch) and reads as it plays, so a change is heard at once. Each file is made once (written
+ * whole beside and renamed, as shared_int does) and from then on changed in place, never replaced, since the player
+ * keeps the mapping it has; one left by a q2playd before is taken as it is. [Q2POD] MONO and SWAPLR, 1 on, are read
+ * again when config.ini changes; a file that is not there reads as off, so none is made for a setting that is. */
+#define XF_FALLBACK_MS 5000 /* the plain fade a smart one falls back to (docs/internals.md#smart-crossfade) */
+#define XF_SMART 0x8000
+#define XF_STOPS 16
+static volatile int *shared_word(const char *rel) {
+    char p[700], tmp[720];
+    snprintf(p, sizeof p, "%s", path(rel)), snprintf(tmp, sizeof tmp, "%s.tmp", p);
+    int fd = open(p, O_RDWR | O_CLOEXEC), made = 0;
+    if (fd < 0) {
+        int zero = 0;
+        fd = open(tmp, O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        if (fd < 0 || write(fd, &zero, sizeof zero) != sizeof zero) {
+            if (fd >= 0) close(fd), unlink(tmp);
+            return 0;
+        }
+        made = 1;
+    }
+    void *m = mmap(0, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (m != MAP_FAILED && made && rename(tmp, p)) munmap(m, sizeof(int)), m = MAP_FAILED;
+    if (m == MAP_FAILED && made) unlink(tmp);
+    return m == MAP_FAILED ? 0 : m;
+}
+
+static struct {
+    volatile int *mono, *swap, *fade;
+    long long stamp;
+    int mono_on, swap_on, fade_on, stops, was_stopped, done;
+    long long key[8];
+} xf = {.stamp = -2};
+
+static void words_settings(void) {
+    long long st = file_stamp(path("/mnt/data/config.ini"));
+    if (st == xf.stamp) return;
+    char *text = read_all(path("/mnt/data/config.ini"));
+    xf.mono_on = text ? ini_get(text, "Q2POD", "MONO", 0) == 1 : 0;
+    xf.swap_on = text ? ini_get(text, "Q2POD", "SWAPLR", 0) == 1 : 0;
+    xf.fade_on = text ? ini_get(text, "Q2POD", "XFADE", 0) == 1 : 0;
+    free(text), xf.stamp = st, xf.done = 0;
+    if (!xf.mono && xf.mono_on) xf.mono = shared_word("/tmp/q2mono");
+    if (xf.mono) *xf.mono = xf.mono_on;
+    if (!xf.swap && xf.swap_on) xf.swap = shared_word("/tmp/q2swap");
+    if (xf.swap) *xf.swap = xf.swap_on;
+}
+
+/* the album key of play order index at (album_key: the library row's, else what path_lookup finds), 0 for none */
+static unsigned album_at(int at) {
+    char al[600], aa[600], p[1100];
+    if (!q.paths) return album_of(q.ids[q.order[at]], al, aa, p) ? album_key(al, aa, p) : 0;
+    char title[sizeof q.title], artist[sizeof q.artist], album[sizeof q.album], row[sizeof q.row_url], f0[sizeof q.file];
+    memcpy(title, q.title, sizeof title), memcpy(artist, q.artist, sizeof artist), memcpy(album, q.album, sizeof album);
+    memcpy(row, q.row_url, sizeof row), memcpy(f0, q.file, sizeof f0);
+    path_lookup(at);
+    unsigned k = album_key(q.album, "", *q.row_url ? q.row_url : q.file);
+    memcpy(q.title, title, sizeof title), memcpy(q.artist, artist, sizeof artist), memcpy(q.album, album, sizeof album);
+    memcpy(q.row_url, row, sizeof row), memcpy(q.file, f0, sizeof f0);
+    return k;
+}
+
+/* /tmp/q2xfade.next: the playing song's path and the next one's, a line each, written whole and renamed */
+static void xfade_next_write(const char *cur, const char *next) {
+    char tmp[720], dst[700];
+    snprintf(dst, sizeof dst, "%s", path("/tmp/q2xfade.next")), snprintf(tmp, sizeof tmp, "%s.tmp", dst);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "%s\n%s\n", cur, next);
+    if (fclose(f) || rename(tmp, dst)) unlink(tmp);
+}
+
+/* Each time round the loop (crossfade.c xfade_poll): the next change's fade in /tmp/q2xfade, XF_FALLBACK_MS with
+ * XF_SMART (the player plans the overlap from both songs and falls back to that plain fade), only with Smart
+ * Crossfade and Gapless on and the next song another album's (a shuffle's every next counts as one), never into a
+ * DSD file or one not there; the two paths in /tmp/q2xfade.next. Each stop moves the count above XF_STOPS, so no
+ * held tail outlives a stop. Worked out again only when what it rests on changes. */
+static void words_poll(void) {
+    words_settings();
+    int stopped = q.state == STOPPED;
+    if (stopped && !xf.was_stopped) ++xf.stops;
+    xf.was_stopped = stopped;
+    int at = q.n && q.loaded && !src.on ? gapless_next() : -1;
+    long long key[8] = {xf.fade_on, gapless_on(), q.list, q.at, at, q.np, xf.stops, q.shuffle};
+    if (xf.done && !memcmp(key, xf.key, sizeof key)) return;
+    memcpy(xf.key, key, sizeof key);
+    char cur[sizeof q.file], next[sizeof q.file], there[sizeof root + sizeof q.file];
+    int ms = 0;
+    if (xf.fade_on && gapless_on() && at >= 0 && at != q.at && peek_file(q.at, cur, sizeof cur) &&
+        peek_file(at, next, sizeof next) && !dsd(next) &&
+        snprintf(there, sizeof there, "%s%s", root, next) < (int)sizeof there && !access(there, F_OK) &&
+        (q.shuffle || album_at(q.at) != album_at(at)))
+        ms = XF_FALLBACK_MS | XF_SMART;
+    xf.done = 0;
+    if (!xf.fade && ms && !(xf.fade = shared_word("/tmp/q2xfade"))) return; /* tried again next time round */
+    if (ms) xfade_next_write(cur, next);
+    if (xf.fade) *xf.fade = ms | (xf.stops & 0x7fff) << XF_STOPS;
+    xf.done = 1;
+}
+
 static int command(const char *verb, const int *ids, int n_ids) {
     int a = 0, b = 0, c = 0;
     if (sscanf(verb, "play %d %d %d", &a, &b, &c) == 3) {
@@ -2714,6 +2899,7 @@ static int jump(int line, int id) {
  * URL and a server list's answer, which keep their own queue, refuse it, as stock's streams do. */
 static int enqueue(int next, int n) {
     if (src.on || q.paths || n <= 0) return -1;
+    gapless_forget();
     if (n > QUEUE_MAX - q.n) n = QUEUE_MAX - q.n;
     if (n <= 0) return -1;
     int got = read_list(pending_ids);
@@ -2734,6 +2920,7 @@ static int enqueue(int next, int n) {
 
 static char cq[2048];
 static size_t cq_n;
+static int find_cmd(int stop);
 static void cmdq_read(void) {
     ssize_t got = read(cmdq_fd, cq + cq_n, sizeof cq - 1 - cq_n);
     if (got <= 0) return;
@@ -2749,11 +2936,12 @@ static void cmdq_read(void) {
                       : sscanf(verb + 1, "rate %d %d", &a, &b) == 2               ? rate_cmd(a, b)
                       : sscanf(verb + 1, "like %d", &a) == 1                      ? like_cmd(a)
                       : sscanf(verb + 1, "album %d %d", &a, &b) == 2              ? album_cmd(a, b)
+                      : !strcmp(verb + 1, "find") || !strcmp(verb + 1, "find stop") ? find_cmd(verb[5] == ' ')
                       : sscanf(verb + 1, "queue %7s %d", where, &a) == 2 && (!strcmp(where, "next") || !strcmp(where, "last"))
                           ? enqueue(where[0] == 'n', a)
                           : command(verb + 1, 0, 0);
         if (verb && r) logf_("refused: %s", verb + 1);
-        if (verb) ack(strtoul(p, 0, 10), r == 3 ? 3 : r ? 1 : 0);
+        if (verb) ack(strtoul(p, 0, 10), r == 3 || r == 2 ? r : r ? 1 : 0);
         p = nl + 1;
     }
     cq_n -= (size_t)(p - cq);
@@ -2839,6 +3027,46 @@ static void queue_write(void) {
  * modes (the play mode's: pm_shuffle, pm_repeat), hearts (the song's stars, 0 for none) and liked (its like, the pin's
  * shim's), each -1 for a source's URL, which cannot be rated, the queue file's place, lines and gen, qlist (the queue
  * itself), and the playing file's path. */
+/* ---- Find My Vamp (docs/playd.md#find-my-vamp) ----
+ * Car Remote's Find reaches the FIFO as the shim's "find" and "find stop" (coda_rc_shim.c); the jingle is q2sysd's
+ * (Q2SYS/1 find, docs/sysd.md#find-my-vamp): answered 0 once it plays, 2 (UNAVAILABLE) when q2sysd refuses it or is
+ * not there. While it plays q2sysd keeps /run/vamp/finding, and the now file says find=1. */
+static int finding;
+static int sys_ask(const char *cmd, char *out, size_t room) { /* one Q2SYS/1 command's answer line, 0; -1 with none */
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    snprintf(a.sun_path, sizeof a.sun_path, "%s", path("/run/vamp/sys.sock"));
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    struct timeval tv = {1, 0};
+    char b[256], req[64];
+    size_t n = 0;
+    if (fd < 0) return -1;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv), setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    int len = snprintf(req, sizeof req, "Q2SYS/1\n%s\n", cmd);
+    if (connect(fd, (struct sockaddr *)&a, sizeof a) || send(fd, req, (size_t)len, MSG_NOSIGNAL) != len) return close(fd), -1;
+    for (char *nl; n < sizeof b - 1;) {
+        ssize_t k = recv(fd, b + n, sizeof b - 1 - n, 0);
+        if (k <= 0) break;
+        n += (size_t)k, b[n] = 0;
+        if ((nl = strchr(b, '\n')) && strchr(nl + 1, '\n')) break;
+    }
+    close(fd);
+    b[n] = 0;
+    char *nl = strchr(b, '\n');
+    if (strncmp(b, "Q2SYS/1 ok\n", 11) || !nl || !strchr(nl + 1, '\n')) return -1;
+    *strchr(nl + 1, '\n') = 0;
+    snprintf(out, room, "%s", nl + 1);
+    return 0;
+}
+static int find_cmd(int stop) {
+    char r[64];
+    if (sys_ask(stop ? "find stop" : "find", r, sizeof r) || strcmp(r, "ok")) return logf_("find: q2sysd did not play it"), 2;
+    return 0;
+}
+static void find_poll(void) { /* q2sysd's mark, for the now file */
+    int on = !access(path("/run/vamp/finding"), F_OK);
+    if (on != finding) finding = on, ++q.seq;
+}
+
 static void now_write(void) {
     static unsigned writes;
     char text[2600], tmp[340];
@@ -2852,6 +3080,7 @@ static void now_write(void) {
             q.list);
     for (const char *c = q.file; *c; ++c) fputc(*c == '\n' || *c == '\r' ? ' ' : *c, f);
     fputc('\n', f);
+    if (finding) fputs("find=1\n", f); /* the shim's, while Find My Vamp's jingle plays (coda-rc's NowPlaying.finding) */
     if (fclose(f) == 0) rename(tmp, path(now_path_rel)); /* whole or not at all */
 }
 
@@ -2953,6 +3182,7 @@ static int source_take(int slot, const char *args) {
     snprintf(q.title, sizeof q.title, "%s", *t ? t : base + 1);
     snprintf(q.artist, sizeof q.artist, "%s", a), snprintf(q.album, sizeof q.album, "%s", b);
     int cut = q.loaded;
+    gapless_forget();
     send_song(cut ? "set-nexturl" : "set-songurl", url, 0);
     set_cover(-1, "");
     q.expect_cut = cut;
@@ -3254,6 +3484,8 @@ int main(int argc, char **argv) {
         if (poll(p, (nfds_t)n, wait) < 0 && errno != EINTR) break;
         catplay_poll();
         m3u_poll();
+        words_poll();
+        find_poll();
         ahead_poll();
         air_poll();
         if (src.on && cl[src.holder].fd < 0) source_release(src.holder); /* its holder gone (here and after the reads): before a new client takes its slot */

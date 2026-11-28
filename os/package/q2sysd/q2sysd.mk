@@ -12,11 +12,12 @@ Q2SYSD_LICENSE_FILES = LICENSE
 
 define Q2SYSD_BUILD_CMDS
 	$(TARGET_MAKE_ENV) $(MAKE) -C $(@D)/sysd OUT=$(@D)/out CC="$(TARGET_CC)" CFLAGS="$(TARGET_CFLAGS)" \
-		LDFLAGS="$(TARGET_LDFLAGS)" $(@D)/out/q2sysd
+		LDFLAGS="$(TARGET_LDFLAGS)" $(@D)/out/q2sysd $(@D)/out/q2ask
 endef
 
 define Q2SYSD_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/out/q2sysd $(TARGET_DIR)/usr/bin/q2sysd
+	$(INSTALL) -D -m 0755 $(@D)/out/q2ask $(TARGET_DIR)/usr/bin/q2ask
 endef
 
 $(eval $(generic-package))

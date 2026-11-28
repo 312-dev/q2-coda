@@ -760,12 +760,92 @@ static void reboot_now(void) {
     shut(reboot_cmd);
 }
 
+/* ---- Find My Vamp (docs/sysd.md#find-my-vamp) ----
+ * Today's Vamp's (patch/findmy.c, docs/internals.md#find-my-vamp): findmy_tune.h's jingle on the internal buzzer
+ * through stock's PWM driver, /dev/jz_pwm, over and over on a thread of its own, its waits in FM_SLICE_MS slices so a
+ * stop is heard within one; the screen lit and kept lit (a use each second, as Smart Awake keeps it), and the toast
+ * "Find My Vamp". It stops at any key, a wheel turn or a touch, at "find stop", or after FM_MAX_MS; a "find" while it
+ * plays starts the minute again. While it plays /run/vamp/finding is there, for q2playd's now file (find=1). */
+#define FM_MAX_MS 60000
+#define FM_SLICE_MS 10
+#define FM_IOCTL(fd, request, arg) ioctl(fd, request, arg)
+#define FM_WAIT(ms) fm_wait(ms)
+static int fm_wait(unsigned ms);
+#include "findmy_tune.h"
+static struct {
+    volatile int run, live; /* run: play on; live: from the start until the worker has let the buzzer go */
+    volatile unsigned long long at;
+    int fd;
+} fm;
+
+static int fm_wait(unsigned ms) {
+    for (;;) {
+        if (!fm.run || now_ms() - fm.at >= FM_MAX_MS / (unsigned)time_scale) return 1;
+        if (!ms) return 0;
+        unsigned slice = ms < FM_SLICE_MS ? ms : FM_SLICE_MS;
+        usleep(slice * 1000);
+        ms -= slice;
+    }
+}
+
+static void *fm_worker(void *unused) {
+    (void)unused;
+    int ch = fm_take(fm.fd);
+    while (!fm_phrase(fm.fd, &ch)) {
+    }
+    fm_done(fm.fd, ch);
+    close(fm.fd);
+    fm.run = 0, fm.live = 0;
+    return 0;
+}
+
+static void ui_say(const char *line);
+/* 0 playing (or its minute started again), -1 when the buzzer's driver cannot be opened or the worker cannot start */
+static int find_start(void) {
+    if (fm.live && fm.run) return fm.at = now_ms(), 0;
+    if (fm.live) return -1; /* stopping: its worker still holds the buzzer */
+    int fd = open(path("/dev/jz_pwm"), O_RDWR | O_CLOEXEC);
+    if (fd < 0) return say("find: %s: %s", path("/dev/jz_pwm"), strerror(errno)), -1;
+    pthread_t th;
+    fm.fd = fd, fm.at = now_ms(), fm.run = fm.live = 1;
+    if (pthread_create(&th, 0, fm_worker, 0)) {
+        close(fd), fm.run = fm.live = 0;
+        return -1;
+    }
+    pthread_detach(th);
+    FILE *mark = fopen(path("/run/vamp/finding"), "w");
+    if (mark) fputs("1\n", mark), fclose(mark);
+    if (!screen_on) set_screen(1);
+    use_now();
+    ui_say("toast Find%20My%20Vamp");
+    tell("find on");
+    say("find: playing");
+    return 0;
+}
+
+static void find_stop(const char *why) {
+    if (!fm.run) return;
+    fm.run = 0;
+    say("find: stopped (%s)", why);
+}
+
+/* the main loop's: the screen kept lit while it plays, and its end told */
+static void find_poll(unsigned long long t) {
+    static unsigned long long lit_at;
+    static int was;
+    if (fm.live && t >= lit_at + 1000) use_now(), lit_at = t;
+    if (was && !fm.live) unlink(path("/run/vamp/finding")), tell("find off");
+    was = fm.live;
+}
+
 static void read_input(int fd) {
     struct input_event e[16];
     ssize_t got;
     while ((got = read(fd, e, sizeof e)) > 0)
         for (unsigned i = 0; i < (size_t)got / sizeof *e; ++i) {
             if (e[i].type == EV_KEY || e[i].type == EV_ABS || e[i].type == EV_REL) use_now(); /* any use */
+            if (fm.run && ((e[i].type == EV_KEY && e[i].value == 1) || e[i].type == EV_REL || e[i].type == EV_ABS))
+                find_stop("a key, the wheel or a touch"); /* the press itself is q2ui's to drop */
             if (e[i].type != EV_KEY || e[i].code != KEY_POWER) continue;
             if (e[i].value == 1) pressed_at = now_ms() | 1;
             else if (e[i].value == 0 && pressed_at) {
@@ -817,7 +897,7 @@ static void client_line(struct client *c, const char *line) {
         c->hello = 1;
         client_say(c, "Q2SYS/1 ok");
     } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby heat jack battery time watch");
+        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby heat jack battery time find watch");
     } else if (!strcmp(line, "battery")) {
         char text[160];
         read_battery();
@@ -835,6 +915,13 @@ static void client_line(struct client *c, const char *line) {
     } else if (!strcmp(line, "heat cancel")) { /* the load warning's Cancel, from a UI that is not Q2UI/1's */
         heat_cancel = 1;
         client_say(c, "ok");
+    } else if (!strcmp(line, "find")) { /* Find My Vamp's jingle (docs/sysd.md#find-my-vamp) */
+        client_say(c, find_start() ? "err find" : "ok");
+    } else if (!strcmp(line, "find stop")) {
+        find_stop("asked");
+        client_say(c, "ok");
+    } else if (!strcmp(line, "find state")) {
+        client_say(c, "find %d", fm.live);
     } else if (!strcmp(line, "awake")) { /* a use, as a key is: the screen off time starts again */
         use_now();
         client_say(c, "ok");
@@ -1255,6 +1342,7 @@ int main(int argc, char **argv) {
             long long h = (long long)(heat_at + GUARD_TICK_MS / (unsigned)time_scale) - (long long)t;
             if (h < wait) wait = h;
         }
+        if (fm.live && wait > 200) wait = 200; /* the jingle's end seen within 200 ms */
         if (wait < 0) wait = 0;
         if (poll(p, (nfds_t)n, (int)wait) < 0 && errno != EINTR) break;
         if (p[0].revents & POLLIN) {
@@ -1290,8 +1378,12 @@ int main(int argc, char **argv) {
             jack_poll(t);
         }
         heat_poll(t);
+        find_poll(t);
         if (usb_mode == USB_CAR) car_poll();
     }
+    find_stop("the end");
+    for (int i = 0; i < 100 && fm.live; ++i) usleep(10000); /* the pin low and the channel released first */
+    unlink(path("/run/vamp/finding"));
     wdt_stop();
     unlink(path("/run/vamp/sys.sock"));
     return 0;

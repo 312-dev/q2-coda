@@ -207,7 +207,7 @@ def test_a_play_from_q2ui_starts_its_song_with_demo_s_fields(run):
     root, pl = run
     play_list(root, [1, 2, 3], 1)
     pl.pump()
-    assert pl.got[0] == ('set-songurl', '/mnt/mmc/Music/b.mp3|ss=0|512|20|0|17|90')
+    assert pl.got[0] == ('set-songurl', '/mnt/mmc/Music/b.mp3|ss=0|512|20|1|17|90')
     n = now(root)
     assert (n['title'], n['artist'], n['album'], n['state'], n['id']) == ('Beta', 'Bob', 'First', '1', '2')
 
@@ -216,10 +216,10 @@ def test_the_cache_follows_the_file_kind_and_a_brace_is_escaped(run):
     root, pl = run
     play_list(root, [3, 5], 0)
     pl.pump()
-    assert pl.got[0] == ('set-songurl', '/mnt/mmc/Music/c%0x7dd.flac|ss=0|1024|20|0|17|90')
+    assert pl.got[0] == ('set-songurl', '/mnt/mmc/Music/c%0x7dd.flac|ss=0|1024|20|1|17|90')
     pl.say('player-status', 'exit')
     pl.pump()
-    assert pl.got[1] == ('set-songurl', '/mnt/mmc/Music/e.dsf|ss=0|4096|50|0|17|90')
+    assert pl.got[1] == ('set-songurl', '/mnt/mmc/Music/e.dsf|ss=0|4096|50|1|17|90')
 
 
 def test_a_song_s_end_plays_the_next_and_the_queue_s_end_stops(run):
@@ -468,7 +468,7 @@ def test_the_output_moves_the_song_where_it_is_and_keeps_a_level_each(run):
     fifo(root, 'output bluetooth')
     pl.pump()
     assert pl.got == [('mcl-setoutputway', '1'), ('mcl-setvol', str(100 << 8 | 100)), ('mcl-stop', 'null'),
-                      ('set-songurl', '/mnt/mmc/Music/a.flac|ss=42|1024|20|0|17|90')], pl.got
+                      ('set-songurl', '/mnt/mmc/Music/a.flac|ss=42|1024|20|1|17|90')], pl.got
     assert now(root)['volume'] == '37', 'no Bluetooth level saved yet: the DAC\'s'
     before = dac(root)
     fifo(root, 'volume 20')
@@ -988,7 +988,7 @@ def test_a_source_plays_its_url_and_gives_the_queue_back_paused_where_it_was(run
     a.say('source http://10.0.0.9:8200/22.mp3?id%3D7 title=Delta%20Dawn artist=Dee album=Phone')
     assert a.line() == 'ok'
     pl.pump()
-    assert pl.got[-1] == ('set-nexturl', 'http://10.0.0.9:8200/22.mp3?id=7|ss=0|512|20|0|17|90'), 'the URL decoded, a cut'
+    assert pl.got[-1] == ('set-nexturl', 'http://10.0.0.9:8200/22.mp3?id=7|ss=0|512|20|1|17|90'), 'the URL decoded, a cut'
     pl.say('player-nextstatus', 'exit')
     a.say('now')
     got = fields(a.line())
@@ -1015,7 +1015,7 @@ def test_a_source_plays_its_url_and_gives_the_queue_back_paused_where_it_was(run
     a.say('resume')
     assert a.line() == 'ok'
     pl.pump()
-    assert pl.got[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3|ss=42|512|20|0|17|90'), 'from where it was put aside'
+    assert pl.got[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3|ss=42|512|20|1|17|90'), 'from where it was put aside'
 
 
 def test_a_source_that_plays_out_tells_its_holder_and_gives_the_queue_back(run):
@@ -1042,7 +1042,7 @@ def test_a_source_that_does_not_open_says_error(run):
     a.say('source http://h/x.flac')
     assert a.line() == 'ok'
     pl.pump()
-    assert pl.got[-1] == ('set-songurl', 'http://h/x.flac|ss=0|1024|20|0|17|90'), 'nothing played: no cut'
+    assert pl.got[-1] == ('set-songurl', 'http://h/x.flac|ss=0|1024|20|1|17|90'), 'nothing played: no cut'
     pl.say('player-status', 'error')
     assert a.line() == 'focus lost why=error'
     assert now(root)['state'] == '0', 'an empty queue comes back stopped'
@@ -1094,7 +1094,7 @@ def test_a_stop_ends_the_source_and_the_queue_comes_back_stopped(run):
     assert (n['title'], n['state'], n['pos'], n['id']) == ('Beta', '0', '0', '2')
     fifo(root, 'resume')
     pl.pump()
-    assert pl.got[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3|ss=0|512|20|0|17|90')
+    assert pl.got[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3|ss=0|512|20|1|17|90')
 
 
 def test_a_holder_that_goes_away_gives_the_queue_back(run):
@@ -1903,7 +1903,7 @@ def test_memory_playback_s_location_brings_the_queue_back_paused_at_its_second(r
     assert pl.songs() == [], 'nothing loaded'
     fifo(root, 'resume')
     pl.pump()
-    assert pl.got[-1] == ('set-songurl', '/mnt/mmc/Music/c%0x7dd.flac|ss=77|1024|20|0|17|90'), pl.got
+    assert pl.got[-1] == ('set-songurl', '/mnt/mmc/Music/c%0x7dd.flac|ss=77|1024|20|1|17|90'), pl.got
 
 
 @pytest.mark.parametrize('config, prepare', [(TRACK, kept(THREE, 1, 77))])
@@ -2686,3 +2686,183 @@ def test_no_ask_without_resume_1_or_with_every_saved_song_on_the_card(run):
     root, pl = run
     assert not wait_for(root/'tmp/q2-navi.resume', 2.5)
     assert now(root)['title'] == 'Cloud One'
+
+
+# ---- gapless (docs/playd.md#gapless) ----
+
+def test_the_next_song_is_sent_ahead_six_seconds_before_the_end_and_plays_on_with_nothing_sent(run):
+    """demo's mclAutoChange: Gapless on, a song of 3 s or more under 6 s from its end: set-gapless for the next, its
+    cache -1, Gapless 1 and no hardware type; the end's exit then sends nothing and Now Playing is on the next"""
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    heard(root, pl, 20, range(10, 15))
+    assert 'set-gapless' not in pl.names(), 'six seconds from the end and more: not yet'
+    heard(root, pl, 20, [15, 16])
+    assert [g for g in pl.got if g[0] == 'set-gapless'] == [('set-gapless', '/mnt/mmc/Music/b.mp3|ss=0|-1|20|1|90')]
+    sent = len(pl.got)
+    pl.say('player-status', 'exit')
+    pl.pump(0.6)
+    assert pl.got[sent:] == [], 'the player plays it on alone'
+    n = now(root, 0.3)
+    assert (n['id'], n['title'], n['state']) == ('2', 'Beta', '1'), n
+    heard(root, pl, 20, [16, 17])
+    assert [g[0] for g in pl.got].count('set-gapless') == 1, 'the last song: nothing ahead'
+
+
+@pytest.mark.parametrize('config', [CONFIG.replace('GAPLESS=1', 'GAPLESS=0')])
+def test_with_gapless_off_nothing_is_sent_ahead_and_the_g_field_is_0(run):
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    assert pl.got[0][1].endswith('|0|17|90')
+    heard(root, pl, 20, [15, 16, 17])
+    assert 'set-gapless' not in pl.names()
+    pl.say('player-status', 'exit')
+    pl.pump(0.6)
+    assert pl.songs()[-1] == ('set-songurl', '/mnt/mmc/Music/b.mp3')
+
+
+@pytest.mark.parametrize('ids', [[5, 1], [1, 5]])
+def test_a_dsd_file_either_side_is_never_sent_ahead(run, ids):
+    root, pl = run
+    play_list(root, ids, 0)
+    pl.pump()
+    heard(root, pl, 20, [15, 16, 17])
+    assert 'set-gapless' not in pl.names()
+
+
+def test_a_short_song_is_not_sent_ahead_and_a_change_closes_a_preload(run):
+    root, pl = run
+    play_list(root, [1, 2, 3], 0)
+    pl.pump()
+    heard(root, pl, 2, [0, 1])
+    assert 'set-gapless' not in pl.names(), 'under 3 s'
+    heard(root, pl, 20, [15])
+    assert 'set-gapless' in pl.names()
+    fifo(root, 'next')
+    pl.pump()
+    names = pl.names()
+    assert names[names.index('set-gapless') + 1:][:2] == ['mcl-closegapless', 'set-nexturl'], names
+
+
+# ---- Mono Audio, Swap L/R and Smart Crossfade (docs/playd.md#mono-swap-and-crossfade) ----
+
+XFADE = CONFIG.replace('THEME=0\n', 'THEME=0\nXFADE=1\n')
+
+
+def word(root, name):
+    p = root/'tmp'/name
+    return struct.unpack('<i', p.read_bytes()[:4])[0] if p.exists() else None
+
+
+def fade_card(root):
+    album_artists(root, {1: 'Ann', 2: 'Ann'})
+    land(root, A, B, CD)
+
+
+@pytest.mark.parametrize('config, prepare', [(XFADE, fade_card)])
+def test_a_change_to_another_album_fades_and_one_within_an_album_stays_gapless(run):
+    """crossfade.c xfade_poll: XF_FALLBACK_MS with XF_SMART for a next song of another album, its two paths in
+    q2xfade.next; 0 within an album; a stop moves the count above XF_STOPS"""
+    root, pl = run
+    play_list(root, [1, 3], 0)
+    pl.pump()
+    assert wait_for_value(lambda: (word(root, 'q2xfade') or 0) & 0xffff, 5000 | 0x8000)
+    assert (root/'tmp/q2xfade.next').read_text() == f'{A}\n{CD}\n'
+    stops = word(root, 'q2xfade') >> 16
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    assert wait_for_value(lambda: word(root, 'q2xfade') & 0xffff, 0), 'First to First: gapless, no fade'
+    fifo(root, 'stop')
+    pl.pump()
+    assert wait_for_value(lambda: word(root, 'q2xfade') >> 16, stops + 1), 'the stop counted'
+    play_list(root, [1, 2], 0, shuffle=1)
+    pl.pump()
+    assert wait_for_value(lambda: word(root, 'q2xfade') & 0xffff, 5000 | 0x8000), 'a shuffle always fades'
+
+
+@pytest.mark.parametrize('config, prepare', [(CONFIG, fade_card), (XFADE.replace('GAPLESS=1', 'GAPLESS=0'), fade_card)])
+def test_no_fade_without_smart_crossfade_or_gapless(run):
+    root, pl = run
+    play_list(root, [1, 3], 0)
+    pl.pump(1.0)
+    assert not (root/'tmp/q2xfade').exists() or word(root, 'q2xfade') & 0xffff == 0
+
+
+def old_mono(root):
+    (root/'tmp/q2mono').write_bytes(struct.pack('<i', 7))
+    (root/'mono.ino').write_text(str((root/'tmp/q2mono').stat().st_ino))
+
+
+@pytest.mark.parametrize('config, prepare', [(CONFIG.replace('THEME=0\n', 'THEME=0\nMONO=1\nSWAPLR=1\n'), old_mono)])
+def test_mono_and_swap_are_the_player_s_words_changed_in_place(run):
+    """crossfade.c mono_sync: Q2POD MONO and SWAPLR in /tmp/q2mono and /tmp/q2swap, an int each the player maps; a file
+    there already is taken as it is, and a change is written in place"""
+    root, pl = run
+    ino = int((root/'mono.ino').read_text())  # the one there before q2playd started
+    assert wait_for_value(lambda: (word(root, 'q2mono'), word(root, 'q2swap')), (1, 1))
+    assert (root/'tmp/q2mono').stat().st_ino == ino, 'the mapping the player holds is the one written'
+    swap_ino = (root/'tmp/q2swap').stat().st_ino
+    (root/'mnt/data/config.ini').write_text(CONFIG.replace('THEME=0\n', 'THEME=0\nMONO=0\nSWAPLR=0\nX=1\n'))
+    assert wait_for_value(lambda: (word(root, 'q2mono'), word(root, 'q2swap')), (0, 0))
+    assert ((root/'tmp/q2mono').stat().st_ino, (root/'tmp/q2swap').stat().st_ino) == (ino, swap_ino)
+
+
+def test_with_mono_and_swap_off_no_word_is_made(run):
+    root, pl = run
+    play_list(root, [1], 0)
+    pl.pump(1.0)
+    assert not (root/'tmp/q2mono').exists() and not (root/'tmp/q2swap').exists()
+
+
+# ---- Find My Vamp (docs/playd.md#find-my-vamp) ----
+
+class FakeSys:
+    """q2sysd's socket (Q2SYS/1): the commands it was sent, each answered self.answer"""
+    def __init__(self, root, answer='ok'):
+        import threading
+        self.lines, self.answer = [], answer
+        (root/'run/vamp').mkdir(parents=True, exist_ok=True)
+        self.s = socket.socket(socket.AF_UNIX)
+        self.s.bind(str(root/'run/vamp/sys.sock'))
+        self.s.listen(4)
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                c, _ = self.s.accept()
+            except OSError:
+                return
+            f = c.makefile('rw')
+            for line in f:
+                line = line.rstrip('\n')
+                if line != 'Q2SYS/1':
+                    self.lines.append(line)
+                f.write(('Q2SYS/1 ok' if line == 'Q2SYS/1' else self.answer) + '\n')
+                f.flush()
+            c.close()
+
+
+def test_find_from_car_remote_is_q2sysd_s_jingle_and_the_now_file_says_find(run):
+    """coda_rc_shim.c "find" and "find stop": 0 once it plays; find=1 in the now file while q2sysd's mark is there"""
+    root, pl = run
+    s = FakeSys(root)
+    send(root, '90 find')
+    assert wait_for_value(lambda: acks(root)[:1], [(90, 0)]) and s.lines == ['find']
+    (root/'run/vamp/finding').write_text('1\n')
+    assert wait_for_value(lambda: now(root, 0.2).get('find'), '1')
+    send(root, '91 find stop')
+    assert wait_for_value(lambda: acks(root)[:1], [(91, 0)]) and s.lines == ['find', 'find stop']
+    (root/'run/vamp/finding').unlink()
+    assert wait_for_value(lambda: 'find' in now(root, 0.2), False)
+
+
+@pytest.mark.parametrize('answer', [None, 'err find'])
+def test_find_with_no_buzzer_or_no_q2sysd_is_unavailable(run, answer):
+    root, pl = run
+    if answer:
+        FakeSys(root, answer)
+    send(root, '92 find')
+    assert wait_for_value(lambda: acks(root)[:1], [(92, 2)]), 'the shim\'s 2, UNAVAILABLE'

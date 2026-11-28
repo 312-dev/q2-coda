@@ -1247,3 +1247,129 @@ def test_time_save_writes_the_rtc_in_utc_and_time_set_sets_then_saves(run):
 
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', '-p', 'no:cacheprovider']))
+
+
+# ---- Find My Vamp (docs/sysd.md#find-my-vamp) ----
+
+@pytest.fixture(scope='session')
+def pwm_shim(tmp_path_factory):
+    out = tmp_path_factory.mktemp('pwm')/'pwm_shim.so'
+    subprocess.run(['cc', '-shared', '-fPIC', '-O2', '-Wall', '-Wextra', '-Werror', '-o', str(out), str(ROOT/'test/pwm_shim.c'), '-ldl'], check=True)
+    return out
+
+
+class Pwm:
+    """q2sysd with the PWM driver's stand-in (test/pwm_shim.c): dev/jz_pwm there, each ioctl in pwm.log"""
+    def __init__(self, binary, tree, shim, device=True, extra=(), env=None):
+        self.root, self.log = tree, tree/'pwm.log'
+        if device:
+            put(tree, '/dev/jz_pwm', '')
+        e = dict(os.environ, LD_PRELOAD=str(shim), Q2PWM_LOG=str(self.log), **(env or {}))
+        self.p = subprocess.Popen([str(binary), '--root', str(tree), '--poweroff', 'true', *extra], stderr=subprocess.PIPE, text=True, env=e)
+        end = time.monotonic() + 5
+        while not (tree/'run/vamp/sys.sock').exists() and time.monotonic() < end:
+            time.sleep(0.02)
+        time.sleep(0.2)
+        self.keys = os.open(tree/'dev/input/event1', os.O_WRONLY)
+
+    def calls(self):
+        return [l.split(' ', 1)[1] for l in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def end(self):
+        os.close(self.keys)
+        self.p.terminate()
+        return self.p.wait(5), self.p.stderr.read()
+
+
+def ask_sys(root, line):
+    a = Api(root)
+    a.line()
+    a.say(line)
+    return a.line()
+
+
+def test_find_plays_the_jingle_with_the_screen_lit_and_the_toast(binary, tree, tools, pwm_shim):
+    """findmy.c / findmy_tune.h: the channel released then requested, each note level 0, CONFIG, level 50, rests at
+    level 0; the screen lit, the toast, find on told, /run/vamp/finding while it plays"""
+    ui = FakeUi(tree)
+    f = Pwm(binary, tree, pwm_shim)
+    w = Watch(tree)
+    assert ask_sys(tree, 'screen off') == 'ok' and read(tree, '/sys/class/backlight/lcd/bl_power') == '4'
+    assert ask_sys(tree, 'find') == 'ok'
+    time.sleep(0.5)
+    calls = f.calls()
+    assert calls[:5] == ['release 1', 'request PC01', 'level 1 0', 'config 2349 1', 'level 1 50'], calls
+    assert 'config 2960 1' in calls and 'level 1 0' in calls[5:], 'the next note after a rest'
+    assert read(tree, '/sys/class/backlight/lcd/bl_power') == '0', 'the screen lit'
+    assert (tree/'run/vamp/finding').exists() and ask_sys(tree, 'find state') == 'find 1'
+    assert 'toast Find%20My%20Vamp' in ui.lines and 'find on' in w.lines
+    assert ask_sys(tree, 'find stop') == 'ok'
+    time.sleep(0.3)
+    calls = f.calls()
+    assert calls[-2:] == ['level 1 0', 'release 1'], 'the pin low and the channel given back, for the next click'
+    assert not (tree/'run/vamp/finding').exists() and 'find off' in w.lines
+    assert f.end()[0] == 0
+
+
+def test_any_key_or_the_wheel_stops_it_within_a_slice(binary, tree, tools, pwm_shim):
+    f = Pwm(binary, tree, pwm_shim)
+    assert ask_sys(tree, 'find') == 'ok'
+    time.sleep(0.3)
+    key(f.keys, KEY_VOLUMEUP, 1)
+    at = time.monotonic()
+    while f.calls()[-1:] != ['release 1'] and time.monotonic() < at + 1:
+        time.sleep(0.005)
+    assert f.calls()[-1:] == ['release 1'] and time.monotonic() - at < 0.15, f.calls()[-3:]
+    key(f.keys, KEY_VOLUMEUP, 0)
+    f.end()
+
+
+def test_it_stops_by_itself_after_a_minute_and_a_find_starts_the_minute_again(binary, tree, tools, pwm_shim):
+    """FM_MAX_MS, 60 s, run 30 times faster: 2 s"""
+    f = Pwm(binary, tree, pwm_shim, extra=['--time-scale', '30'])
+    assert ask_sys(tree, 'find') == 'ok'
+    time.sleep(1.4)
+    assert ask_sys(tree, 'find') == 'ok', 'again while it plays'
+    time.sleep(1.4)
+    assert ask_sys(tree, 'find state') == 'find 1', 'its minute started again'
+    time.sleep(1.2)
+    assert ask_sys(tree, 'find state') == 'find 0' and f.calls()[-1] == 'release 1'
+    f.end()
+
+
+def test_a_refused_config_takes_the_channel_again_once(binary, tree, tools, pwm_shim):
+    f = Pwm(binary, tree, pwm_shim, env={'Q2PWM_REFUSE': '1'})
+    assert ask_sys(tree, 'find') == 'ok'
+    time.sleep(0.3)
+    calls = f.calls()
+    # fm_note lets the channel go, and fm_take releases once more before its REQUEST, as it does at the start
+    assert calls[:9] == ['release 1', 'request PC01', 'level 1 0', 'config 2349 1 refused', 'release 1', 'release 1',
+                         'request PC01', 'level 1 0', 'config 2349 1'], calls
+    ask_sys(tree, 'find stop')
+    f.end()
+
+
+def test_with_no_pwm_driver_find_is_refused(binary, tree, tools, pwm_shim):
+    f = Pwm(binary, tree, pwm_shim, device=False)
+    assert ask_sys(tree, 'find') == 'err find' and not (tree/'run/vamp/finding').exists()
+    f.end()
+
+
+# ---- q2ask (docs/vamp-os-base.md#first-card-boot) ----
+
+@pytest.fixture(scope='session')
+def q2ask(tmp_path_factory):
+    out = tmp_path_factory.mktemp('ask')/'q2ask'
+    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-O2', '-o', str(out), os.environ.get('Q2ASK_SOURCE') or str(ROOT/'sysd/q2ask.c')], check=True)  # Q2ASK_SOURCE: a broken copy
+    return out
+
+
+def test_q2ask_prints_the_greeting_and_an_answer_a_line(run, q2ask):
+    root, _ = run
+    sock = str(root/'run/vamp/sys.sock')
+    r = subprocess.run([str(q2ask), sock, 'Q2SYS/1', 'battery', 'screen'], capture_output=True, text=True, timeout=5)
+    assert (r.returncode, r.stdout) == (0, 'Q2SYS/1 ok\nbattery level=73 mv=3912 status=Discharging cable=0\nscreen on\n'), r
+    r = subprocess.run([str(q2ask), sock, 'Q2SYS/9'], capture_output=True, text=True, timeout=5)
+    assert (r.returncode, r.stdout) == (1, 'err version\n'), r
+    r = subprocess.run([str(q2ask), str(root/'run/vamp/none.sock'), 'Q2SYS/1'], capture_output=True, text=True, timeout=5)
+    assert r.returncode == 2

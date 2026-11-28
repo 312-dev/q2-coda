@@ -214,6 +214,40 @@ Everything here has been run only under the emulator and on this machine. What o
 | Hot reload | `kill -HUP`'s in-place restart (QEMU's `/proc/self/exe` is QEMU) | [Hot reload](#hot-reload) |
 | App isolation | Which of mount and network namespaces, cgroups and seccomp the kernel has, for what a package's permissions can hold; a package run by `q2pkgd app-run` as its own uid refused by a root service, and one started over Q2PKG/1 running as its own uid (a laptop has one uid for both ends: there `app-run` cannot drop to the package's user, and runs nothing); `PR_SET_CHILD_SUBREAPER` for an API 0 app's loop (QEMU refuses it) | [Packages: Users and groups](platform/packages.md#users-and-groups) |
 
+## First card boot
+
+The first run of Vamp OS on the owner's Q2, by [card boot](#card-boot) alone: nothing is written to flash but today's Vamp itself (a `--dev` build of it, by the usual update), the image runs once and the next reboot is today's Vamp. What it tells apart is [Migration readiness](vamp-os.md#migration-readiness)'s Device rows. Each step stops the run if it does not read as expected.
+
+**On the computer.**
+
+1. `tools/mac/q2env python3 tools/vampos.py build --out runs/card` (or a sweep's `runs/z1`), then `tools/mac/q2env python3 tools/vampos.py compose --image runs/card/vampos.squashfs --zip "$HOME/q2-stock/Q2 Firmware V1.36.zip" --out runs/card/composed.squashfs`.
+2. A `--dev` build of today's Vamp from this branch (`tools/ci/rebuild.py --dev`), installed by the usual update. Boot it once with no `.vamp/os` on the card: it behaves as before and `/mnt/data/vamp/handoff.log` does not exist.
+3. Back up `/mnt/data`: `adb shell 'tar -C /mnt -cf - data' > q2-data-$(date +%Y%m%d).tar; tar tf q2-data-*.tar | grep -E 'config.ini|database.db|bluetooth'`.
+4. Read the unit: `adb shell 'cat /proc/devices | grep loop; ls /dev/loop0'`. No loop device: the card boot cannot work; stop.
+5. The card: `adb push runs/card/composed.squashfs /mnt/mmc/.vamp/os/vampos.squashfs`, then `adb shell 'cd /mnt/mmc/.vamp/os && sha256sum vampos.squashfs > vampos.squashfs.sha256 && sha256sum -c vampos.squashfs.sha256'` (or `tools/vampos.py card --image ... --card CARD` with the card in the computer).
+6. A fallback first: `adb shell 'echo 0 > /mnt/mmc/.vamp/os/vampos.squashfs.sha256; touch /mnt/mmc/.vamp/os/boot-once'; adb reboot`. Today's Vamp comes up, `boot-once` is gone, and `adb shell cat /mnt/data/vamp/handoff.log` has the SHA-256 line. Put the right `.sha256` back (step 5).
+7. The boot: `adb shell touch /mnt/mmc/.vamp/os/boot-once; adb reboot`. Stock's splash, a black screen, then `q2ui`'s Home. adb stays up: its shell is stock's, outside the image, so the image's tools run as `chroot /tmp/vamp-os-root CMD`.
+
+**The checks**, over adb, in this order (with `A='chroot /tmp/vamp-os-root /usr/bin/q2ask'` on the Q2's shell: `adb shell` then `A=...`):
+
+| # | Command | Expect | Tells |
+| --- | --- | --- | --- |
+| 1 | `cat /mnt/data/vamp/handoff.log; tail -20 /mnt/data/vamp/boot.log` | the chroot started; rcS's lines through the services | the hand-off |
+| 2 | `ps \| grep -E 'runsv\|q2(ui\|player\|playd\|libd\|sysd\|netd\|btd\|pkgd)'` | each running once | the services |
+| 3 | `$A /run/vamp/sys.sock Q2SYS/1 battery heat jack` | `battery level=` near today's, `heat off` (today's `q2guard` keeps it), `jack po= bal=` as plugged | the CW2015, the jacks' GPIO class |
+| 4 | `$A /run/vamp/sys.sock Q2SYS/1 'screen off'`, then `'screen on'`; a short press of Power | the panel dark, then lit, both ways | Readiness 3 |
+| 5 | `$A /run/vamp/lib.sock Q2LIB/1 'songs count=3'` | three of the card's songs | `q2libd`'s scan |
+| 6 | On the Q2, play a song from Songs; then `$A /run/vamp/play.sock Q2PLAY/1 now` twice, 2 s apart | `state=1`, `pos` moving | the player |
+| 7 | Listen on 3.5 mm, then 4.4 mm; `$A /run/vamp/play.sock Q2PLAY/1 'volume 20' 'volume 60'` | sound on the jack the DAC drives, louder at 60 | Readiness 1 and 2: which jack sounds, and the law |
+| 8 | Unplug the headphones while it plays | paused | the unplug |
+| 9 | `$A /run/vamp/net.sock Q2NET/1 status` with Wi-Fi on and a saved network | `state=connected` and an `ip=` | Readiness 13 |
+| 10 | `$A /run/vamp/bt.sock Q2BT/1 status devices` | `power=` as saved, the paired headset listed; connect it from its own button | Readiness 5 |
+| 11 | `$A /run/vamp/sys.sock Q2SYS/1 find`, then press any key | the jingle with the screen lit, stopped at the key | Find My Vamp's PWM |
+| 12 | `logread 2>/dev/null \| tail -50; dmesg \| tail -50` | no service restarting in a loop | |
+
+8. Come back: `adb reboot`. Today's Vamp starts (`boot-once` was spent); `cat /mnt/data/vamp/handoff.log` has this boot's lines. If adb is gone, hold Power 3 s (`q2sysd`'s power off, which in a card boot reaches stock's `init`), or longer for the PMIC's cut-off. If today's Vamp does not come up, the step 3 tar has the data and [First boot on a Q2](#first-boot-on-a-q2)'s step 1 is the way back.
+9. Keep the evidence: `adb pull /mnt/data/vamp/` and the answers above, into the needs-a-Q2 rows they settle.
+
 ## First boot on a Q2
 
 **Recovery is unproven on the owner's Q2 (measured 2026-11-27, unit V26Qi): no flash install of Vamp OS on the device.** The documented combo (hold Previous, power on with Centre for 1 to 2 s) booted normally, and `recovery-update/` (stock V1.36's `xImage` and `rootfs.squashfs`) was still on the card afterwards, so the recovery did not run. U-Boot's strings (`mtd0`, read-only) show only the `ota:kernel2` mark path (`====into recovery====`), the one stock's updater takes through `mtd6`; a key-triggered recovery is not shown to exist on this unit (a longer hold is still to be tried). Until a rescue path has been seen working on that Q2, Vamp OS is tried there only by [card boot](#card-boot), and nothing that writes its flash is run: no `q2pkgd install`, no `mtd6` mark, no step 9 below.
