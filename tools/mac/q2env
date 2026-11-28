@@ -43,7 +43,9 @@ tc_sha=$(cd "$root/tools" && python3 -c 'import thirdparty; print(thirdparty.TOO
 # No core dumps: a crashed test would leave hundreds of MB in the worktree it ran in.
 # --init: PID 1 is Docker's init, which reaps orphans. Without it the command is PID 1, and a test's process
 # whose parent has gone is reparented to it and stays a zombie, which kill(pid, 0) still finds alive.
-run=(docker run --rm --init --platform linux/arm64 --user "$(id -u):$(id -g)" --ulimit core=0
+# /dev/fuse: the card boot's squashfuse_ll mounts a real image over FUSE in test/q2vampos.py, inside unshare -Urm (a
+# user namespace may mount FUSE; the container needs no capability for it, only the device).
+run=(docker run --rm --init --platform linux/arm64 --user "$(id -u):$(id -g)" --ulimit core=0 --device /dev/fuse
      --tmpfs /tmp:exec,mode=1777,size=2g
      --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined
      -v "$HOME:$HOME" -v "$HOME/.cache/q2-thirdparty:/home/gray/.cache/q2-thirdparty" -v q2-toolchain:$tc
