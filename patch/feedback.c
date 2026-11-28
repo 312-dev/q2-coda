@@ -1406,7 +1406,8 @@ static void card_across_row(void *canvas, void *item, int k, int left, int lit) 
 /* A destructive answer (docs/oled-design.md#confirmation-card, the owner's ruling 2026-11-28): the
  * trash in Negative and the verb after it, centred together; lit, over a gray platter (Off,
  * CARD_DANGER_SEL_L in Light; not the accent) with the verb in Text Primary, else the verb in
- * Negative. The trash shows either way, so the verb never moves as the selection does. */
+ * Negative. The trash shows either way, so the verb never moves as the selection does. Cancel lit on
+ * the same card takes the same gray in Text Primary (confirm_rows_paint): red marks only the verb. */
 #define CARD_TRASH 18              /* tools/art.py CARD_TRASH_PX */
 #define CARD_TRASH_GAP 8           /* the trash's right to the verb */
 #define CARD_DANGER_SEL_L 0xe5e5ea /* the lit platter in Light (Dark's is Off, RGB_OFF) */
@@ -1468,12 +1469,17 @@ void confirm_rows_paint(void *w, void *canvas) {
             danger_row(w, canvas, item, cf.c.rows[k], lit, x, y, cx, red, primary);
             continue;
         }
-        ui_text(canvas, cf.c.rows[k], 0, TYPE(20), lit ? 0xffffff : primary, 1, cx, y, CARD_W - 2 * CARD_IN, 1);
+        if (lit && cf.c.kind == CONFIRM_DESTRUCTIVE) { /* Cancel lit: the verb's gray, so red marks only the verb */
+            rect_t bar = { x + theme()->sel_inset, I(item, W_Y), I(item, W_W) - 2 * theme()->sel_inset, CARD_ROW };
+            fill_box(canvas, &bar, RGBA(ipod_light() ? CARD_DANGER_SEL_L : RGB_OFF), (unsigned)theme()->sel_radius);
+        }
+        ui_text(canvas, cf.c.rows[k], 0, TYPE(20), lit && cf.c.kind != CONFIRM_DESTRUCTIVE ? 0xffffff : primary, 1, cx, y,
+                CARD_W - 2 * CARD_IN, 1);
         if (cf.c.timeout_ms > 0 && k == cf.c.timeout_row) {
             char t[16];
             int left = (int)(cf.until - (unsigned)time_now_ms());
             tk_snprintf(t, sizeof t, "%d s", left > 0 ? (left + 999) / 1000 : 0);
-            ui_text(canvas, t, 0, CARD_COUNT_PX, lit ? 0xffffff : tok(TOK_TERTIARY), 1,
+            ui_text(canvas, t, 0, CARD_COUNT_PX, lit && cf.c.kind != CONFIRM_DESTRUCTIVE ? 0xffffff : tok(TOK_TERTIARY), 1,
                     x + out + CARD_W - CARD_IN, y, 60, 3);
         }
     }

@@ -24,8 +24,9 @@
  * a toast never does.
  *
  * q2ui asks its own questions on the same card (notice_ask_local: Forget This Device), queued with the
- * rest; one may be destructive (docs/oled-design.md#confirmation-card): it opens on Cancel, and its verb
- * has the trash before it in Negative, lit on a gray platter with the verb in Text Primary.
+ * rest; one may be destructive (docs/oled-design.md#confirmation-card): it opens on Cancel, its verb
+ * has the trash before it in Negative, and the lit row, the verb or Cancel, is on a gray platter in
+ * Text Primary, never the accent, so red on the card marks only the verb.
  *
  * Everything here runs in the loop's one thread: the socket and its connections are ui_watch'd,
  * read without waiting, and a command changes state like an input does (the card's motion is
@@ -640,9 +641,14 @@ static void card_draw_in(rect_t r) {
         int lit = k == card.sel, danger = k == card.a.danger;
         rectf_t bar = { CARD_X + BAR_INSET, at, CARD_W - 2 * BAR_INSET, ANSWER_H };
         float ty = at + (ANSWER_H - TYPE(20)) / 2.0f;
-        if (!danger) {
+        if (!danger && card.a.danger < 0) {
             if (lit) fill_round(bar, 8, 0, RGB_ACCENT, a, 0);
             run_draw(&card.answer[k], SCREEN_W / 2.0f - card.answer[k].w / 2, ty, lit ? 0xffffff : tok(TOK_PRIMARY), ink);
+            continue;
+        }
+        if (!danger) { /* Cancel on a destructive card: lit on the same gray, so red marks only the verb */
+            if (lit) fill_round(bar, 8, 0, ui_light ? DANGER_SEL_L : RGB_OFF, a, 0);
+            run_draw(&card.answer[k], SCREEN_W / 2.0f - card.answer[k].w / 2, ty, tok(TOK_PRIMARY), ink);
             continue;
         }
         /* the destructive verb (demo's feedback.c danger_row): the trash and the verb centred together, unmoved as the

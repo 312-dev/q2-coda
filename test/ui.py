@@ -1004,8 +1004,8 @@ def danger_card(binary, work, home):
     """Forget This Device asks first (ui/page_bluetooth.c, demo's bt_detail.c forget_ask), on the confirmation card's
     destructive kind (ui/notice.c, docs/oled-design.md#confirmation-card, the owner's ruling 2026-11-28): it opens on
     Cancel, so Centre at once forgets nothing; the verb has the trash before it whether lit or not and does not move;
-    unlit the verb is Negative (#FF453A, #D70015 on Light's white card), lit it sits on a gray platter (#3A3A3C, Light
-    #E5E5EA) in Text Primary, never the accent. Before/after PNGs with Q2UI_KEEP."""
+    unlit the verb is Negative (#FF453A, #D70015 on Light's white card); the lit answer, Cancel as it opens or the verb,
+    sits on a gray platter (#3A3A3C, Light #E5E5EA) in Text Primary, never the accent. Before/after PNGs with Q2UI_KEEP."""
     good = True
     car = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest',  # Settings > Bluetooth
            'tick 2', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest']  # Car's page, Forget This Device
@@ -1024,7 +1024,7 @@ def danger_card(binary, work, home):
         if os.environ.get('Q2UI_KEEP'):
             for name, pic in (('ask', ask), ('lit', lit)):
                 pathlib.Path(f"{os.environ['Q2UI_KEEP']}/danger-{half}-{name}.ppm").write_bytes(b'P6\n%d %d\n255\n' % (W, H) + pic.rgb)
-        cancel = [y for y in range(44, 302) if ask.at(55, y) == ACCENT]
+        cancel = [y for y in range(44, 302) if ask.at(55, y) == platter]
         top = cancel[-1] + 1 if cancel else 0  # the verb's row is the 32 px under Cancel's bar
 
         def row(pic):
@@ -1037,8 +1037,10 @@ def danger_card(binary, work, home):
             xs = [x for x in range(60, 316) if sum(abs(a - b) for a, b in zip(pic.at(x, top + 16), TRASH)) <= 3]  # blend rounding
             return (xs[0], xs[-1]) if xs else None
         unlit, lit_row = row(ask), row(lit)
-        good &= check(f'({half}) the card opens on Cancel, lit in the accent, the verb under it unlit',
-                      len(cancel) >= 28 and ACCENT not in unlit, f'{len(cancel)} accent rows')
+        cancel_row = {ask.at(x, y) for y in range(top - 30, top - 2) for x in range(60, 316)}
+        good &= check(f'({half}) the card opens on Cancel, lit on the same gray platter {platter} in Text Primary, never the '
+                      'accent, the verb under it unlit', len(cancel) >= 28 and inked(cancel_row, primary) and
+                      ACCENT not in cancel_row | unlit, f'{len(cancel)} gray rows, primary {inked(cancel_row, primary)}')
         good &= check(f'({half}) unlit, the verb is Negative {negative} after the trash', inked(unlit, negative) and trash_x(ask) is not None,
                       f'negative {inked(unlit, negative)}, trash {trash_x(ask)}')
         good &= check(f'({half}) lit, a gray platter {platter} and the verb in Text Primary, no accent and no Negative ink',
@@ -3029,6 +3031,27 @@ def screen_dark(binary, work):
     return good
 
 
+def stats_rests(binary, work):
+    """dropped counts refreshes a motion missed, not the rests between motions (a device read, 2026-11-28: 294 dropped
+    against 180 frames, every motion frame one refresh after the last): ticks a rest apart, each glide played out,
+    report no drop and no gap over a refresh; over_budget leaves out the pan, which on the Q2 waits for the refresh."""
+    run = Run(binary, work, 400)
+    try:
+        run.rest()
+        base = run.stats()
+        for _ in range(4):
+            run.ticks(1)
+            time.sleep(0.8)
+        s = run.rest()
+        gaps = s.get('gap_hist_refreshes', {})
+        moved = s['frames'] - base['frames']
+        return check('four ticks a rest apart: frames drawn, none dropped, no gap past one refresh, the rests not counted',
+                     moved > 8 and s['dropped'] == base['dropped'] and gaps.get('more', 0) == base.get('gap_hist_refreshes', {}).get('more', 0),
+                     f"{moved} frames, dropped {base['dropped']} -> {s['dropped']}, gaps {gaps}")
+    finally:
+        run.proc.kill(), run.proc.wait(timeout=5), os.close(run.queue)
+
+
 def live_stats(binary, work):
     """The stats file while the list moves, not only at rest (the coordinator's, 2026-11-28: a device read during a scroll
     saw no update): written at most once a second as the loop runs, whole each time."""
@@ -3361,6 +3384,7 @@ def main():
         if not only or 'live' in only:
             good &= live(binary, work)
             good &= live_stats(binary, work)
+            good &= stats_rests(binary, work)
             good &= routes(binary, work)
             good &= reload(binary, work)
             good &= early_hup(binary, work)
@@ -3402,6 +3426,8 @@ def main():
             good &= light_default(binary, work, ('--page', 'home'))
         if not only or 'api' in only:
             good &= api_play(binary, work) & api_status(binary, work)
+        if 'rests' in only:  # the stats across rests alone ('live' runs it too)
+            good &= stats_rests(binary, work)
         if 'danger' in only:  # the danger card alone ('pages' runs it too)
             good &= danger_card(binary, work, ('--page', 'home'))
         if not only or 'dark' in only:
