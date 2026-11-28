@@ -21,6 +21,12 @@
 #include <unistd.h>
 
 #include <linux/input.h>
+/* An event's time by the kernel header's own names, which a libc with a 64-bit time_t on a 32-bit Q2 needs (Vamp OS's:
+ * the struct has no timeval there); headers before Linux 4.16 (today's Vamp's toolchain) have only the timeval. */
+#ifndef input_event_sec
+#define input_event_sec time.tv_sec
+#define input_event_usec time.tv_usec
+#endif
 
 #include "q2ui.h"
 
@@ -113,7 +119,9 @@ int input_fds(int *fds, int max) {
 
 static int wheel_event(const struct input_event *e, input_t *out, int max) {
     int n = 0;
-    unsigned at = e->time.tv_sec || e->time.tv_usec ? (unsigned)(e->time.tv_sec * 1000 + e->time.tv_usec / 1000) : now_ms();
+    unsigned at = e->input_event_sec || e->input_event_usec
+                      ? (unsigned)(e->input_event_sec * 1000 + e->input_event_usec / 1000)
+                      : now_ms();
     if (e->type == EV_ABS && e->code == ABS_X) x = e->value;
     if ((e->type == EV_KEY && e->code == BTN_TOUCH) ||
         (e->type == EV_ABS && e->code == ABS_PRESSURE)) {

@@ -1612,7 +1612,8 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start (white in Light Mode, where the
   fill is dark). Volume ends at y 248, the toggles block's foot.
 - <a id="cc-usb-row"></a>**USB row** (approved 2026-11-17 from `design/usb-row` `mock_usb_row.py`), only while a cable is
-  in: 335 x 38 from (20, 258), 10 px under the blocks, fully round as the sliders, in the block's color: Phosphor's
+  in: 319 x 38 from (28, 258), 10 px under the blocks, its ends 8 px in from theirs so that it, its ring and the landing's
+  overshoot stay inside the glass's bottom corners ([Corners](#corners); the owner's, 2026-11-28: it ran off the rounded edge), fully round as the sliders, in the block's color: Phosphor's
   `usb` (fill, 20 px, Text Primary) centered 22 px in, "USB" in Inter Medium 15 from 40 px in, the remembered choice
   (Automatic, Transfer Files, USB Audio, Charge Only, Ask Every Time, USB Debugging) in 15 px Text Secondary ending 30 px from its
   end, and a 13 px bold `caret-right` in the chevron's gray centered 18 px from it. The wheel's ring round it is the
@@ -1637,7 +1638,11 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
 - **Coming and going** (the owner's, 2026-11-27: it comes down from the top, never in from the side): a finger pulled
   down from the top edge holds the sheet's foot under it as it moves (an interactive transition), and let go the sheet
   settles open, or back up when let go less than a third of the way down unless flung down (faster than 300 px/s; a
-  fling up closes it from anywhere). Return held drops it from the top; Return or a swipe up sends it back up. Each
+  fling up closes it from anywhere). Open, a finger dragged up or down anywhere on it (the owner's, 2026-11-28: "move
+  WITH finger up and down and have a trigger point to collapse") holds its foot as far above the screen's foot as the
+  finger has gone up, in the frame that takes each move, and let go the sheet goes back up past a third of the way up or
+  flung up, else it settles open again: the pull's rule from the other side. A slider dragged across is still a slider.
+  Return held drops it from the top; Return sends it back up. Each
   settle is cubic out, 260 ms over the whole screen and its share of that for less; under Reduce Motion it stands
   or goes at once, and a finger still pulls it. The page under it stays as it was.
 - **Now Playing block**: a tap anywhere on it but the transport, or Center on it, closes the page and opens Now

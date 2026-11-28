@@ -743,3 +743,30 @@ def test_q2uis_display_page_sets_night_shift_and_its_warmth_through_demo(fw):
     saved.clear()
     assert cc(b'nightk', 2700) == 0 and saved == [('Q2POD', 'NIGHTK', 2700)] and kelvin() == 2700 and on() == 2
     assert cc(b'nightk', 2750) == -1 and cc(b'nightk', 5100) == -1 and cc(b'nightk', 1900) == -1 and kelvin() == 2700
+
+
+def test_centre_pressed_dark_lights_the_screen_while_q2ui_has_it(fw):
+    """Centre wakes a dark screen at its press (the owner's, 2026-11-28: "center button is not presently waking device"):
+    stock lights it at Centre's release, which never reaches stock while q2ui reads Centre, so the press wakes it here, as
+    Return's does (nav/input.c wake_key), and goes to neither demo's page nor, dark, to q2ui (ui/ui.c drops it)."""
+    g = Gate(fw)
+    g.poll()
+    lit = fw.var('g_backlight_status', C.c_ubyte)
+    lit.value = 0
+    woke, passed = [], []
+    fw.mock('awake_screen', lambda *_: woke.append(1) or lit.__setattr__('value', 1) or 1)
+    fw.mock('stock_input_trampoline', lambda *_: passed.append(1) or 0)
+    send = fw.fn('ringnav_input', C.c_int, C.c_void_p, C.c_void_p)
+
+    def event(kind, key):
+        e = C.create_string_buffer(0x40)
+        struct.pack_into('<i', e, O['EVENT_TYPE'], kind)
+        struct.pack_into('<i', e, O['EVENT_KEY'], key)
+        return e
+    send(None, event(DOWN, KEYS['KEY_CENTER']))
+    g.ms += 80
+    send(None, event(UP, KEYS['KEY_CENTER']))
+    assert woke == [1] and passed == []
+    g.ms += 2000
+    send(None, event(DOWN, KEYS['KEY_CENTER']))  # lit: an ordinary press, q2ui's
+    assert woke == [1] and passed == []

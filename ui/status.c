@@ -143,9 +143,15 @@ int status_told_value(const char *key, char *out, size_t room) {
     return 0;
 }
 
+/* the states' text as last read, read again first when it changed (a script's `told`, main.c) */
+const char *status_told_text(void) {
+    if (S.told) S.told = 0, read_told();
+    return S.told_text;
+}
 static void read_told(void) {
-    char line[640], num[12], text[sizeof S.told_text]; /* a line: up to the cover's path (now.c) */
-    FILE *f = fopen(status_told, "r");
+    char line[640], num[12], text[sizeof S.told_text], composed[1024]; /* a line: up to the cover's path (now.c) */
+    /* on Vamp OS the states are the services' (ui/api.c api_told), in the file's form */
+    FILE *f = api_told(composed, sizeof composed) ? fmemopen(composed, strlen(composed), "r") : fopen(status_told, "r");
     size_t got = f ? fread(text, 1, sizeof text - 1, f) : 0;
     text[got] = 0;
     if (strcmp(text, S.told_text)) { /* a page may show it (Control Center's switches): every row asked again */

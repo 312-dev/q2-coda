@@ -9,7 +9,7 @@
  *          [--backlight DIR] [--ask FILE] [--now FILE] [--cover FILE] [--power DIR] [--wifi FILE]
  *          [--wireless FILE] [--told FILE] [--networks FILE]
  *          [--bt-devices FILE] [--art DIR] [--config FILE] [--card DIR]
- *          [--notices SOCKET] [--apps FILE] [--app-card DIR] [--then now]
+ *          [--notices SOCKET] [--apps FILE] [--app-card DIR] [--then now] [--api auto|demo|vamp] [--api-dir DIR]
  *
  * --catalogue is the server library's (default /mnt/mmc/.q2pod/catalogue.db; "" for none): its
  * songs are listed with the card's, as the Library lists them. --panel-bits is the depth of the
@@ -28,7 +28,9 @@
  * ends it, by a signal, when a window of its own must be seen, and starts it again after: so the
  * pages it had open and each one's row are kept in --state (a file in /tmp: gone at a restart)
  * each time it comes to rest, and a start within STATE_FRESH_S of that opens them again. --cmdq and --playlist are
- * the player's queue and list file (ui/player.c), --ctl the open fd of the pipe demo takes settings
+ * the player's queue and list file (ui/player.c), --api which side the player is spoken to on: auto (the default)
+ * Vamp OS's services when --api-dir (/run/vamp) is there, else demo's queue and files, demo always them, vamp
+ * the services (ui/api.c), --ctl the open fd of the pipe demo takes settings
  * from (demo passes it; patch/q2ui_gate.c), --now what plays and --cover the cover's file while
  * demo names none (ui/now.c), --ask the file a page of demo's is asked for in (ui_demo_page), --backlight the
  * folder whose state says the screen is dark, --power, --wifi and --wireless where the status
@@ -110,6 +112,10 @@ static void parse(int argc, char **argv) {
             now_file = v, ++i;
         else if (!strcmp(a, "--cover"))
             now_cover_file = v, ++i;
+        else if (!strcmp(a, "--api"))
+            api_choice = v, ++i;
+        else if (!strcmp(a, "--api-dir"))
+            api_dir = v, ++i;
         else if (!strcmp(a, "--cmdq"))
             player_queue = v, ++i;
         else if (!strcmp(a, "--ctl"))
@@ -196,8 +202,12 @@ static void write_stats(void) {
     FILE *f = fopen(opt.stats, "w");
     const struct ui_stats *s = &ui_stats;
     if (!f) return;
-    char notices[200];
+    char notices[200], title[256];
     notice_stats(notices, sizeof notices);
+    size_t tn = 0; /* what plays, JSON-safe: a quote, a backslash or a control byte left out */
+    for (const char *c = now_get()->title; *c && tn + 1 < sizeof title; ++c)
+        if (*c != '"' && *c != '\\' && (unsigned char)*c >= 0x20) title[tn++] = *c;
+    title[tn] = 0;
     double frames = s->frames ? (double)s->frames : 1;
     fprintf(f,
             "{\"rows\": %d, \"open_ms\": %u, \"first_frame_ms\": %u, \"frames\": %u, \"ticks\": %u,\n"
@@ -209,14 +219,16 @@ static void write_stats(void) {
             "\"lt16_7\": %u, \"lt33\": %u, \"more\": %u},\n"
             " \"glyphs\": %u, \"glyph_bytes\": %u, \"glyphs_made\": %u, \"glyph_evictions\": %u, "
             "\"motion\": %d, \"panel_bits\": %d, \"page\": %d,\n"
-            " \"now_seq\": %u, \"now_watched\": %d, \"playing\": %d, \"paused\": %d, \"cover\": %d, \"top\": \"%s\",\n %s%s%s}\n",
+            " \"now_seq\": %u, \"now_watched\": %d, \"playing\": %d, \"paused\": %d, \"cover\": %d, \"top\": \"%s\",\n"
+            " \"api_vamp\": %d, \"api_play\": %d, \"hearts\": %d, \"liked\": %d, \"title\": \"%s\",\n %s%s%s}\n",
             lib_songs(), open_ms, first_ms, s->frames, s->ticks, (double)s->draw_ns / frames / 1e3,
             (double)s->show_ns / frames / 1e3, (double)s->draw_max_ns / 1e3, (unsigned)(s->px / frames),
             (double)s->work_us / frames, (unsigned long long)s->work_max_us, s->over_budget, s->cpu_over, s->dropped,
             s->late, s->streak_max, fb_refresh_us(), s->deferred, s->hist[0], s->hist[1], s->hist[2], s->hist[3],
             s->hist[4], s->hist[5], s->hist[6], s->hist[7], text_stats.glyphs, text_stats.bytes,
             text_stats.made, text_stats.evictions, list_motion, fb_bits, fb_page(), now_seq(), now_watched(),
-            now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(), notices,
+            now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(), api_vamp, api_play_live(),
+            now_get()->hearts, now_get()->liked, title, notices,
             *bench_json ? ",\n \"bench\": " : "", bench_json);
     fclose(f);
 }
@@ -406,6 +418,7 @@ static int key_code(const char *name) {
  * shot FILE | rows FILE | layout FILE (the rows in sight as laid out, list_layout_dump) | record DIR | record off | plays FILE (what plays is read from FILE from here on) |
  * networks FILE and btdevices FILE (the same for demo's Wi-Fi networks and Bluetooth devices) |
  * notice COMMAND (a Q2UI/1 command, as a connection's: its answers go to the trace, "said ...") |
+ * api (every answer Vamp OS's services owe in, up to 2 s of real time; ui/api.c) | told FILE (the status row's states) |
  * touch X Y | move X Y | lift (a finger on the upright screen, as ui/input.c reads hyn_ts) |
  * swipe X0 Y0 X1 Y1 MS (a finger down, moved a frame at a time over MS, lifted) |
  * spin N DPS (N ticks, one a frame, the wheel turning at DPS degrees a second; a tick's is 0).
@@ -473,6 +486,11 @@ static int script(const char *path) {
         } else if (sscanf(line, "plays %319s", arg) == 1) {
             now_file = strdup(arg); /* what plays is now this file's: as demo writing a new one */
             now_read();
+        } else if (!strncmp(line, "api", 3) && (line[3] == '\n' || !line[3])) {
+            api_wait(2000); /* every answer from Vamp OS's services in, a script's clock stopped meanwhile */
+        } else if (sscanf(line, "told %319s", arg) == 1) {
+            FILE *o = fopen(arg, "w"); /* the status row's states as it reads them */
+            if (o) fputs(status_told_text(), o), fclose(o);
         } else if (sscanf(line, "networks %319s", arg) == 1) {
             wifi_networks_file = strdup(arg); /* demo's networks are now this file's: as demo writing them anew */
             wifi_networks_changed();
@@ -536,6 +554,7 @@ int main(int argc, char **argv) {
     if (fb_open(opt.fb, opt.bits)) return fprintf(stderr, "q2ui: cannot use %s\n", opt.fb), 2;
     panel_24bit();
     open_ms = (unsigned)((mono_us() - t0) / 1000u);
+    api_open(); /* before what plays is read: on Vamp OS it is Q2PLAY/1's */
     now_open();
     config_open();
     art_sync = opt.script || opt.bench; /* covers read in place: a script's pictures and a bench's times repeat */
