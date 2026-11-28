@@ -751,10 +751,12 @@ def tool(tmp, name, *defines):
     """test/player/NAME.c with patch/peq.c (and player/dsp.c for dsp_test) as the player builds them, for this
     machine."""
     out = tmp/name
-    if not out.exists() and name in ('volume_test', 'alsa_test'):  # output.c and the car's trace it counts into, with FFmpeg's headers
+    if not out.exists() and name in ('volume_test', 'alsa_test'):  # output.c, the car's trace it counts into and the output tap
+        # it copies into (tap.c, whose USB audio sink is uac.c), with FFmpeg's headers
         ff = pathlib.Path(subprocess.run([sys.executable, ROOT/'tools/player.py', 'ffmpeg', 'host'], check=True, capture_output=True, text=True).stdout.strip())
         subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-O2', '-Wall', '-Werror', *defines, '-I', ROOT/'player', '-I', ff/'include', HERE/f'{name}.c',
-                        ROOT/'player/output.c', ROOT/'player/cartrace.c', '-L', ff/'lib', '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
+                        ROOT/'player/output.c', ROOT/'player/cartrace.c', ROOT/'player/tap.c', ROOT/'player/uac.c', '-L', ff/'lib',
+                        '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
     if not out.exists():
         subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-DPEQ_HOST', *defines, '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                         '-I', ROOT/'player', '-I', ROOT/'patch', HERE/f'{name}.c', *([ROOT/'player/dsp.c'] if name == 'dsp_test' else []), ROOT/'patch/peq.c',
