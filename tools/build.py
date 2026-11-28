@@ -590,6 +590,16 @@ LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.er
 # (patch/q2ui_gate.c, which finds no /usr/bin/q2ui in any other build and so does nothing there), and has the screen
 # back whenever q2ui ends. So the choice is one file and demo is always the fallback.
 UI = 'usr/bin/q2ui'
+# --dev only (docs/boot.md#vampos-card-boot, patch/q2vampos.sh): a VampOS image on the card, mounted (a loop device,
+# or squashfuse_ll over FUSE on a kernel with none: VAMPOS_FUSE) and run in a chroot before demo when the card's
+# .vamp/os asks for it (boot-once, removed first, or boot-always) and the image's SHA-256 matches; any other case, or
+# a failure, goes on to Rockbox's choice and demo as before. q2vampos exits 2 only once VampOS has run and ended, and
+# the Q2 then reboots; any other status (1, its normal Vamp, or a q2vampos that is missing or broken) goes on as
+# before. Before Rockbox's choice, in BOOT_HOOK's start path.
+VAMPOS, VAMPOS_FUSE = 'usr/bin/q2vampos', 'usr/bin/squashfuse_ll'
+VAMPOS_HOOK = (b'        if [ "$(cat /mnt/data/boot-target 2>/dev/null)" != q2pod ] && ! /usr/bin/q2boot; then\n',
+               b'        /usr/bin/q2vampos; [ $? = 2 ] && { reboot; sleep 60; }\n'
+               b'        if [ "$(cat /mnt/data/boot-target 2>/dev/null)" != q2pod ] && ! /usr/bin/q2boot; then\n')
 # --dev only: the wheel's frame log (playback.c wl_flush) and stale-press notes (navigation.c stale_note) go to the
 # card's q2-wheel.log, appended, when the card is up, up to 256 KB. In BOOT_HOOK's start path.
 WHEEL_LOG_HOOK = (b'        rb=/mnt/mmc/.rockbox\n',
@@ -2533,15 +2543,32 @@ def adbd_binary(out):
     return thirdparty.stripped(thirdparty.build('adbd')/ADBD, out/'adbd').read_bytes()
 
 
+def s90play_script(s90play, dev):
+    """S90play as a build ships it: stock's with BOOT_HOOK, and a --dev build's hooks on top."""
+    check(s90play.count(BOOT_HOOK[0]) == 1 and s90play.count(REMOTE_HOOK[0]) == 1, 'Unexpected S90play')
+    s90play = s90play.replace(*BOOT_HOOK)
+    check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
+    check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
+    check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
+    check(s90play.count(VAMPOS_HOOK[0]) == 1, 'Unexpected boot choice')
+    if not dev:
+        return s90play
+    return (s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*ADB_WIFI_HOOK).replace(*USBTRACE_HOOK)
+            .replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK).replace(*VAMPOS_HOOK))
+
+
 def adb_files(out, cat):
     """A --dev build's ADB files ({rootfs path: (path whose inode metadata it takes, bytes)}): adbd, its gadget
-    script, adb over Wi-Fi's supervisor and mDNS responder, q2update, and stock's USB scripts wrapped (adb_wrapper), each stock copy before its wrapper, which takes the
-    inode the copy's metadata comes from."""
+    script, adb over Wi-Fi's supervisor and mDNS responder, q2update, q2vampos and squashfuse_ll (VAMPOS_HOOK, not
+    ADB's but --dev's too), and stock's USB scripts wrapped (adb_wrapper), each stock copy before its wrapper, which
+    takes the inode the copy's metadata comes from."""
     return {ADBD: (HELPER_LIKE, adbd_binary(out)),
             ADB_GADGET: (HELPER_LIKE, (ROOT/'patch/adb_gadget.sh').read_bytes()),
             ADB_WIFI: (HELPER_LIKE, (ROOT/'patch/adb_wifi.sh').read_bytes()),
             ADB_MDNS: (HELPER_LIKE, compile_helper(out, cat, ADB_MDNS_SOURCES, 'q2adb-mdns', HELPER_LIBS[:1])),
             Q2UPDATE: (HELPER_LIKE, (ROOT/'patch/q2update.sh').read_bytes()),
+            VAMPOS: (HELPER_LIKE, (ROOT/'patch/q2vampos.sh').read_bytes()),
+            VAMPOS_FUSE: (HELPER_LIKE, squashfuse_binary(out)),
             **{f'usr/bin/{n.replace(".sh", "_stock.sh")}': (f'usr/bin/{n}', cat(f'usr/bin/{n}')) for n in USB_SCRIPTS},
             **{f'usr/bin/{n}': (f'usr/bin/{n}', adb_wrapper(n)) for n in USB_SCRIPTS}}
 
@@ -2609,6 +2636,19 @@ def adbd_record(out):
     import thirdparty
     data = (out/'adbd').read_bytes()
     return dict(version=thirdparty.SOURCES['adbd'][0], sha256=sha(data), bytes=len(data))
+
+
+def squashfuse_binary(out):
+    """--dev builds' squashfuse_ll (VAMPOS_FUSE), built static by tools/thirdparty.py, stripped into out."""
+    import thirdparty
+    return thirdparty.stripped(thirdparty.build('squashfuse')/VAMPOS_FUSE, out/'squashfuse_ll').read_bytes()
+
+
+def squashfuse_record(out):
+    """The manifest's squashfuse_ll: squashfuse's version, SHA-256 and size."""
+    import thirdparty
+    data = (out/'squashfuse_ll').read_bytes()
+    return dict(version=thirdparty.SOURCES['squashfuse'][0], sha256=sha(data), bytes=len(data))
 
 
 def append_payload(image, payload, base, memsz, label):
@@ -3209,14 +3249,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     def swap_inode(p, path, src):
         line = need(inode(p, path), f'Missing {path.decode()} pseudo inode')
         return p[:line.start()]+path+b' F '+b' '.join(line.groups())+b' cat '+shlex.quote(str(src)).encode()+p[line.end():]
-    s90play = cat(S90PLAY)
-    check(s90play.count(BOOT_HOOK[0]) == 1 and s90play.count(REMOTE_HOOK[0]) == 1, 'Unexpected S90play')
-    s90play = s90play.replace(*BOOT_HOOK)
-    check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
-    check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
-    check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
-    s90play = s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*ADB_WIFI_HOOK).replace(*USBTRACE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play
-    (out/'S90play').write_bytes(s90play)
+    (out/'S90play').write_bytes(s90play_script(cat(S90PLAY), dev))
     (out/'config.ini').write_bytes(default_config(cat(DEFAULT_CONFIG)))
     s11logo = cat(S11LOGO)
     check(s11logo.count(LOGO_HOOK[0]) == 1, 'Unexpected S11logo_display_shell')
@@ -3480,7 +3513,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes()), 'q2_usbtrace_sha256': sha((out/'q2-usbtrace').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
-        **({'adbd': adbd_record(out)} if dev else {}),
+        **({'adbd': adbd_record(out), 'squashfuse_ll': squashfuse_record(out)} if dev else {}),
         **({'own_bluez': own_bluez[1]} if own_bluez else {}),
         **({'own_bluealsa': own_bluealsa_record(own_files)} if own_bluealsa else {}),
         q2player_sha256=sha(q2player.read_bytes()),
