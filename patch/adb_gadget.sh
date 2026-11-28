@@ -97,14 +97,16 @@ gadget_make() {
 # one packet a microframe, no mute or volume control (the computer's own level is its own). Eight
 # requests in flight: dwc2's descriptor DMA sends an empty packet in two with one and in three with two
 # (docs/iphone-mode.md#empty-packets).
+# Q2ADB_UAC_SRATE, _SSIZE and _REQ stand for the rates, the sample size and the requests, for a desk
+# test that compares them (docs/usb-audio.md#the-desk-test); a try's environment reaches its work.
 audio_function() {
     mkdir functions/uac2.q2 || return 1
     echo 3 > functions/uac2.q2/p_chmask
     echo 0 > functions/uac2.q2/c_chmask
-    echo 44100,48000,88200,96000,176400,192000 > functions/uac2.q2/p_srate
-    echo 4 > functions/uac2.q2/p_ssize
+    echo "${Q2ADB_UAC_SRATE:-44100,48000,88200,96000,176400,192000}" > functions/uac2.q2/p_srate
+    echo "${Q2ADB_UAC_SSIZE:-4}" > functions/uac2.q2/p_ssize
     echo 1 > functions/uac2.q2/p_hs_bint
-    echo 8 > functions/uac2.q2/req_number
+    echo "${Q2ADB_UAC_REQ:-8}" > functions/uac2.q2/req_number
     echo 0 > functions/uac2.q2/p_mute_present
     echo 0 > functions/uac2.q2/p_volume_present
     # the names a computer shows: Windows lists the function's (its interface association) as the
@@ -173,7 +175,9 @@ audio_set() {
         say "audio $1: the gadget made again"
         gadget_remove || exit 1
         gadget_make
-        say "made: $(cat "$G/idProduct" 2>/dev/null), functions $(ls "$G/functions" 2>/dev/null | tr '\n' ' ')"
+        say "made: $(cat "$G/idProduct" 2>/dev/null), functions $(ls "$G/functions" 2>/dev/null | tr '\n' ' ')$(
+            [ -d "$G/functions/uac2.q2" ] && for a in p_srate p_ssize req_number function_name; do
+                printf ', %s %s' $a "$(cat "$G/functions/uac2.q2/$a" 2>/dev/null)"; done)"
     ) || return 1
     bind
     say "bind returned $?"
