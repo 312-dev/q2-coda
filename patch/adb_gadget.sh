@@ -11,11 +11,12 @@
 #           background once adbd, which its restart loop starts again, has written its descriptors
 #   audio on|off|try [S]|rehearse [S]|keep
 #           USB audio beside adb (docs/usb-audio.md#usb-audio): a UAC2 function, the Q2's output as the
-#           computer's microphone, in the same gadget (a second gadget directory is refused). on and off
+#           computer's line input, in the same gadget (a second gadget directory is refused). on and off
 #           remember the choice ($DATA/q2adb.audio) for every setup after; each makes the gadget again,
 #           which drops USB adb for the seconds adbd takes to come back. try is on, not remembered, under
 #           a watchdog: unless keep (which remembers a try's audio) comes within S seconds (90), it goes back to adb
-#           alone, and if USB adb is still not back 30 s after that, the Q2 restarts. rehearse is try with
+#           alone, and if USB adb is still not back 30 s after that, the Q2 restarts; an on, off or later
+#           try with USB adb back after it stands that watchdog down. rehearse is try with
 #           the gadget made again as it was, no audio: the remake alone, under the same watchdog. Each
 #           returns once its work has detached (adbd's end ends the shell that ran it), and every step is
 #           a line in $LOG, kept across a restart.
@@ -28,6 +29,8 @@ RUN=${Q2ADB_RUN:-/tmp}
 G=$CFS/usb_gadget/q2adb
 DATA=${Q2ADB_DATA:-/mnt/data}
 PARKED=$RUN/q2adb.parked
+# The token of the latest try or rehearsal, its watchdog's duty (watch, stand_down)
+WATCH=$RUN/q2adb.audio.watch
 # There while the gadget has the UAC2 function: q2player's sign to play into its card (player/uac.c)
 AUDIO=$RUN/q2adb.audio
 LOG=${Q2ADB_LOG:-$DATA/vamp-usb-audio.log}
@@ -94,15 +97,18 @@ gadget_make() {
     mountpoint -q "$FFS" || mount -t functionfs adb "$FFS"
 }
 # Shanling's f_uac2, built into the kernel (stock's USB DAC mode uses it the other way round): playback
-# alone, the Q2 the source and the computer the sink, so the computer sees a microphone. Its rates are a
+# alone, the Q2 the source and the computer the sink, so the computer sees a recording device. Its
+# terminal type (c_terminal_type, the one the computer records from although c_chmask is 0) is a line
+# connector, 0x0603, written in decimal as the kernel prints it: as a microphone (Shanling's 0x0201)
+# Windows 11 runs its Voice Clarity noise suppression over it and a steady tone is gone within 0.2 s
+# (docs/usb-audio.md#the-desk-test). Its rates are a
 # list the computer picks from (Shanling's u_audio takes one, as upstream 6.x's does), 32-bit samples,
 # one packet a microframe, no mute or volume control (the computer's own level is its own). Eight
 # requests in flight: dwc2's descriptor DMA sends an empty packet in two with one and in three with two
 # (docs/iphone-mode.md#empty-packets).
 # Q2ADB_UAC_SRATE, _SSIZE and _REQ stand for the rates, the sample size and the requests, for a desk
 # test that compares them (docs/usb-audio.md#the-desk-test); a try's environment reaches its work.
-# Q2ADB_UAC_CTERM, when set, is the terminal type the computer records from (c_terminal_type, Shanling's
-# default 0x0201, a microphone, which is the one Windows reports for this gadget although c_chmask is 0).
+# Q2ADB_UAC_CTERM stands for the terminal type (513 for Shanling's microphone, to compare).
 audio_function() {
     mkdir functions/uac2.q2 || return 1
     echo 3 > functions/uac2.q2/p_chmask
@@ -113,9 +119,9 @@ audio_function() {
     echo "${Q2ADB_UAC_REQ:-8}" > functions/uac2.q2/req_number
     echo 0 > functions/uac2.q2/p_mute_present
     echo 0 > functions/uac2.q2/p_volume_present
-    [ -z "$Q2ADB_UAC_CTERM" ] || echo "$Q2ADB_UAC_CTERM" > functions/uac2.q2/c_terminal_type
+    echo "${Q2ADB_UAC_CTERM:-1539}" > functions/uac2.q2/c_terminal_type
     # the names a computer shows: Windows lists the function's (its interface association) as the
-    # recording device, "Microphone (Q2 Output)"; Shanling's default is "Source/Sink"
+    # recording device, "Line (Q2 Output)"; Shanling's default is "Source/Sink"
     echo "Q2 Output" > functions/uac2.q2/function_name
     echo "Q2 Output" > functions/uac2.q2/if_ctrl_name
     ln -s functions/uac2.q2 configs/c.1/
@@ -225,9 +231,13 @@ snapshot() {
 # The watchdog of a try: unless keep came within S seconds, adb alone again (in a child, given 30 s); and
 # unless USB adb is then back within BACK_S, the Q2 restarts, which makes the gadget as remembered (a try
 # never is, so the restart cannot come again). Never while parked: stock's gadget has the controller.
+# Its try's token ($WATCH, $2) still there is what keeps it on duty: a later try writes its own, and an on or
+# off takes it once USB adb is back after it (stand_down), so a watchdog never undoes a later command.
 watch() {
     sleep "$1"
     [ -f "$RUN/q2adb.audio.keep" ] && { say "kept"; return 0; }
+    [ "$(cat "$WATCH" 2>/dev/null)" = "$2" ] ||
+        { say "watchdog of try $2 stands down: an audio command since has USB adb back, or a later try has its own watchdog"; return 0; }
     say "no keep in $1 s: back to adb alone"
     snapshot
     (audio_set off) &
@@ -248,6 +258,16 @@ watch() {
     say "USB adb not back $BACK_S s after adb alone: RESTARTING THE Q2 (a try is not remembered: it comes up on adb alone)"
     sync
     $REBOOT
+}
+# After an on or off: once USB adb is back (BACK_S at most), the token of the try before it, the one there
+# when the command began ($1), goes, and that try's watchdog stands down. If USB adb does not come back the
+# token stays, and the watchdog still goes back to adb alone, restarting the Q2 if that fails too.
+stand_down() {
+    [ -n "$1" ] || return 0
+    i=0
+    while ! usb_back && [ $i -lt "$BACK_S" ]; do sleep 1; i=$((i+1)); done
+    usb_back || { say "USB adb not back after audio $2: the watchdog of try $1 stays on"; return 0; }
+    [ "$(cat "$WATCH" 2>/dev/null)" = "$1" ] && rm -f "$WATCH" && say "watchdog of try $1 told to stand down"
 }
 configfs() { mountpoint -q "$CFS" || mount -t configfs none "$CFS"; }
 
@@ -287,8 +307,9 @@ audio)
         : > "$RUN/q2adb-audio.$Q2ADB_DETACHED"
         say "audio $2 $3: pid $$, session $(cut -d' ' -f6 /proc/$$/stat 2>/dev/null)"
         case "$2" in
-        watch) watch "${3:-90}" ;;
-        on|off|try|rehearse) audio_set "$2" ;;
+        watch) watch "${3:-90}" "$4" ;;
+        on|off) t=$(cat "$WATCH" 2>/dev/null); audio_set "$2"; stand_down "$t" "$2" ;;
+        try|rehearse) audio_set "$2" ;;
         esac
         exit
     fi
@@ -303,7 +324,9 @@ audio)
     try|rehearse)
         case "${3:-90}" in *[!0-9]*) echo "q2adb-gadget: audio $2 S, S in seconds" >&2; exit 2 ;; esac
         rm -f "$RUN/q2adb.audio.keep"
-        detach watch audio watch "${3:-90}" && detach work audio "$2" &&
+        t="$$.$(cut -d' ' -f1 "$PROC/uptime" 2>/dev/null)" # this try's token: its watchdog's, until a later command's
+        echo "$t" > "$WATCH"
+        detach watch audio watch "${3:-90}" "$t" && detach work audio "$2" &&
             echo "audio $2: USB adb drops for a few seconds; within ${3:-90} s run: q2adb-gadget audio keep"
         ;;
     *) echo "usage: q2adb-gadget audio on|off|try [S]|rehearse [S]|keep" >&2; exit 2 ;;

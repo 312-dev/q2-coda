@@ -511,6 +511,7 @@ def gadget_checks():
                 os.readlink(g/'configs/c.1/ffs.adb') == 'functions/ffs.adb' and \
                 [rd(f'functions/uac2.q2/{a}') for a in ('p_chmask', 'c_chmask', 'p_srate', 'p_ssize', 'req_number', 'p_volume_present')] == \
                 ['3', '0', '44100,48000,88200,96000,176400,192000', '4', '8', '0'] and \
+                rd('functions/uac2.q2/c_terminal_type') == '1539' and \
                 rd('functions/uac2.q2/function_name') == 'Q2 Output' and (run/'q2adb.audio').exists()
         def audio_off():
             return g.is_dir() and rd('idProduct') == '0x0105' and rd('bDeviceClass') == '0x00' and \
@@ -523,7 +524,7 @@ def gadget_checks():
         def said(text): return text in (log.read_text() if log.exists() else '')
         r = gadget('audio', 'on')
         expect('audio on: returns once its work has detached', r.returncode == 0, r.stderr)
-        expect('audio on: the composite gadget (0x0104, class ef/02/01), adb and the UAC2 source, remembered, bound',
+        expect('audio on: the composite gadget (0x0104, class ef/02/01), adb and the UAC2 source as a line input (1539), remembered, bound',
                until(audio_on) and (data/'q2adb.audio').exists() and bound(), log.read_text() if log.exists() else '')
         expect('audio on: each step in the log on the card', until(lambda: said('bind returned 0')) and said('gadget removed'))
         r = gadget('setup')
@@ -557,20 +558,38 @@ def gadget_checks():
                r.returncode == 0 and k.returncode == 0 and until(lambda: said('kept')) and audio_on() and (data/'q2adb.audio').exists())
         gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
         # a desk test's other device: the terminal type the computer records from, another product and release
-        knobs = dict(env, Q2ADB_UAC_CTERM='0x0603', Q2ADB_UAC_PID='0x0106', Q2ADB_UAC_BCD='0x0226')
+        knobs = dict(env, Q2ADB_UAC_CTERM='513', Q2ADB_UAC_PID='0x0106', Q2ADB_UAC_BCD='0x0226')
         # on, not try: a try's watchdog would outlive this check and go back to adb alone inside a later one
         r = subprocess.run(['sh', str(script), 'audio', 'on'], env=knobs, capture_output=True, text=True, timeout=30)
         def knobbed():
             return g.is_dir() and rd('idProduct') == '0x0106' and rd('bcdDevice') == '0x0226' and \
-                rd('functions/uac2.q2/c_terminal_type') == '0x0603' and rd('functions/uac2.q2/function_name') == 'Q2 Output'
+                rd('functions/uac2.q2/c_terminal_type') == '513' and rd('functions/uac2.q2/function_name') == 'Q2 Output'
         expect('audio with Q2ADB_UAC_CTERM, _PID and _BCD: that terminal type, product and release',
                r.returncode == 0 and until(knobbed) and bound(), r.stderr + log.read_text()[-800:])
-        expect('the log names the terminal type set', until(lambda: said('c_terminal_type 0x0603')), log.read_text()[-800:])
+        expect('the log names the terminal type set', until(lambda: said('c_terminal_type 513')), log.read_text()[-800:])
         gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
         r = gadget('audio', 'on')
-        expect('audio on without the knobs: 0x0104, 0x0225, no c_terminal_type written',
-               until(audio_on) and not (g/'functions/uac2.q2/c_terminal_type').exists(), log.read_text()[-800:])
+        expect('audio on without the knobs: 0x0104, 0x0225, a line input', until(audio_on), log.read_text()[-800:])
         gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
+        # a try's watchdog stands down for a command after it once USB adb is back: an on after a try stays on
+        log.write_text('')
+        gadget('audio', 'try', '3'); until(lambda: said('bind returned'))
+        r = gadget('audio', 'on')
+        expect('audio on after a try: that try\'s watchdog told to stand down once USB adb is back',
+               r.returncode == 0 and until(lambda: said('told to stand down')), log.read_text()[-1500:])
+        expect('the try\'s watchdog then stands down at its time, and the on stays on and remembered',
+               until(lambda: said('stands down: an audio command'), 10) and audio_on() and (data/'q2adb.audio').exists()
+               and not said('no keep in 3 s'), log.read_text()[-1500:])
+        gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
+        # a later try: the earlier try's watchdog leaves the gadget to the later one's
+        log.write_text('')
+        gadget('audio', 'try', '2')
+        gadget('audio', 'try', '6')
+        expect('two tries: the first one\'s watchdog stands down, the second try stays on',
+               until(lambda: said('stands down'), 10) and not said('no keep in 2 s') and audio_on(), log.read_text()[-1500:])
+        expect('two tries: the second one\'s watchdog goes back to adb alone at its time',
+               until(lambda: said('no keep in 6 s'), 15) and until(audio_off) and until(lambda: said('USB adb back')),
+               log.read_text()[-1500:])
         log.write_text('')
         r = gadget('audio', 'rehearse', '1')
         expect('audio rehearse: the gadget made again as it was, no audio, and back', r.returncode == 0

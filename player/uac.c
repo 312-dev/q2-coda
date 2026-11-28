@@ -1,6 +1,6 @@
 /* The USB audio sink (docs/usb-audio.md#the-player-s-output-in-the-gadget): the output tap's stream (tap.c) played
  * into the sound card of the q2adb gadget's UAC2 function, so a computer on the cable records the Q2's output as a
- * microphone, while the DAC plays as ever.
+ * line input, while the DAC plays as ever.
  *
  * While UAC_FLAG is there (q2adb-gadget audio on makes it with the function), the thread opens the gadget card's
  * playback PCM at the rate the computer chose (Shanling's u_audio opens it at that rate alone, and says it as the
