@@ -201,7 +201,10 @@ def main(argv):
     check(1 <= tries <= 6, f'bt-attach says what it lacks and tries every 10 s, not spinning ({tries} tries)')
     check((data / 'bluetooth').is_dir(), 'the store is /mnt/data/bluetooth')
     talker.join(5)
-    btd = '\n'.join(l for l in read('runsvdir.log').splitlines() if 'q2btd' in l)
+    # the services' words: each ./run script sends its output to /run/vamp/services.log (usr/libexec/vamp/log), so
+    # runsvdir's own output has only what came before a script's exec
+    services = (vamp / 'services.log').read_text(errors='replace') if (vamp / 'services.log').exists() else ''
+    btd = '\n'.join(l for l in (read('runsvdir.log') + services).splitlines() if 'q2btd' in l)
     print('q2btd:\n' + ''.join('    ' + l + '\n' for l in btd.splitlines()[-25:]) + f'    Q2BT/1: {said}')
     check(said.get('hello') == 'Q2BT/1 ok', 'q2btd: Q2BT/1 answers', said.get('error', ''))
     check(' power=1 ' in said.get('status', '') and any(p[:1] == b'\x01' for p in kernel.sent(0x05)),
