@@ -1,4 +1,4 @@
-/* The part of alsa-lib's public API output.c calls, declared here because the Q2's root filesystem has
+/* The part of alsa-lib's public API output.c and uac.c call, declared here because the Q2's root filesystem has
  * libasound.so.2 (1.1.6) and no headers. Values are alsa-lib's <alsa/pcm.h>. */
 #ifndef ALSA_MIN_H
 #define ALSA_MIN_H
@@ -48,4 +48,16 @@ int snd_pcm_pause(snd_pcm_t *, int);
 int snd_pcm_drop(snd_pcm_t *);
 int snd_pcm_drain(snd_pcm_t *);
 const char *snd_strerror(int);
+/* controls (uac.c reads the gadget card's Playback Rate); SND_CTL_ELEM_IFACE_PCM is alsa-lib's <alsa/control.h> */
+typedef struct _snd_ctl snd_ctl_t;
+typedef struct _snd_ctl_elem_value snd_ctl_elem_value_t;
+enum { SND_CTL_ELEM_IFACE_PCM = 3 };
+int snd_ctl_open(snd_ctl_t **, const char *, int mode);
+int snd_ctl_close(snd_ctl_t *);
+int snd_ctl_elem_value_malloc(snd_ctl_elem_value_t **);
+void snd_ctl_elem_value_free(snd_ctl_elem_value_t *);
+void snd_ctl_elem_value_set_interface(snd_ctl_elem_value_t *, int);
+void snd_ctl_elem_value_set_name(snd_ctl_elem_value_t *, const char *);
+int snd_ctl_elem_read(snd_ctl_t *, snd_ctl_elem_value_t *);
+long snd_ctl_elem_value_get_integer(const snd_ctl_elem_value_t *, unsigned int);
 #endif

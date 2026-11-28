@@ -298,6 +298,28 @@ void car_trace_position(int position, int64_t played); /* the position told demo
 void car_tap(const uint8_t *data, int64_t bytes);     /* what is written to the device, for the tap */
 void car_trace_tick(struct output *, int closing);    /* the line, once its second is up or as the output closes */
 
+/* tap.c: the output tap, what the device is handed streamed to the FIFO's reader over adb and to the USB audio sink
+ * (docs/usb-audio.md#the-tap). pcm_tap_put and pcm_tap_back are the playback thread's and never wait; with no
+ * consumer each is two loads. */
+void pcm_tap_start(void);                                                   /* main: the consumers' threads, --dev only */
+void pcm_tap_put(const struct pcm_format *f, const uint8_t *data, int frames); /* frames written to the device */
+void pcm_tap_back(int64_t frames); /* written frames taken back unheard: a rewind, or a drop of what the device held */
+/* A consumer's ring: one producer (the playback thread), one consumer; head and tail count bytes ever put and taken.
+ * Records are whole once head has moved past them: an 8-byte header (PCM_TAP_HEAD), then the payload. */
+enum { PCM_TAP_RING = 1 << 20, PCM_TAP_HEAD = 8 };
+struct tap_ring {
+    uint8_t *buf;
+    size_t head, tail;
+    int active, session;            /* the consumer's: it wants frames; its count of sessions */
+    int seen;                       /* the playback thread's from here: the session its last record went to */
+    struct pcm_format sent;
+    uint32_t lost, back;
+};
+void tap_ring_open(struct tap_ring *); /* a consumer's session begins: the producer starts it with a format */
+void tap_ring_close(struct tap_ring *);
+/* uac.c: the USB audio sink's thread (docs/usb-audio.md#the-player-s-output-in-the-gadget) */
+void *uac_thread(void *ring);
+
 /* engine.c */
 void *engine_thread(void *);
 #endif
