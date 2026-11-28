@@ -406,8 +406,13 @@ static void tick(void) {
     listening = jack || (*out && strncmp(out, "output dac", 10));
     int bton = have_bt && field_int(bt, "power", 0) == 1;
     field(bt, "state", state, sizeof state), field(bt, "kind", kind, sizeof kind);
-    const char *slot = !bton ? "none" : !strcmp(state, "connecting") ? "connecting"
-                       : strcmp(state, "connected") ? "rune" : !strcmp(kind, "car") ? "car" : "headset";
+    /* status_row.c bt_slot: nothing while the sound goes to the wire or Bluetooth is off or idle, the
+     * rune dim while a device connects, the rune for a connected headset, the car's glyph for a car */
+    const char *slot = wired || !bton                  ? "none"
+                       : !strcmp(state, "connecting") ? "connecting"
+                       : strcmp(state, "connected")   ? "none"
+                       : !strcmp(kind, "car")         ? "car"
+                                                      : "rune";
     char netstate[24] = "";
     field(net, "state", netstate, sizeof netstate), field(net, "ssid", ssid, sizeof ssid);
     int wifi = have_net && strcmp(netstate, "off") && *netstate;
@@ -417,7 +422,7 @@ static void tick(void) {
     snprintf(s, sizeof s,
              "out=%s\nbt=%s\nbtbatt=%d\nrelay=none\nlock=0\nsync=0\nsyncpm=0\noffline=0\nnet=1\nclock24=%d\n"
              "wifi=%d\nbton=%d\nbtbusy=0\nairplay=0\ncar=%d\nsmart=%d\neq=%d\nusb=%s\ncable=%d\nbright=%d\nvol=%d\nvolmax=%d\n",
-             wired ? "wire" : "other", slot, !strcmp(slot, "headset") ? field_int(bt, "battery", -1) : -1,
+             wired ? "wire" : "other", slot, -1, /* demo tells no battery: the rune alone */
              ini_get("SYSSET", "TIME24H", 1) != 0, wifi, bton, ini_get("Q2POD", "CARREMOTE", 0) == 1,
              ini_get("Q2POD", "SMARTWIFI", 0) == 1, field_int(eq, "on", 0) == 1, picks[pick >= 0 && pick < 6 ? pick : 0], field_int(sys_bat, "cable", 0) == 1,
              ini_get("SYSSET", "LIGHTNESS", 50), field_int(play, "volume", 0), ini_get("PLAYSET", "MAXVOLUME", 100));

@@ -134,7 +134,7 @@ def config(root):
     return (root/'mnt/data/config.ini').read_text()
 
 
-STATUS = ('out=wire\nbt=headset\nbtbatt=80\nrelay=none\nlock=0\nsync=0\nsyncpm=0\noffline=0\nnet=1\nclock24=0\n'
+STATUS = ('out=wire\nbt=none\nbtbatt=-1\nrelay=none\nlock=0\nsync=0\nsyncpm=0\noffline=0\nnet=1\nclock24=0\n'
           'wifi=1\nbton=1\nbtbusy=0\nairplay=0\ncar=1\nsmart=1\neq=0\nusb=Transfer Files\ncable=1\nbright=60\nvol=37\nvolmax=80\n')
 
 
@@ -151,6 +151,19 @@ def test_a_jack_on_bluetooth_is_no_wire_and_a_car_is_the_car_slot(gate):
     assert until(lambda: 'out=other\nbt=car\nbtbatt=-1\n' in text(root, 'q2ui.status')), text(root, 'q2ui.status')
     s['bt'].answers['status'] = 'status power=0 state=off device= name= kind= codec= battery=-1 output=dac'
     assert until(lambda: 'bt=none\n' in text(root, 'q2ui.status') and 'bton=0\n' in text(root, 'q2ui.status'))
+
+
+def test_bluetooth_s_slot_is_demo_s_none_idle_or_under_the_wire_and_the_rune_for_a_headset(gate):
+    """status_row.c bt_slot: the wire's glyph alone while it plays there, nothing while Bluetooth is on and idle, the
+    rune for a connected headset (no battery: btbatt -1), the car's glyph for a car"""
+    root, s, ctl = gate
+    s['play'].answers['output'] = 'output bluetooth'
+    assert until(lambda: 'out=other\nbt=rune\nbtbatt=-1\n' in text(root, 'q2ui.status')), text(root, 'q2ui.status')
+    s['bt'].answers['status'] = 'status power=1 state=on device= name= kind= codec= battery=-1 output=dac'
+    assert until(lambda: 'bt=none\n' in text(root, 'q2ui.status') and 'bton=1\n' in text(root, 'q2ui.status')), \
+        text(root, 'q2ui.status')
+    s['bt'].answers['status'] = 'status power=1 state=connecting device=A name=Buds kind=headphones codec= battery=-1 output=dac'
+    assert until(lambda: 'bt=connecting\n' in text(root, 'q2ui.status')), text(root, 'q2ui.status')
 
 
 def test_the_switches_and_settings_are_set_as_demo_sets_them(gate):
