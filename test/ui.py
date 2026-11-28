@@ -1368,7 +1368,7 @@ def control_center(binary, work, home):
         if ticks == 9:
             u = pics['at']
             good &= check('with a cable in, the USB row under the blocks, ringed white 2 px wide 5 px out when the wheel is on it',
-                          u.at(100, 277) == RAISED and u.at(16, 277) == (255, 255, 255), f'{u.at(100, 277)} {u.at(16, 277)}')
+                          u.at(100, 277) == RAISED and u.at(24, 277) == (255, 255, 255), f'{u.at(100, 277)} {u.at(24, 277)}')
     good &= check("AirPlay's Centre, the USB row's Centre, EQ held and Car held each open demo's page for it",
                   asks == [('systemset/netservice_page', []), ('usbpick_page', []), ('playset/equalizer_page', []), ('carremote_page', [])], str(asks))
     rows = {}
@@ -1428,6 +1428,8 @@ def control_center_touch(binary, work, home):
     good &= check('a swipe up closes the sheet, from the grab bar or over the Brightness slider, which it leaves alone',
                   shut == [('home', []), ('home', [])], str(shut))
     good &= control_center_motion(binary, work, home, told)
+    good &= control_center_lift(binary, work, home, told)
+    good &= control_center_usb(binary, work, home)
     return good
 
 
@@ -1483,6 +1485,64 @@ def control_center_motion(binary, work, home, told):
                   said == ['set bt 1', 'set bt 0'] and pics['twice'].at(147, 68) == OFF, f"{said} {pics['twice'].at(147, 68)}")
     return good
 
+
+
+def control_center_lift(binary, work, home, told):
+    """The open sheet held by a finger (the owner's, 2026-11-28: "control center drag should move WITH finger up and
+    down and have a trigger point to collapse"): a drag up or down anywhere on it moves its foot with the finger, in the
+    frame that takes the move, and the lift closes it past a third of the way up or on a fast flick up, else it springs
+    back open; a tap still acts and a slider dragged sideways is still a slider."""
+    good = True
+    opened = ['rest', 'hold return', 'rest']
+    lines = opened + ['touch 187 250', 'move 187 240', 'move 187 200', 'move 187 150', 'move 187 230', 'move 187 245', 'run 300',
+                      'lift', 'rest']
+    trace, _, stats, _, said = script(binary, work, 60, lines, *home, '--told', told, queue=True, ctl=True)
+    feet = [int(r['reveal']) for r in trace if 'reveal' in r]
+    want = [320 - 10, 320 - 50, 320 - 100, 320 - 20, 320 - 5]  # the foot 320 + (finger - 250) after each move
+    rest = feet.index(320) if 320 in feet else len(feet)  # open: the drop is over
+    lifted = feet[rest:]
+    at = next((i for i in range(len(lifted)) if lifted[i:i + len(want)] == want), None)
+    good &= check("dragged up and back down, the open sheet's foot is where the finger is in each move's own frame, up and down",
+                  at is not None, lifted[:20])
+    good &= check('let go a sixth of the way up, held still, it springs back open; the circle under the finger is not flipped',
+                  stats['top'] == 'control' and feet[-1] == 320 and said == [], f"{stats['top']} {feet[-3:]} {said}")
+    _, _, stats = script(binary, work, 60, opened + ['touch 187 250', 'move 187 200', 'move 187 130', 'run 300', 'lift', 'rest'], *home,
+                         '--told', told)
+    good &= check('let go more than a third of the way up, held still, it closes', stats['top'] == 'home', stats['top'])
+    _, _, stats = script(binary, work, 60, opened + ['touch 187 250', 'move 187 238', 'move 187 226', 'lift', 'rest'], *home,
+                         '--told', told)
+    good &= check('flicked up fast a tenth of the way, it closes', stats['top'] == 'home', stats['top'])
+    _, _, stats = script(binary, work, 60, opened + ['touch 187 250', 'move 187 100', 'run 200', 'move 187 120', 'move 187 140', 'lift', 'rest'], *home,
+                         '--told', told)
+    good &= check('dragged past the third, then flung back down short of it, it stays open', stats['top'] == 'control', stats['top'])
+    trace, _, stats = script(binary, work, 60, opened + ['touch 200 181', 'move 230 181', 'move 300 181', 'lift', 'rest'], *home,
+                             '--told', told)
+    good &= check('a slider dragged sideways moves its level and the sheet stays put',
+                  stats['top'] == 'control' and all(int(r.get('reveal', 320)) == 320 for r in trace[[int(r.get('reveal', 0)) for r in trace].index(320):]),
+                  stats['top'])
+    return good
+
+
+def control_center_usb(binary, work, home):
+    """The USB row (a cable in) inside the glass's rounded corners (oled-design.md#corners: GLASS_R, CORNER_SLACK more for
+    text and icons; the owner's, 2026-11-28: "the USB row is currently running off the rounded edge a bit"), at rest, with
+    the wheel's ring round it, and through the landing's overshoot."""
+    sys.path.insert(0, str(ROOT/'tools'))
+    import ipod
+    r, slack = ipod.CORNER_R, ipod.CORNER_SLACK
+    told = cc_told(work, CC_TOLD.replace('cable=0', 'cable=1').replace('usb=Automatic', 'usb=Ask Every Time'))
+    lines = ['rest', 'hold return', 'run 270'] + [f'run 17\nshot @f{k}.ppm' for k in range(20)] + ['rest', 'tick 9', 'run 50', 'shot @ring.ppm']
+    _, pics, _ = script(binary, work, 60, lines, *home, '--told', told)
+    out = []
+    for name, pic in pics.items():
+        for y in range(320 - r, 320):
+            for x in list(range(0, r)) + list(range(375 - r, 375)):
+                cx = r if x < r else 374 - r
+                cy = 319 - r
+                if (x - cx) ** 2 + (y - cy) ** 2 > (r - slack) ** 2 and pic.at(x, y) != (0, 0, 0):
+                    out.append((name, x, y))
+    return check("the USB row, its ring and its landing's overshoot stay inside the glass's corners, slack included", not out,
+                 out[:6] + [len(out)])
 
 # A Q2's own hyn_ts, recorded from /dev/input/event2 on the owner's Q2 (2026-11-27) while a finger pulled down from the
 # screen's top edge: (ms from the first, type, code, value). The panel says a finger only by ABS_PRESSURE 1 and 0, never
@@ -2509,14 +2569,15 @@ def api_play(binary, work):
         sent = {text.split(' ')[0] for b in blocks for kind, text in b if kind == '>'}
         caps = [text for b in blocks for kind, text in b if kind == '<' and text.startswith('caps ')]
         nows = [text for b in blocks for kind, text in b if kind == '<~' and text.startswith('now ')]
-        good &= check('The stand-in Q2PLAY/1 answers caps as playback.md does', caps and caps[0] == PLAY_CAPS, caps)
+        play_caps = caps[0] if caps else PLAY_CAPS  # the page's own: the service gains words (queue, mode)
         keys = [[part.split('=')[0] for part in r.split(' ')[1:]] for r in nows]
+        play_now = PLAY_NOW + ''.join(f' {k}=0' for k in (keys[0] if keys else [])[8:])  # shuffle=, repeat= where it has them
         good &= check("The stand-in's now line has playback.md's now fields, in their order",
-                      keys and all(k == [part.split('=')[0] for part in PLAY_NOW.split(' ')[1:]] for k in keys), keys)
+                      keys and all(k == [part.split('=')[0] for part in play_now.split(' ')[1:]] for k in keys), keys)
     else:
         print('  (no feat/vamp-os-base here: the stand-in is not checked against playback.md)')
-        sent = None
-    answers = {'caps': [PLAY_CAPS], 'now': [PLAY_NOW], 'rating 0': ['rating id=2 stars=3 liked=1']}
+        sent, play_caps, play_now = None, PLAY_CAPS, PLAY_NOW
+    answers = {'caps': [play_caps], 'now': [play_now], 'rating 0': ['rating id=2 stars=3 liked=1']}
     lines = ['api', 'rest', 'tick 2', 'rest', 'key centre', 'api', 'rest', 'run 600',
              'tick 1', 'api', 'run 600',  # the wheel's volume
              'key centre', 'run 600', 'key centre', 'run 600',  # a scrub begun and ended: shuffle's stop
@@ -2538,10 +2599,10 @@ def api_play(binary, work):
         runs[name] = (stats, [f.split(' ', 1)[1] for f in fifo], ids, svc.lines if svc else [])
         if svc:
             svc.close()
-    return good & api_checks(runs, sent) & api_window(binary, work)
+    return good & api_checks(runs, sent, ' mode ' in play_caps + ' ') & api_window(binary, work, play_caps)
 
 
-def api_checks(runs, sent):
+def api_checks(runs, sent, mode):
     good = True
     stats, fifo, ids, sock = runs['vamp']
     demo_stats, demo_fifo, demo_ids, demo_sock = runs['demo']
@@ -2559,8 +2620,12 @@ def api_checks(runs, sent):
     vols, demo_vols = [x for x in sock if x.startswith('volume ')], [f for f in demo_fifo if f.startswith('volume ')]
     good &= check("The wheel's volume on Now Playing is Q2PLAY/1's volume, as demo's queue had it",
                   vols and vols == demo_vols, (vols, demo_vols))
-    good &= check("Shuffle's flip, a word Q2PLAY/1's caps lack, still goes down q2playd's FIFO",
-                  [f for f in fifo if f.startswith('mode ')] == ['mode 1 -1'] and not [x for x in sock if x.startswith('mode')], fifo)
+    on_fifo, on_sock = [f for f in fifo if f.startswith('mode ')], [x for x in sock if x.startswith('mode')]
+    if mode:
+        good &= check("Shuffle's flip is Q2PLAY/1's mode, its caps naming it", on_sock == ['mode 1 -1'] and not on_fifo, (on_sock, fifo))
+    else:
+        good &= check("Shuffle's flip, a word Q2PLAY/1's caps lack, still goes down q2playd's FIFO", on_fifo == ['mode 1 -1'] and not on_sock,
+                      fifo)
     likes = [x for x in sock if x.startswith('like ')]
     good &= check("The heart's flip of a liked song is Q2PLAY/1's like 0 for it, then its rating asked again",
                   likes == ['like 0 2'] and sock[sock.index('like 0 2') + 1] == 'rating 0'
@@ -2574,27 +2639,25 @@ def api_checks(runs, sent):
     return good
 
 
-def api_window(binary, work):
-    """A list past Q2PLAY/1's 1000 songs: the 1000 round the song chosen, as demo's queue takes 20000 round it."""
+def api_window(binary, work, caps):
+    """A list of 1500 songs: Q2PLAY/1's play of every one from the song chosen, as demo's queue takes them."""
     held = {}
     lines = ['api', 'rest', 'tick 1300', 'rest', 'key centre', 'api', 'rest']
     out = {}
     for name in ('vamp', 'demo'):
         def start(d, name=name):
             (d/'vamp').mkdir()
-            held[name] = Service(d/'vamp/play.sock', 'Q2PLAY/1', {'caps': [PLAY_CAPS], 'now': [PLAY_NOW]})
+            held[name] = Service(d/'vamp/play.sock', 'Q2PLAY/1', {'caps': [caps], 'now': [PLAY_NOW]})
         _, _, _, (fifo, ids, _) = script(binary, work, 1500, lines, '--api-dir', '@vamp', '--api', 'auto' if name == 'vamp' else 'demo',
                                          queue=True, before=start)
         out[name] = (fifo, ids, held[name].lines)
         held[name].close()
     demo_play = [f.split(' ', 1)[1] for f in out['demo'][0] if ' play ' in f]
-    at = int(demo_play[0].split()[1]) if demo_play else -1
-    want_from = min(max(at - 500, 0), 1500 - 1000)
     sock = out['vamp'][2]
     i = next((k for k, x in enumerate(sock) if x.startswith('play ')), None)
-    return check("A list of 1500 is Q2PLAY/1's play of the 1000 round the song chosen",
-                 at > 1000 and i is not None and sock[i] == f'play {at - want_from} 0 1000'
-                 and sock[i + 1:i + 1001] == out['demo'][1][want_from:want_from + 1000], (at, sock[i] if i is not None else None))
+    return check("A list of 1500 is Q2PLAY/1's play of all 1500 from the song chosen, as demo's queue had it",
+                 demo_play and i is not None and sock[i] == demo_play[0] and demo_play[0].endswith(' 1500')
+                 and sock[i + 1:i + 1501] == out['demo'][1], (demo_play, sock[i] if i is not None else None))
 
 
 SYS_BATTERY = 'battery level=73 mv=3912 status=Discharging cable=0'  # docs/platform/system.md's stand-in

@@ -18,7 +18,6 @@
 
 #define PLAY_LIST "/tmp/coda-rc.list"
 #define PLAY_MAX 20000 /* songs one play may queue (coda_rc_shim.c CR_LIST_MAX) */
-#define API_PLAY_MAX 1000 /* and on Q2PLAY/1 (docs/platform/playback.md: play's N) */
 
 const char *player_queue = CRC_CMDQ, *player_list = PLAY_LIST;
 
@@ -83,10 +82,7 @@ int player_play(const int *ids, int n, int at, int shuffle) {
         if (from + PLAY_MAX > n) from = n - PLAY_MAX;
         ids += from, at -= from, n = PLAY_MAX;
     }
-    if (api_play_has("play")) { /* Q2PLAY/1 takes 1 to 1000 ids: the 1000 round the song chosen */
-        int from = at - API_PLAY_MAX / 2 < 0 ? 0 : at - API_PLAY_MAX / 2;
-        if (n > API_PLAY_MAX && from + API_PLAY_MAX > n) from = n - API_PLAY_MAX;
-        if (n > API_PLAY_MAX) ids += from, at -= from, n = API_PLAY_MAX;
+    if (api_play_has("play")) { /* Q2PLAY/1's play takes as many as the FIFO's (q2playd QUEUE_MAX) */
         snprintf(verb, sizeof verb, "play %d %d %d", at, shuffle, n);
         return api_play_list(verb, ids, n);
     }
@@ -99,7 +95,7 @@ int player_enqueue(const int *ids, int n, int next) {
     char verb[32];
     if (n > PLAY_MAX) n = PLAY_MAX;
     snprintf(verb, sizeof verb, "queue %s %d", next ? "next" : "last", n);
-    if (api_play_has("queue")) return api_play_list(verb, ids, n < API_PLAY_MAX ? n : API_PLAY_MAX);
+    if (api_play_has("queue")) return api_play_list(verb, ids, n);
     if (list_write(ids, n)) return -1;
     return player_send(verb);
 }
