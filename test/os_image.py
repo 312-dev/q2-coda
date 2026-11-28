@@ -548,7 +548,7 @@ def lib_check(fs):
         s.close()
     except OSError as e:
         return check(False, f'q2libd: Q2LIB/1 on /run/vamp/lib.sock ({e!r})')
-    check(out[:2] == ['Q2LIB/1 ok', 'caps songs song albums artists genres playlists playlist search art watch'] and
+    check(out[:2] == ['Q2LIB/1 ok', 'caps songs song albums artists genres playlists playlist search art watch lyrics'] and
           out[2].startswith('song id=1 title=song1 ') and out[2].endswith(' time=60 source=card'), f'q2libd: Q2LIB/1 answers on the image ({out})')
 
 
