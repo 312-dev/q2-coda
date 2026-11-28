@@ -764,7 +764,23 @@ def test_each_suite_has_a_tmpdir_of_its_own_gone_when_it_ends(tmp_path):
              tmp_dir=tmp_path)
     dirs = seen.read_text().split()
     assert len(set(dirs)) == 2 and all(d.startswith(str(tmp_path)) for d in dirs)
-    assert not any(os.path.exists(d) for d in dirs) and not list(tmp_path.glob('q2g*'))
+    assert not any(os.path.exists(d) for d in dirs) and not list(tmp_path.glob('g*'))
+
+
+def test_the_gates_real_tmpdir_leaves_the_fixtures_their_margins(tmp_path):
+    """vd43 (2026-11-28): under a TMPDIR of /tmp/q2gXXXXXXXX/N, test/coverflow.py's card root passed coverflow.c's
+    72-byte folder length (names_of) and test/peq.py's Tidal folder tidal.c's 43 bytes, and both failed obscurely.
+    A suite run by the gate on the real /tmp makes each fixture's folder as those suites do, and both fit."""
+    out = tmp_path/'paths'
+    probe = ("import tempfile; print(tempfile.mkdtemp(prefix='q2-coverflow-check-')); "
+             "print(tempfile.mkdtemp(prefix='q2-peq-check-'))")
+    r = gate.run({'probe': gate.Suite('probe', [sys.executable, '-c', probe])}, [], tmp_path/'logs', sys.executable,
+                 build='B', log=lambda m: None, mem=lambda: 12.0, poll=0.02)
+    assert r['probe']['rc'] == 0
+    cf, peq = pathlib.Path(r['probe']['log']).read_text().split()
+    assert len(cf + '/c0/mnt/mmc/.coverflow') < 72, cf  # test/coverflow.py's card c0
+    assert len(peq + '/tidal') <= 43, peq  # test/peq.py's tidal_check
+    assert pathlib.Path(cf).parent.parent == gate.TMP and not pathlib.Path(cf).exists()
 
 
 def test_a_suite_that_fails_on_a_full_tmp_names_who_held_it(tmp_path):
