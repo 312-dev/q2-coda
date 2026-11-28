@@ -598,8 +598,9 @@ for (preset,accent),column in ((p,c) for p in (*enumerate(ACCENTS),*OLED_ROWS) f
     for c,want in table:
         got=mapped(c,preset,column)
         assert close(got,want),(preset,hex(c),hex(got),hex(want))
-        # mapped once: no longer stock's red, except under Crimson, whose own tones are near it and map again
-        if preset!=O['CRIMSON']: assert mapped(got,preset,column)==got
+        # mapped once: no longer stock's red, except under Crimson and Arterial (its ACCENTS row and OLED's own), whose
+        # tones are reds near it and map again
+        if preset not in (O['CRIMSON'],len(ACCENTS)-1,len(ACCENTS)+1): assert mapped(got,preset,column)==got
     passed()
 
 # Settings: IPOD/ACCENT, HOME and BATTERY come from the stock config.ini once, a missing or bad value
