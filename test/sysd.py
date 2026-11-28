@@ -136,13 +136,40 @@ def read(root, rel):
     return (root/rel.lstrip('/')).read_text().strip()
 
 
-def test_a_short_press_turns_the_screen_off_then_on(run):
+def test_a_short_press_lights_a_dark_screen_and_leaves_a_lit_one(run):
+    """Centre is KEY_POWER on the Q2 (md-gpio-keys, event1 here): lit, its short press is q2ui's select and q2sysd does
+    nothing; dark, its release lights the screen (docs/sysd.md, the power key)"""
     root, keys = run
     press(keys)
-    assert read(root, '/sys/class/backlight/lcd/bl_power') == '4' and read(root, '/sys/hynitron_debug/hyngescontrol') == '1'
+    assert read(root, '/sys/class/backlight/lcd/bl_power') == '0', 'a lit screen stays lit: the press was a select'
+    assert ask_sys(root, 'screen off') == 'ok' and read(root, '/sys/hynitron_debug/hyngescontrol') == '1'
     press(keys)
     assert read(root, '/sys/class/backlight/lcd/bl_power') == '0' and read(root, '/sys/hynitron_debug/hyngescontrol') == '0'
+    press(keys)
+    assert read(root, '/sys/class/backlight/lcd/bl_power') == '0'
     assert not (root/'powered-off').exists()
+
+
+def test_one_centre_press_seen_on_two_devices_wakes_once_and_holds_from_the_first(binary, tree, tools, pwm_shim):
+    """One press can arrive on md-gpio-keys (event1) and the PMIC's axp2101-pek (event0), both KEY_POWER: one wake,
+    and a hold measured from the first device's press, not restarted by the second"""
+    os.mkfifo(tree/'dev/input/event0')
+    f = Pwm(binary, tree, pwm_shim, device=False, extra=['--poweroff', f'touch {tree}/powered-off'])
+    pek = os.open(tree/'dev/input/event0', os.O_WRONLY)
+    w = Watch(tree)
+    assert ask_sys(tree, 'screen off') == 'ok'
+    key(f.keys, KEY_POWER, 1), key(pek, KEY_POWER, 1)
+    time.sleep(0.05)
+    key(f.keys, KEY_POWER, 0), key(pek, KEY_POWER, 0)
+    time.sleep(0.3)
+    assert read(tree, '/sys/class/backlight/lcd/bl_power') == '0' and w.lines.count('screen on') == 1, w.lines
+    key(f.keys, KEY_POWER, 1)  # held: md-gpio-keys first, the PMIC's 1.5 s later
+    time.sleep(1.5)
+    key(pek, KEY_POWER, 1)
+    time.sleep(1.8)  # 3.3 s from the first press, 1.8 s from the second
+    assert (tree/'powered-off').exists(), 'the hold counted from md-gpio-keys\' press'
+    os.close(pek)
+    f.end()
 
 
 def test_a_hold_powers_off_and_leaves_the_screen(run):
@@ -260,7 +287,7 @@ def test_q2sys1(run):
     assert 'status=Not charging' in read(root, '/run/vamp/battery').splitlines()
     a.say('watch')
     assert a.line() == 'ok'
-    press(keys)
+    assert ask_sys(root, 'screen off') == 'ok'
     assert a.line() == 'screen off'
     b = Api(root, 'Q2SYS/2')
     assert b.line() == 'err version'
@@ -1000,15 +1027,15 @@ def batt(root, level=None, mv=None, cable=None):
 def low_start(root, keys):
     """19%: the screen's change reads it (else 30 s), and below 20% the battery is read each second from then"""
     batt(root, 19, 3700)
-    press(keys)
-    press(keys)
+    assert ask_sys(root, 'screen off') == 'ok'
+    press(keys)  # md-gpio-keys: lights the dark screen, and the light's change reads the battery
 
 
 def test_under_16_percent_lights_the_screen_and_says_low_battery_once(run):
     root, keys = run
     ui, w = FakeUi(root), Watch(root)
     low_start(root, keys)
-    press(keys)  # dark
+    assert ask_sys(root, 'screen off') == 'ok'  # dark
     assert read(root, '/sys/class/backlight/lcd/bl_power') == '4'
     batt(root, 15)
     assert until(lambda: 'lowbattery warn' in w.lines, 3), w.lines

@@ -2,8 +2,9 @@
  * the screen's light, and the battery.
  *
  *   - The power key (KEY_POWER on any input device: md-gpio-keys' power button, the PMIC's key, and the touchscreen's
- *     double tap, which hyn_touch reports as KEY_POWER while its gesture mode is on): a press shorter than HOLD_MS
- *     turns the screen off or on; held HOLD_MS it powers the Q2 off (POWEROFF, init's shutdown: the services stopped,
+ *     double tap, which hyn_touch reports as KEY_POWER while its gesture mode is on). It is the Q2's Centre button, so a
+ *     press shorter than HOLD_MS lights a dark screen and leaves a lit one to q2ui (its select; q2ui asks for the screen
+ *     off itself); held HOLD_MS it powers the Q2 off (POWEROFF, init's shutdown: the services stopped,
  *     the file systems unmounted).
  *   - The screen: off is the light out and the touchscreen's gesture mode on, as stock's screen_action does
  *     (docs/internals.md#screen-off-and-wake); on is the light back and gestures off. The light is a backlight
@@ -975,11 +976,13 @@ static void read_input(int fd) {
             if (fm.run && ((e[i].type == EV_KEY && e[i].value == 1) || e[i].type == EV_REL || e[i].type == EV_ABS))
                 find_stop("a key, the wheel or a touch"); /* the press itself is q2ui's to drop */
             if (e[i].type != EV_KEY || e[i].code != KEY_POWER) continue;
-            if (e[i].value == 1) pressed_at = now_ms() | 1;
+            /* the hold from the first device's press: one press can come on md-gpio-keys and the PMIC's key both */
+            if (e[i].value == 1 && !pressed_at) pressed_at = now_ms() | 1;
             else if (e[i].value == 0 && pressed_at) {
+                /* Centre is KEY_POWER on the Q2 (md-gpio-keys has no other power key), so a short press while lit is
+                 * q2ui's select, and q2ui asks for the screen off itself; only a dark screen is lit here */
                 pressed_at = 0;
-                set_screen(!screen_on);
-                read_battery();
+                if (!screen_on) set_screen(1), read_battery();
             }
         }
 }

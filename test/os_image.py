@@ -395,7 +395,7 @@ def accent_check(fb):
 
 def sysd_checks(fs, power_key, log):
     """q2sysd in the booted image (docs/sysd.md): the battery's file from the CW2015's, a press of the power key on a
-    device of its own (a FIFO: q2ui leaves an unnamed one alone) turning the screen off and on, and a hold of it
+    device of its own (a FIFO: q2ui leaves an unnamed one alone) lighting a dark screen and leaving a lit one, and a hold of it
     starting init's shutdown (rcK's line in the boot log). The last check: the system goes down."""
     import struct as st
     bl = fs/'sys/class/backlight/lcd/bl_power'
@@ -413,13 +413,14 @@ def sysd_checks(fs, power_key, log):
         while time.monotonic() < end and not pred():
             time.sleep(0.1)
         return pred()
-    if bl.read_text().strip() == '4':  # dark already: q2sysd's screen off time (30 s unused) ran out first
-        key(1), time.sleep(0.1), key(0)
-        until(lambda: bl.read_text().strip() == '0')
+    # Centre is KEY_POWER on the Q2: lit, a short press is q2ui's select and leaves the light; dark, it lights it
+    got = sys_heat(fs, 'screen off')
+    check(got == 'ok' and until(lambda: bl.read_text().strip() == '4'), f'q2sysd: Q2SYS/1 screen off (bl_power 4) ({got})')
     key(1), time.sleep(0.1), key(0)
-    check(until(lambda: bl.read_text().strip() == '4'), 'q2sysd: a press of the power key turns the screen off (bl_power 4)')
+    check(until(lambda: bl.read_text().strip() == '0'), 'q2sysd: a press of the power key lights a dark screen')
     key(1), time.sleep(0.1), key(0)
-    check(until(lambda: bl.read_text().strip() == '0'), 'q2sysd: another turns it on again')
+    time.sleep(1)
+    check(bl.read_text().strip() == '0', 'q2sysd: a press while lit leaves the screen lit (Centre\'s select is q2ui\'s)')
     key(1)
     check(until(lambda: b'rcK: stopping the services' in log.read_bytes(), 10), 'q2sysd: the power key held starts init\'s shutdown')
     os.close(fd)
