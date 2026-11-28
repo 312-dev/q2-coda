@@ -1374,3 +1374,26 @@ def test_q2ask_prints_the_greeting_and_an_answer_a_line(run, q2ask):
     assert (r.returncode, r.stdout) == (1, 'err version\n'), r
     r = subprocess.run([str(q2ask), str(root/'run/vamp/none.sock'), 'Q2SYS/1'], capture_output=True, text=True, timeout=5)
     assert r.returncode == 2
+
+
+# ---- Key Tone (docs/sysd.md#key-tone) ----
+
+def test_a_click_is_one_short_note_on_the_buzzer_and_one_while_it_sounds_is_dropped(binary, tree, tools, pwm_shim):
+    f = Pwm(binary, tree, pwm_shim)
+    a = Api(tree)
+    a.line()
+    a.say('click')
+    first = a.line()
+    a.say('click')
+    second = a.line()
+    time.sleep(0.2)
+    assert (first, second) == ('ok', 'err click'), 'the second while the first sounds'
+    assert f.calls() == ['release 1', 'request PC01', 'level 1 0', 'config 2637 1', 'level 1 50', 'level 1 0', 'release 1'], f.calls()
+    a.say('click')
+    assert a.line() == 'ok', 'free again'
+    assert ask_sys(tree, 'find') == 'ok'
+    time.sleep(0.1)
+    a.say('click')
+    assert a.line() == 'err click', "the jingle's buzzer"
+    ask_sys(tree, 'find stop')
+    f.end()

@@ -54,12 +54,19 @@ static void say(const char *fmt, ...) {
     va_end(ap);
 }
 
+/* test/gate.py's race test builds with ASK_HOOK a wait between naming a service's socket and connecting to it, the
+ * window in which another thread's path() used to overwrite the name */
+#ifndef ASK_HOOK
+#define ASK_HOOK()
+#endif
+
 /* ---- the services: one exchange each, its answer's lines into out (up to the "ok" of a list), 0; -1 when the
  * service is not there or does not greet ---- */
 static int ask(const char *sock, const char *hello, const char *cmd, char *out, size_t room, int secs) {
     struct sockaddr_un a = {.sun_family = AF_UNIX};
     if ((size_t)snprintf(a.sun_path, sizeof a.sun_path, "%.*s%s", (int)(sizeof a.sun_path - 1), root, sock) >= sizeof a.sun_path)
-        return -1; /* not path(): its buffers are the main thread's */
+        return -1; /* not path(): its buffers are the main thread's, and ask runs on the scans' and links' threads too */
+    ASK_HOOK();
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     struct timeval tv = {secs, 0};
     char req[300], b[4096];
@@ -330,13 +337,25 @@ static int set(const char *name, int v) {
     return -1; /* eq: the EQ's state is q2player's file, not set from here yet */
 }
 
+/* Key Tone (clicker.c clicker_route, docs/gate.md#key-tone): Off ([SYSSET] KEYTONE not 1) nothing; [IPOD] CLICKER 0
+ * Both, the click mixed into what q2player plays (Q2PLAY/1 click) and the buzzer (Q2SYS/1 click); 1 Speaker, the
+ * buzzer alone and only while nothing listens (no jack plugged and the music on the DAC); 2 Headphones, the player's
+ * alone. A press is a button's click, a turn the wheel's. */
+static int listening; /* a jack plugged or another output: the tick's */
+static void click(int button) {
+    if (ini_get("SYSSET", "KEYTONE", 0) != 1) return;
+    int mode = ini_get("IPOD", "CLICKER", 0);
+    if (mode == 0 || mode == 2) ask_ok(PLAY, button ? "click button" : "click wheel", 1);
+    if (mode == 0 || (mode == 1 && !listening)) ask_ok(SYS, "click", 1);
+}
+
 static void line(char *l) {
     char word[16], mac[18];
     int v;
     if (sscanf(l, "set %15s %d", word, &v) == 2) {
         if (set(word, v)) say("set %s %d refused", word, v);
     } else if (sscanf(l, "click %d", &v) == 1) {
-        /* Key Tone: not routed yet (docs/gate.md#not-here-yet) */
+        click(v != 0);
     } else if (!strcmp(l, "scan")) {
         pthread_mutex_lock(&mu);
         int start = !wifi_scanning;
@@ -381,7 +400,8 @@ static void tick(void) {
     ask(SYS, "jack", sys_jack, sizeof sys_jack, 2), ask(SYS, "battery", sys_bat, sizeof sys_bat, 2);
     ask(PLAY, "now", play, sizeof play, 2), ask(PLAY, "output", out, sizeof out, 2);
     char state[24] = "", kind[24] = "", ssid[33] = "";
-    int wired = (field_int(sys_jack, "po", 0) == 1 || field_int(sys_jack, "bal", 0) == 1) && !strncmp(out, "output dac", 10);
+    int jack = field_int(sys_jack, "po", 0) == 1 || field_int(sys_jack, "bal", 0) == 1, wired = jack && !strncmp(out, "output dac", 10);
+    listening = jack || (*out && strncmp(out, "output dac", 10));
     int bton = have_bt && field_int(bt, "power", 0) == 1;
     field(bt, "state", state, sizeof state), field(bt, "kind", kind, sizeof kind);
     const char *slot = !bton ? "none" : !strcmp(state, "connecting") ? "connecting"

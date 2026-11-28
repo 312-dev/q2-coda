@@ -23,7 +23,7 @@ import playd  # noqa: E402
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PKGD = pathlib.Path(os.environ.get('Q2PKGD_SOURCE') or ROOT/'pkgd/q2pkgd.c')
 BUSYBOX = pathlib.Path(os.environ.get('Q2_BUSYBOX_TAR') or pathlib.Path.home()/'.cache/q2-os/dl/busybox/busybox-1.37.0.tar.bz2')
-CAPS = 'catalogue playlist ahead ratings likes\n'  # the words docs/platform/packages.md names, this image's for an API 0 app
+CAPS = 'catalogue playlist ahead ratings likes grow\n'  # the words docs/platform/packages.md names, this image's for an API 0 app
 
 # The stand-in API 0 app, as q2-subsonic's run script and daemon behave: the launcher returns once the loop runs in the
 # background with its pid in /tmp/q2-navi; the app records the caps line it found, takes a .catplay there at its start

@@ -19,6 +19,8 @@ endef
 
 define Q2UI_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/out/q2ui $(TARGET_DIR)/usr/bin/q2ui
+	$(INSTALL) -d $(TARGET_DIR)/usr/share/vamp/icons
+	$(INSTALL) -m 0644 $(@D)/icons/*.png $(TARGET_DIR)/usr/share/vamp/icons/
 endef
 
 $(eval $(generic-package))

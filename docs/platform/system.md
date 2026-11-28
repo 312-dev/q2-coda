@@ -21,22 +21,25 @@
 | `time save` | `ok`, or `err time`: the system clock written to the RTC (UTC), as stock does after a network sync (`q2netd`'s) |
 | `find` | `ok`, or `err find` with no buzzer driver: Find My Vamp's jingle on the internal buzzer, the screen lit, until any key, the wheel or a touch, `find stop` or a minute; again while it plays, its minute starts again ([q2sysd: Find My Vamp](../sysd.md#find-my-vamp)) |
 | `find stop` | `ok`: the jingle stopped |
+| `click` | `ok`: one click of the internal buzzer, Key Tone's ([q2sysd: Key Tone](../sysd.md#key-tone)); `err click` while one sounds, while Find My Vamp's jingle plays, or with no buzzer driver |
 | `find state` | `find 1` while it plays, else `find 0` |
 | `heat cancel` | `ok`: the load warning's Cancel, for a UI that does not serve Q2UI/1's `ask` |
 | `watch` | `ok`; then `screen on`, `screen off`, `battery ...`, `charge held level=N`, `charge allowed level=N`, `usb adb`, `usb storage`, `usb dac`, `usb car`, `car`, `usb ask` (a cable in on Ask Every Time: the chooser's to draw), `standby`, `resumed`, `charge wait` (Auto Power Off with a cable in: the Q2 stays on until the cable is out or the battery is full, [q2sysd](../sysd.md#auto-standby-and-auto-power-off); the charge screen is the UI's to draw), `jack po 1`, `jack po 0`, `jack bal 1`, `jack bal 0` (a plug, an unplug that lasted), `heat warn`, `heat nosensor`, `heat ok`, `heat loadwarn left=S`, `heat cancelled`, `heat off` (the guardian's events: the music paused, the power off 10 s later), `time zone=NAME` (the zone changed) and `time set` (the clock set by hand), `lowbattery warn` (under 16%, once a discharge) and `lowbattery off` (the power off that follows five low readings: [q2sysd: A low battery](../sysd.md#a-low-battery)), `find on` and `find off` (the jingle starting and ending), `power off` and `reboot` lines as they happen |
-| `caps` | `caps screen awake brightness usb usb-dac usb-car standby heat jack battery time find watch` |
+| `caps` | `caps screen awake brightness usb usb-dac usb-car standby heat jack battery time find click watch` |
 
 ```conformance
 > Q2SYS/1
 < Q2SYS/1 ok
 > caps
-< caps screen awake brightness usb usb-dac usb-car standby heat jack battery time find watch
+< caps screen awake brightness usb usb-dac usb-car standby heat jack battery time find click watch
 > screen
 < screen on
 > find state
 < find 0
 > find stop
 < ok
+> click
+< ~ ok|err click
 > awake
 < ok
 > screen off

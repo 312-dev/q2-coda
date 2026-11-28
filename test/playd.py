@@ -2929,3 +2929,86 @@ def test_thirty_seconds_with_nothing_playing_power_the_dac_off_and_play_powers_i
     fifo(root, 'resume')
     pl.pump()
     assert dac_calls(root)[3:] == ['1c 0', '1a 1'], dac_calls(root)
+
+
+# ---- Key Tone (docs/playd.md#key-tone) ----
+
+def test_a_click_goes_to_the_player_and_not_under_a_source(run):
+    """clicker.c clicker_route: {mcl-click\\KIND} to q2player, only while the Library's player owns the output"""
+    root, pl = run
+    a = api(root)
+    a.say('click wheel')
+    assert a.line() == 'ok'
+    a.say('click button')
+    assert a.line() == 'ok'
+    pl.pump()
+    assert [g for g in pl.got if g[0] == 'mcl-click'] == [('mcl-click', 'wheel'), ('mcl-click', 'button')]
+    a.say('source http://192.0.2.1/a.flac')
+    assert a.line() == 'ok'
+    a.say('click wheel')
+    assert a.line() == 'err click', 'a source owns the output'
+
+
+# ---- a song played while it arrives (docs/playd.md#a-song-played-while-it-arrives) ----
+
+S1, S2 = '/mnt/mmc/.navi/stream/a/hi/x/Cloud One [s1].flac', '/mnt/mmc/.navi/stream/a/hi/x/Cloud Two [s2].flac'
+
+
+def stream(root, *lines, age=0):
+    p = root/'tmp/q2-navi.stream'
+    p.write_text('#Q2STREAM/1\tseq=1\n' + ''.join('\t'.join(map(str, l)) + '\n' for l in lines))
+    if age:
+        t = time.time() - age
+        os.utime(p, (t, t))
+
+
+def grown(root, pl, *second):
+    sock = catalogue(root)
+    play_list(root, [SERVER + 1, SERVER + 2], 0)
+    assert wait_for(root/'tmp/q2-navi.catplay')
+    land(root, S1, S2)  # in place: both there from their first bytes
+    stream(root, ('done', 900000, 900000, 60000, S1), *second)
+    answer(root, S1, S2)
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', S1)]
+    return sock
+
+
+def test_a_song_arriving_is_queued_once_three_seconds_of_it_are_there(run):
+    """m3u_songs with grow: a get line under START (3 s of the song: total x 3000 / length, at least 256 KB) waits as
+    a missing file does, then plays as it is"""
+    root, pl = run
+    sock = grown(root, pl, ('get', 400000, 30000000, 200000, S2))  # START 450000 bytes
+    pl.say('player-status', 'exit')
+    pl.pump(1.0)
+    assert pl.songs() == [('set-songurl', S1)] and now(root, 0.3)['title'] == 'Cloud Two', 'waited for, Now Playing on it'
+    stream(root, ('done', 900000, 900000, 60000, S1), ('get', 460000, 30000000, 200000, S2))
+    pl.pump(1.0)
+    assert pl.songs()[-1] == ('set-songurl', S2), 'its start there: played as it arrives'
+    sock.close()
+
+
+@pytest.mark.parametrize('line, plays', [
+    (('wait', 0, 0, 0, S2), False), (('stall', 100000, 30000000, 200000, S2), False),
+    (('get', 300000, 1000000, 200000, S2), True),    # START at least 256 KB: 300000 is past it
+    (('get', 100000, 1000000, 200000, S2), False),   # 3 s is 15000 bytes here, but never under 256 KB
+    (('get', 300000, 0, 0, S2), False),              # total unknown: the whole file
+    (('fail', 1000, 30000000, 200000, S2), True), (('done', 300000, 300000, 20000, S2), True)])
+def test_each_state_of_a_song_s_line(run, line, plays):
+    root, pl = run
+    sock = grown(root, pl, line)
+    pl.say('player-status', 'exit')
+    pl.pump(1.0)
+    assert (pl.songs()[-1] == ('set-songurl', S2)) == plays, (line, pl.songs())
+    sock.close()
+
+
+def test_a_stale_file_s_get_line_reads_as_fail(run):
+    """a .stream with a get line and no write for 3 s: the app died, the end of the bytes is the song's end"""
+    root, pl = run
+    sock = grown(root, pl, ('get', 1000, 30000000, 200000, S2))
+    stream(root, ('done', 900000, 900000, 60000, S1), ('get', 1000, 30000000, 200000, S2), age=5)
+    pl.say('player-status', 'exit')
+    pl.pump(1.0)
+    assert pl.songs()[-1] == ('set-songurl', S2)
+    sock.close()

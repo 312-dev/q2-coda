@@ -179,6 +179,13 @@ def check_image(build, fs, manifest, perturb=None):
             bad.append(f'{rel}: interpreter {interp}')
     check(not found, f'no file of the vendor set in the image{": " + ", ".join(found) if found else ""}')
     check(elves > 10 and not bad, f'all {elves} ELF files MIPS32R2 o32 NaN 2008 on ld-linux-mipsn8{": " + "; ".join(bad[:5]) if bad else ""}')
+    # q2ui's glyphs (tools/vampos.py ui_art), named as ui/image.c icon() opens them: a row's, Now Playing's, the status
+    # row's, Control Center's
+    glyphs = [f'usr/share/vamp/icons/oled_{n}.png' for n in ('shuffle_w', 'mode_radio_w', 'np_fav_d', 'np_unfav_d', 'np_more_d',
+                                                             'vol_lo_d', 'status_down_d', 'cc_wifi_3', 'cc_usb')]
+    missing = [g for g in glyphs if not (fs/g).read_bytes()[:8] == bytes.fromhex('89504e470d0a1a0a')] if all((fs/g).exists() for g in glyphs) else glyphs
+    check(not missing and len(list((fs/'usr/share/vamp/icons').glob('oled_*.png'))) > 500,
+          f"q2ui's glyphs in /usr/share/vamp/icons{': missing ' + ', '.join(missing) if missing else ''}")
     for name in ('usr/bin/q2player', 'usr/bin/q2ui', 'lib/libc.so.6'):
         fp = subprocess.run(['readelf', '-A', fs/name], capture_output=True, text=True).stdout
         check('FP ABI: Hard float (32-bit CPU, 64-bit FPU)' in fp, f'{name}: hard float, 64-bit FPU')
@@ -496,7 +503,7 @@ def launch_check(fs):
     check(first == ['Q2PKG/1 ok', 'status navi stopped', 'ok'] and mid == ['Q2PKG/1 ok', 'status navi running', 'ok', 'status navi stopped'],
           f'q2pkgd: an API 0 app started and stopped over Q2PKG/1 ({first + mid[1:]})')
     got = caps.read_text() if caps.exists() else None
-    check(got == 'catalogue playlist ahead ratings likes\n', f"q2pkgd: the app's caps line is the image's words ({got!r})")
+    check(got == 'catalogue playlist ahead ratings likes grow\n', f"q2pkgd: the app's caps line is the image's words ({got!r})")
     check((fs/'run/vamp/sv/navi/supervise/stat').exists(), 'q2pkgd: the app ran under a runsv of its own, /run/vamp/sv/navi')
 
 

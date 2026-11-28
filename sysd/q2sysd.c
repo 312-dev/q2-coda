@@ -799,11 +799,40 @@ static void *fm_worker(void *unused) {
     return 0;
 }
 
+/* ---- Key Tone's buzzer (docs/sysd.md#key-tone) ----
+ * Stock clicks the MCU's buzzer (cmd_mcu write_str buzzer, a stock program and an MCU firmware load Vamp OS has not
+ * got); the same buzzer is PWM channel 1 through /dev/jz_pwm, as Find My Vamp plays it: a click is one short note,
+ * CLICK_HZ for CLICK_MS, on a thread, the channel taken and given back as findmy_tune.h does. A click while one sounds,
+ * or while the jingle plays, is dropped, as the buzzer could not play it yet. */
+#define CLICK_HZ 2637 /* inside the buzzer's loud 2 to 3 kHz, as the MCU's click is (docs/internals.md#key-tone) */
+#define CLICK_MS 12
+static volatile int click_busy;
+static void *click_worker(void *arg) {
+    int fd = (int)(long)arg, ch = fm_take(fd);
+    if (!fm_note(fd, &ch, CLICK_HZ)) usleep(CLICK_MS * 1000);
+    fm_done(fd, ch);
+    close(fd);
+    click_busy = 0;
+    return 0;
+}
+/* 0 sounding, -1 dropped (one sounding, the jingle's, or no driver) */
+static int click_buzz(void) {
+    if (click_busy || fm.live) return -1;
+    int fd = open(path("/dev/jz_pwm"), O_RDWR | O_CLOEXEC);
+    pthread_t th;
+    if (fd < 0) return -1;
+    click_busy = 1;
+    if (pthread_create(&th, 0, click_worker, (void *)(long)fd)) return close(fd), click_busy = 0, -1;
+    pthread_detach(th);
+    return 0;
+}
+
 static void ui_say(const char *line);
 /* 0 playing (or its minute started again), -1 when the buzzer's driver cannot be opened or the worker cannot start */
 static int find_start(void) {
     if (fm.live && fm.run) return fm.at = now_ms(), 0;
     if (fm.live) return -1; /* stopping: its worker still holds the buzzer */
+    for (int i = 0; i < 50 && click_busy; ++i) usleep(10000); /* a click sounding ends first (findmy.c's tone_busy wait) */
     int fd = open(path("/dev/jz_pwm"), O_RDWR | O_CLOEXEC);
     if (fd < 0) return say("find: %s: %s", path("/dev/jz_pwm"), strerror(errno)), -1;
     pthread_t th;
@@ -897,7 +926,7 @@ static void client_line(struct client *c, const char *line) {
         c->hello = 1;
         client_say(c, "Q2SYS/1 ok");
     } else if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby heat jack battery time find watch");
+        client_say(c, "caps screen awake brightness usb usb-dac usb-car standby heat jack battery time find click watch");
     } else if (!strcmp(line, "battery")) {
         char text[160];
         read_battery();
@@ -917,6 +946,8 @@ static void client_line(struct client *c, const char *line) {
         client_say(c, "ok");
     } else if (!strcmp(line, "find")) { /* Find My Vamp's jingle (docs/sysd.md#find-my-vamp) */
         client_say(c, find_start() ? "err find" : "ok");
+    } else if (!strcmp(line, "click")) { /* Key Tone's buzzer: one click (docs/sysd.md#key-tone) */
+        client_say(c, click_buzz() ? "err click" : "ok");
     } else if (!strcmp(line, "find stop")) {
         find_stop("asked");
         client_say(c, "ok");

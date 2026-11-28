@@ -103,7 +103,7 @@ static struct { int mode, shuf_one, rep_off; } pm;
 static struct {
     int on, next, waiting;
     char file[300], want[360];
-    long long stamp;
+    long long stamp, stream; /* the m3u's, and the app's .stream's */
     char app[64];  /* whose answer it is, and the seq its .play carried: Download Ahead's .ahead is written for them */
     unsigned seq;
 } mq;
@@ -700,11 +700,51 @@ static long long file_stamp(const char *p) {
 
 /* the m3u's entries from mq.next on into q.paths, up to the first not there yet (mq.want); an entry off the card is
  * passed over. The file read whole each time (it is the app's few lines). */
+/* ---- a song played while it arrives (grow: docs/server-library.md, "Starting before the end") ----
+ * With the caps line's grow the app writes a song in place as it arrives and tells how far it has come in
+ * /tmp/q2-<id>.stream: "#Q2STREAM/1\tseq=N", then "<state>\t<bytes>\t<total>\t<length ms>\t<path>" a song. A line of
+ * the answer whose file is there is taken once its line is done or fail, or get or stall with START bytes: 3 s of
+ * the song (total x 3000 / length), at least 256 KB, or the whole file when total or length is unknown; a get line in
+ * a file not written for 3 s is stale and reads as fail. A song with no line is whole. q2player waits at the bytes
+ * there are (player/grow.c). */
+#define GROW_MIN_BYTES (256 * 1024)
+#define STREAM_STALE_S 3
+static long long stream_stamp(void) {
+    char p[300];
+    snprintf(p, sizeof p, "/tmp/q2-%s.stream", mq.app);
+    return file_stamp(path(p));
+}
+/* whether e, there on the card, may be queued */
+static int grow_ready(const char *e) {
+    char p[300], line[1300];
+    snprintf(p, sizeof p, "/tmp/q2-%s.stream", mq.app);
+    struct stat st;
+    FILE *f = stat(path(p), &st) ? 0 : fopen(path(p), "r");
+    int ready = 1, stale = f && time(0) - st.st_mtime >= STREAM_STALE_S;
+    while (f && fgets(line, sizeof line, f)) {
+        char state[8];
+        long long bytes, total, ms;
+        int at = 0;
+        line[strcspn(line, "\r\n")] = 0;
+        if (sscanf(line, "%7[a-z]\t%lld\t%lld\t%lld\t%n", state, &bytes, &total, &ms, &at) != 4 || !at) continue;
+        if (strcmp(line + at, e)) continue;
+        if (!strcmp(state, "done") || !strcmp(state, "fail") || (stale && !strcmp(state, "get"))) ready = 1;
+        else if (!strcmp(state, "wait")) ready = 0;
+        else { /* get, stall: its start there */
+            long long start = total > 0 && ms > 0 ? total * 3000 / ms : -1;
+            if (start >= 0 && start < GROW_MIN_BYTES) start = GROW_MIN_BYTES;
+            ready = start >= 0 ? bytes >= start : 0;
+        }
+    }
+    if (f) fclose(f);
+    return ready;
+}
+
 static void m3u_read(void) {
     FILE *f = fopen(path(mq.file), "r");
     char line[1100], e[sizeof mq.want];
     int entry = 0;
-    mq.want[0] = 0, mq.stamp = file_stamp(path(mq.file));
+    mq.want[0] = 0, mq.stamp = file_stamp(path(mq.file)), mq.stream = stream_stamp();
     while (f && fgets(line, sizeof line, f)) {
         char *l = line;
         if (!strncmp(l, "\xEF\xBB\xBF", 3)) l += 3; /* a BOM */
@@ -712,7 +752,7 @@ static void m3u_read(void) {
         if (!*l || *l == '#' || entry++ < mq.next) continue;
         if (!card_path(l) || strlen(l) >= sizeof e) { ++mq.next; continue; } /* off the card, or too long to be a path here */
         memcpy(e, l, strlen(l) + 1);
-        if (access(path(e), F_OK)) { memcpy(mq.want, e, strlen(e) + 1); break; }
+        if (access(path(e), F_OK) || !grow_ready(e)) { memcpy(mq.want, e, strlen(e) + 1); break; }
         char **g = realloc(q.paths, (size_t)(q.np + 1) * sizeof *g);
         if (!g) break;
         q.paths = g, q.paths[q.np++] = strdup(e), ++mq.next;
@@ -725,7 +765,9 @@ static void m3u_read(void) {
  * goes on with what came */
 static void m3u_poll(void) {
     if (!mq.on || src.on) return;
-    if (mq.stamp == file_stamp(path(mq.file)) && !(*mq.want && !access(path(mq.want), F_OK))) return;
+    if (mq.stamp == file_stamp(path(mq.file)) && mq.stream == stream_stamp() &&
+        !(*mq.want && !access(path(mq.want), F_OK) && grow_ready(mq.want)))
+        return;
     int had = q.n;
     m3u_read();
     if (q.n > had) ++q.seq; /* the now file's qlen and the queue file */
@@ -3291,7 +3333,7 @@ static void client_line(struct client *c, char *line) {
         return;
     }
     if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album");
+        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click");
     } else if (!strncmp(line, "source ", 7)) {
         client_say(c, source_take((int)(c - cl), line + 7) ? "err source" : "ok");
     } else if (!strcmp(line, "focus")) {
@@ -3314,6 +3356,11 @@ static void client_line(struct client *c, char *line) {
         client_say(c, (a != 0 && a != 1) || !id_path(b, p, sizeof p) || like_path(p, a) ? "err like" : "ok");
     } else if (sscanf(line, "album %d %d%n", &a, &b, &n) == 2 && !line[n]) {
         client_say(c, album_cmd(a, b) ? "err album" : "ok");
+    } else if (!strcmp(line, "click wheel") || !strcmp(line, "click button") || !strcmp(line, "click beep")) {
+        /* the Clicker's click mixed into what the player plays (clicker.c's {mcl-click\KIND}, docs/playd.md#key-tone):
+         * only while the queue's player owns the output, as clicker.c sends it only while the Library's does */
+        if (player < 0 || src.on) client_say(c, "err click");
+        else player_send("mcl-click", line + 6), client_say(c, "ok");
     } else if (!strcmp(line, "watch")) {
         c->watch = 1;
         client_say(c, "ok");

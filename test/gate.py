@@ -68,8 +68,22 @@ HOME_AP = ('ap ssid=Home signal=-60 secure=1\nap ssid=Caf%C3%A9 signal=-78 secur
            'ap ssid=Near signal=-68 secure=1\nap ssid=Back\\slash signal=-82 secure=1\nok')
 
 
+@pytest.fixture(scope='session')
+def slow_binary(tmp_path_factory):
+    """q2gate with ASK_HOOK: 300 ms between naming a service's socket and connecting, so a thread's exchange overlaps
+    the main thread's tick (which names files through path() many times) every time"""
+    out = tmp_path_factory.mktemp('gate-slow')
+    src = out/'q2gate.c'
+    src.write_bytes(SOURCE.read_bytes())
+    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-O2', '-DASK_HOOK()=usleep(300000)', '-o', str(out/'q2gate'),
+                    str(src), '-pthread'], check=True)
+    return out/'q2gate'
+
+
 @pytest.fixture
-def gate(binary, tmp_path):
+def gate(request, binary, tmp_path):
+    if getattr(request, 'param', None) == 'slow':
+        binary = request.getfixturevalue('slow_binary')
     root = tmp_path
     (root/'mnt/data').mkdir(parents=True)
     (root/'tmp').mkdir()
@@ -201,6 +215,22 @@ def test_the_devices_paired_first_and_btlink_does_what_the_row_click_does(gate):
                                           'pair AA:BB:CC:DD:EE:09'], s['bt'].asked()
 
 
+@pytest.mark.parametrize('gate', ['slow'], indirect=True)
+def test_a_link_s_thread_names_its_own_socket_while_the_main_thread_ticks(gate):
+    """btlink's exchanges run on a thread while the main thread's tick writes the files: with 300 ms between naming the
+    socket and connecting, a name in a buffer the tick also uses was another file's by then, the devices not read,
+    and a paired device paired again in place of connected (eb0eae6a)"""
+    root, s, ctl = gate
+    for mac in ('AA:BB:CC:DD:EE:02', 'AA:BB:CC:DD:EE:01'):
+        send(ctl, f'btlink {mac}')
+        for _ in range(4):  # a line every 100 ms: a tick at once each, inside the thread's 300 ms
+            time.sleep(0.1)
+            send(ctl, 'set motion 1')
+        time.sleep(0.6)
+    assert until(lambda: len(s['bt'].asked()) >= 2, 8), s['bt'].asked()
+    assert sorted(s['bt'].asked()) == ['connect AA:BB:CC:DD:EE:02', 'disconnect AA:BB:CC:DD:EE:01'], s['bt'].asked()
+
+
 def test_the_screen_s_two_words_and_a_line_too_long_dropped(gate):
     root, s, ctl = gate
     send(ctl, 'x' * 100 + 'screenoff', 'screenoff', 'wake')
@@ -210,3 +240,33 @@ def test_the_screen_s_two_words_and_a_line_too_long_dropped(gate):
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-q', '-p', 'no:cacheprovider']))
+
+
+# ---- Key Tone (docs/gate.md#key-tone) ----
+
+def keytone(root, tone, clicker):
+    c = config(root).replace('[SYSSET]\n', f'[SYSSET]\nKEYTONE={tone}\n') + f'[IPOD]\nCLICKER={clicker}\n'
+    (root/'mnt/data/config.ini').write_text(c)
+
+
+@pytest.mark.parametrize('tone, clicker, jack, out, play, sys_', [
+    (0, 0, 0, 'dac', [], []),                                  # Key Tone off
+    (1, 0, 1, 'dac', ['click wheel', 'click button'], ['click', 'click']),  # Both: both, whatever listens
+    (1, 1, 1, 'dac', [], []),                                  # Speaker with headphones in: quiet
+    (1, 1, 0, 'bluetooth', [], []),                            # Speaker with Bluetooth listening: quiet
+    (1, 1, 0, 'dac', [], ['click', 'click']),                  # Speaker with nothing listening: the buzzer
+    (1, 2, 0, 'dac', ['click wheel', 'click button'], []),     # Headphones: the player's alone
+])
+def test_a_click_takes_the_clicker_s_route(gate, tone, clicker, jack, out, play, sys_):
+    """clicker.c clicker_route: Off nothing; Both the mixed click and the buzzer; Speaker the buzzer while nothing
+    listens; Headphones the mixed click; a press a button's"""
+    root, s, ctl = gate
+    keytone(root, tone, clicker)
+    s['sys'].answers['jack'] = f'jack po={jack} bal=0'
+    s['play'].answers['output'] = f'output {out}'
+    s['play'].answers['click wheel'] = s['play'].answers['click button'] = 'ok'
+    time.sleep(1.3)  # a tick: what listens
+    send(ctl, 'click 0', 'click 1')
+    time.sleep(1.0)
+    assert [l for l in s['play'].asked() if l.startswith('click')] == play
+    assert [l for l in s['sys'].asked() if l.startswith('click')] == sys_

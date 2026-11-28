@@ -402,8 +402,8 @@ What the owner would lose or notice running Vamp OS by [card boot](vamp-os-base.
 | 5 | Bluetooth headphones | Partial | `q2btd` connects, routes and keeps levels ([btd](btd.md)); pairing a new headset needs the UI's notice; per-device settings, ear detection and the AirPods handshake missing |
 | 6 | Standby | Device | `mem` suspend with Vamp OS's services, its wake sources ([sysd](sysd.md#needs-a-q2)) |
 | 7 | Power off, battery, charging, Charge Limit | Device | Built ([sysd](sysd.md)); `poweroff` reaching the PMIC, `PE22` through the GPIO class |
-| 8 | Server songs | Partial | The catplay, offline copies, Download Ahead, a streamed queue at a restore; a song played while it arrives (`grow`), Retry and Skip missing ([playd](playd.md#what-is-missing)) |
-| 9 | Key Tone (the Clicker) | Missing | Stock's `cmd_mcu` and the MCU firmware load are `demo`'s; `q2sysd` has the buzzer through `/dev/jz_pwm` (Find My Vamp) but no click; the click in the headphones (`mcl-click`) is not sent |
+| 8 | Server songs | Partial | The catplay, offline copies, Download Ahead, a song played while it arrives (`grow`), a streamed queue at a restore; Retry and Skip missing ([playd](playd.md#what-is-missing)) |
+| 9 | Key Tone (the Clicker) | Device | `q2gate` routes `q2ui`'s clicks as the Clicker does, to the player (`mcl-click`) and the buzzer, which `q2sysd` clicks through `/dev/jz_pwm` since stock's `cmd_mcu` and MCU load are `demo`'s ([sysd: Key Tone](sysd.md#key-tone)); whether the note sounds like stock's |
 | 10 | Radio (`q2tuner`) | Missing | Not in the image; as a source of `q2playd` it needs `q2ui`'s page |
 | 11 | Online lyrics | Missing | Neither the lookup nor a page draws them |
 | 12 | Guest Play | Missing | `q2-guest` not packaged ([services](vamp-os-services.md#guest-play)) |

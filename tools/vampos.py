@@ -62,7 +62,7 @@ PATCHES = ROOT/'os/patches/buildroot'
 # feat/render-engine's ui/ (another worker's; read-only here): moved on by changing this commit
 Q2UI_COMMIT = '9af5a6f5'
 VAMP_PATHS = ['os', 'tools', 'player', 'playd', 'sysd', 'libd', 'netd', 'btd', 'pkgd', 'dacloop', 'scrobd', 'dlnad', 'sendd', 'carrd', 'gate', 'perm', 'patch', 'assets/signing', 'assets/fonts', 'assets/scrobble-ca.pem', 'LICENSE']
-Q2UI_PATHS = ['ui', 'patch', 'LICENSE']
+Q2UI_PATHS = ['ui', 'patch', 'LICENSE', 'tools', 'assets/themes', 'assets/icons', 'assets/fonts']  # tools and assets: its art
 MANIFEST = ROOT/'os/vendor/V1.36.tsv'
 # A static qemu-mipsel for the boot test (test/os_image.py), the host's architecture: Ubuntu 24.04's, from
 # Launchpad's permanent copy of the package
@@ -152,6 +152,17 @@ def export(commit, paths, dest, worktree=False):
     return full
 
 
+def ui_art(tree):
+    """q2ui's glyphs (ui/image.c icon: oled_<name>_w.png and the rest in --icons), drawn by the pin's own tools/art.py
+    from its themes, as today's Vamp's tools/build.py draws them into demo's images: into tree/icons, which the q2ui
+    package installs in /usr/share/vamp/icons"""
+    icons = tree/'icons'
+    icons.mkdir()
+    code = ('import pathlib, sys; sys.path.insert(0, "tools"); from theme import builtins; from art import theme_images\n'
+            'for n, d in theme_images(builtins()).items(): pathlib.Path("icons", n + ".png").write_bytes(d)\n')
+    subprocess.run([sys.executable, '-c', code], cwd=tree, check=True)
+
+
 def build(out, worktree=False, jobs=JOBS):
     if platform.system() != 'Linux':
         sys.exit('os: build runs on Linux; on a Mac, under tools/mac/q2env')
@@ -161,6 +172,7 @@ def build(out, worktree=False, jobs=JOBS):
     src = CACHE/'src'
     vamp = export('HEAD', VAMP_PATHS, src/'vamp', worktree)
     q2ui = export(Q2UI_COMMIT, Q2UI_PATHS, src/'q2ui')
+    ui_art(src/'q2ui')
     work = CACHE/'out'
     env = dict(os.environ, BR2_DL_DIR=str(DL))
     common = [f'O={work}', f'BR2_EXTERNAL={src}/vamp/os', f'VAMP_SRC={src}']
