@@ -1055,7 +1055,7 @@ painted it white, which drew the box at rest.
   slim battery ending 62 px from the right edge (`STATUS_ROW_INSET`), three level bars while something plays (a pause
   in their place while paused, in the same white; a tap on either opens Now Playing), Wi-Fi's signal while connected
   (iOS's fan; a crossed glyph with no link past the access point), a card app's sync (turning arrows while it checks, a filling ring while it
-  downloads), wired headphones while a jack or a USB DAC takes the sound, Bluetooth (a headset's battery) while it does, a 13 px
+  downloads), wired headphones while a jack or a USB DAC takes the sound, Bluetooth (its rune, or a car) while it does, a 13 px
   padlock while Buttons Lock is on, and an orange crossed-out cloud while a card
   app's server can't be reached, each the clock's digits' height (11 px) on their
   rows (the headphones and the Bluetooth rune the battery's 12), 6 px apart, up in the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock

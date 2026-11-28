@@ -1,4 +1,4 @@
-/* A Bluetooth headset's battery for the status row (docs/internals.md#headset-battery):
+/* A Bluetooth headset's battery for Settings > Bluetooth (docs/internals.md#headset-battery):
  * bt_headset_battery() is its level, 0 to 100, or -1 with none connected or none reported; with it,
  * bt_headset_rate() is the stream's sample rate and bt_headset_class() the device's Class of
  * Device, each 0 when unknown (Settings > Bluetooth's line and page, the status row's car,
@@ -18,7 +18,7 @@
  * end) written whole to BATT_FILE, read once as the run ends. The first run of a connection (the
  * first call that finds a connected headset in stock's link list) asks for all four; a later one,
  * the level and the rate alone, the Class and the name kept. A headset's level moves by a percent
- * in minutes and shows only on a lit screen (the status row, the Bluetooth page, the low toasts),
+ * in minutes and shows only on a lit screen (the Bluetooth page, the low toasts),
  * so a later run starts only with the screen lit: BATT_POLL_MS after the last, BATT_RETRY_MS while
  * the level is not known yet (BlueZ has it some seconds after the link, as the headset sends it),
  * at most BATT_TRIES times, and at once when the codec streaming changes, which moves the rate.

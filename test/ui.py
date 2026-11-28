@@ -2369,9 +2369,9 @@ def told(binary, work):
                   rune.at(274, 22) == colour('status_bt_d') and dim.at(274, 22) == colour('status_btdim_d') and
                   rune.at(258, 22) == (0, 0, 0), f'{rune.at(274, 22)} {dim.at(274, 22)} {rune.at(258, 22)}')
     headset = row({'out': 'other', 'bt': 'headset', 'btbatt': 19})
-    good &= check("a headset that says its level: headphones, then its own battery, red under a fifth",
-                  headset.at(253, 22) == colour('status_headphones_d') and headset.at(265, 23) == (0xff, 0x45, 0x3a),
-                  f'{headset.at(253, 22)} {headset.at(265, 23)}')
+    good &= check("a headset that says its level is the rune alone (option A), no battery beside it",
+                  headset.at(274, 22) == colour('status_bt_d') and all(headset.at(x, 22) == (0, 0, 0) for x in range(240, 268)),
+                  f'{headset.at(274, 22)} {[x for x in range(240, 268) if headset.at(x, 22) != (0, 0, 0)]}')
     many = row({'out': 'other', 'sync': 2, 'syncpm': 500, 'lock': 1, 'offline': 1})
     arrow = many.at(272, 20)
     good &= check("a download (option A): its arrow over a 12 x 2 tray half filled in Status Blue from the left, the rest the "

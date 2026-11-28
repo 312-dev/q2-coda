@@ -50,14 +50,13 @@ static struct {
     int volume;       /* the level last seen, -1 before the first */
     uint64_t volume_at; /* when it last changed on a page with no display of its own, 0: not shown */
     unsigned seen;    /* now_seq() when play was read */
-    /* demo's word (status_told): where the sound goes, the Bluetooth slot and a headset's level,
-     * a guest's relay, the lock, a sync and its permille, a server out of reach, Wi-Fi's internet */
+    /* demo's word (status_told): where the sound goes, the Bluetooth slot, a guest's relay, the lock, a sync and its permille, a server out of reach, Wi-Fi's internet */
     char out[8], bt[12], relay[12];
-    int btbatt, lock, sync, syncpm, offline, net;
+    int lock, sync, syncpm, offline, net;
     int told;         /* status_told changed since it was read */
     char told_text[1536]; /* the file as last read, for status_told_value: a cover's path is up to 600 */
     int spin;         /* the sync arrows' frame shown */
-} S = { .level = -1, .volume = -1, .btbatt = -1, .net = 1, .told = 1, .clock24 = 1 };
+} S = { .level = -1, .volume = -1, .net = 1, .told = 1, .clock24 = 1 };
 
 #define VOLUME_SHOW_US 1500000u
 #define VOLUME_X 150 /* its track, between the clock and the glyphs */
@@ -160,15 +159,15 @@ static void read_told(void) {
     }
     if (f) rewind(f);
     char out[8] = "", bt[12] = "", relay[12] = "", tz[sizeof S.tz] = "", c24[4] = "";
-    int v[6] = { -1, 0, 0, 0, 0, 1 }; /* btbatt lock sync syncpm offline net */
-    static const char *const keys[] = { "btbatt", "lock", "sync", "syncpm", "offline", "net" };
+    int v[5] = { 0, 0, 0, 0, 1 }; /* lock sync syncpm offline net; btbatt, a headset's level, is not drawn */
+    static const char *const keys[] = { "lock", "sync", "syncpm", "offline", "net" };
     while (f && fgets(line, sizeof line, f)) {
         word_of(line, "out", out, sizeof out);
         word_of(line, "bt", bt, sizeof bt);
         word_of(line, "relay", relay, sizeof relay);
         word_of(line, "tz", tz, sizeof tz);
         word_of(line, "clock24", c24, sizeof c24);
-        for (int k = 0; k < 6; ++k) {
+        for (int k = 0; k < 5; ++k) {
             *num = 0, word_of(line, keys[k], num, sizeof num);
             if (*num) v[k] = atoi(num);
         }
@@ -183,11 +182,11 @@ static void read_told(void) {
         S.clock[0] = 0;
     }
     if (*c24 && atoi(c24) != S.clock24) S.clock24 = atoi(c24), S.clock[0] = 0;
-    if (strcmp(out, S.out) || strcmp(bt, S.bt) || strcmp(relay, S.relay) || v[0] != S.btbatt || v[1] != S.lock ||
-        v[2] != S.sync || v[3] != S.syncpm || v[4] != S.offline || v[5] != S.net) {
+    if (strcmp(out, S.out) || strcmp(bt, S.bt) || strcmp(relay, S.relay) || v[0] != S.lock || v[1] != S.sync ||
+        v[2] != S.syncpm || v[3] != S.offline || v[4] != S.net) {
         snprintf(S.out, sizeof S.out, "%s", out), snprintf(S.bt, sizeof S.bt, "%s", bt);
         snprintf(S.relay, sizeof S.relay, "%s", relay);
-        S.btbatt = v[0], S.lock = v[1], S.sync = v[2], S.syncpm = v[3], S.offline = v[4], S.net = v[5];
+        S.lock = v[0], S.sync = v[1], S.syncpm = v[2], S.offline = v[3], S.net = v[4];
         ui_mark(glyphs_rect());
     }
 }
@@ -200,9 +199,7 @@ static void read_told(void) {
 #define LOCK_W 13
 #define DROP_W 14  /* a download's box: its arrow over its tray (tools/art.py status_drop) */
 #define SPIN_W 12  /* the turning arrows */
-#define BT_GAP 2   /* between headphones and the headset's battery, and round a guest's relay */
-#define HS_BATT_W 15
-#define HS_NUB 2
+#define BT_GAP 2   /* round a guest's relay */
 #define RELAY_W 8
 /* Where the slots left of the battery start: the battery's body on whole pixels and GAP before it,
  * so the glyphs' 2 and 3 px strokes do not straddle pixels. */
@@ -295,16 +292,6 @@ static void drop(float left, int permille, uint32_t ink) {
     art(stem, left, 16);
 }
 
-/* A headset's own battery: a 15 x 8 body with a 1 px outline, filled 2 px inside it to the level,
- * red under a fifth, and its nub (patch/list_marks.c battery_slim) */
-static void slim(float x, int level) {
-    fill_round((rectf_t){ x, 19, 15, 8 }, 4, 0, 0x6e6e6e, 1, 0);
-    fill_round((rectf_t){ x + 1, 20, 13, 6 }, 3, 0, tok(TOK_CANVAS), 1, 0);
-    float full = 11 * clampf((float)level / 100, 0, 1);
-    if (full > 0) fill_round((rectf_t){ x + 2, 21, full, 4 }, full < 4.4f ? full / 2 : 2.2f, 0, level < LOW ? tok(TOK_NEGATIVE) : tok(TOK_PRIMARY), 1, 0);
-    fill_round((rectf_t){ x + 16, 20.8f, 1.5f, 4.4f }, 0.8f, 0, 0x6e6e6e, 1, 0);
-}
-
 /* Everything right of the clock, in the inks of the half in use */
 static void glyphs(void) {
     uint32_t ink = tok(TOK_PRIMARY);
@@ -348,15 +335,12 @@ static void glyphs(void) {
     }
     if (!strcmp(S.out, "wire"))
         art("status_wired", x - GLYPH, 16), x -= GLYPH + GAP;
-    if (!strcmp(S.bt, "connecting") || !strcmp(S.bt, "rune"))
+    /* a headset is the rune alone, whatever level it reports (option A, 2026-11-28; q2gate says headset) */
+    if (!strcmp(S.bt, "connecting") || !strcmp(S.bt, "rune") || !strcmp(S.bt, "headset"))
         art(S.bt[0] == 'c' ? "status_btdim" : "status_bt", x - RUNE_W, 16), x -= RUNE_W + GAP;
     else if (!strcmp(S.bt, "car"))
         art("status_car", x - CAR_W, 16), x -= CAR_W + GAP;
-    else if (!strcmp(S.bt, "headset")) { /* headphones, then the headset's own battery */
-        slim(x - HS_BATT_W - HS_NUB, S.btbatt);
-        art("status_headphones", x - HS_BATT_W - HS_NUB - BT_GAP - GLYPH, 16);
-        x -= GLYPH + BT_GAP + HS_BATT_W + HS_NUB + GAP;
-    } else if (!strcmp(S.bt, "guest")) { /* a guest's phone in Status Blue, then › and where it plays */
+    else if (!strcmp(S.bt, "guest")) { /* a guest's phone in Status Blue, then › and where it plays */
         float w = !strcmp(S.relay, "car") ? CAR_W : !strcmp(S.relay, "headphones") ? GLYPH : 0;
         if (w) {
             art(w == CAR_W ? "status_car" : "status_headphones", x - w, 16);

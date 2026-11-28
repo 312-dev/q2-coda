@@ -284,9 +284,9 @@ All lists share one grid.
   - **Bluetooth** (P9 in `design/bt-redesign`), left of wired headphones: nothing while Bluetooth is off or nothing
     is connected, or while wired headphones take the sound (a jack plugged in over a linked headset plays there, and
     the row shows where the sound goes: one glyph, never both); Phosphor `bluetooth` (bold, 12 px tall on rows 16 to
-    27 as wired headphones, 8.4 px wide) in Text Tertiary while a device connects and in Text Primary once one is connected; a
-    headset that reports its level, `headphones` (bold) and a 15x8 battery 2 px after it, filled to the level as
-    the status battery's (red under 20%); a car, `car-profile` (bold, 18.5 px wide at 11 tall). While a guest plays
+    27 as wired headphones, 8.4 px wide) in Text Tertiary while a device connects and in Text Primary once one is connected,
+    a headset that reports its battery level too (option A, 2026-11-28: the level is on Settings > Bluetooth, and
+    the row stays short); a car, `car-profile` (bold, 18.5 px wide at 11 tall). While a guest plays
     ([Guest Play](#guest-play)), `device-mobile` (fill) in Status Blue, and while it is relayed to the Q2's
     Bluetooth device a `›` (8 px, Text Secondary) and that device's glyph.
   - **Buttons Lock**: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
@@ -298,7 +298,7 @@ All lists share one grid.
     says why. On Now Playing too (`mock_subsonic_offline.py`, the user's, 2026-11-19;
     [internals](internals.md#cloud-reach)).
 - **The strip.** The glyphs left of the battery have the room from 8 px past the widest clock, at the row's left, to
-  the battery (about 170 px: every slot at once with a headset's battery takes about 145). When they need more, that strip (never the battery) scrolls as a marquee: at rest its
+  the battery (about 170 px: every slot at once takes 112, or 148 with a guest relayed to a car). When they need more, that strip (never the battery) scrolls as a marquee: at rest its
   left end shows, the first glyph after the clock, for 2.75 s; then it slides left at 35 px/s until its right end
   meets the battery's 6 px, holds there 1.5 s and goes back, as Now Playing's lines do. Each end whose glyphs are cut
   fades over 6 px, the house marquee's 12 tightened: the right at rest, both while it slides, the left at its end.
