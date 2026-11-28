@@ -197,6 +197,7 @@ float text_width(int face, int px, const char *s);
 void text_frame(void); /* a frame is over: the cache's clock moves on */
 extern int text_budget_us; /* what a frame may spend making new glyphs, wall time; 0: all it needs */
 extern int text_deferred;  /* glyphs this frame left for the next */
+extern unsigned text_made_frame, text_glyph_max_us; /* glyphs this frame made, and the slowest one's time */
 int text_warm(unsigned budget_us); /* make common glyphs ahead of need; 1 while more are left */
 struct text_stats {
     unsigned glyphs, bytes, made, evictions;
@@ -309,6 +310,7 @@ struct ui_stats {
     unsigned gaps_paused; /* frames after a motion that had ended by its own steps (ui.c account): no gap counted */
     uint64_t gap_max_us;  /* the longest gap counted as refreshes missed, and the UI_SINCE_* flags of its wait */
     unsigned gap_max_flags;
+    unsigned start_late; /* gaps of a refresh and a half or more in the first turns after the start: not a motion's */
     /* from a wheel's or a finger's input to the end of the pan of the first frame shown after it (its first refresh
      * on the panel): under 17, 33, 50, 67, 100 ms, more; how many, their sum and the longest */
     unsigned lat_hist[6], lat_n;
@@ -321,6 +323,10 @@ struct ui_frame_rec {
     uint32_t dt_us;
     int32_t scroll16;
     uint32_t flags;
+    uint32_t work_us;      /* from the frame's start to the end of its pan (ui.c account) */
+    uint32_t glyphs;       /* glyphs made for it (text.c) */
+    uint32_t glyph_max_us; /* the slowest of them */
+    uint32_t faults;       /* major page faults since the frame before (a mapped font's pages read from flash) */
 };
 #define FRAME_MOVING 1  /* the frame asked for the next */
 #define FRAME_OVERLAP 2 /* the panel said the page this frame was turned onto was the one shown */

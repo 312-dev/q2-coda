@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <time.h>
 
 #include "q2ui.h"
@@ -286,7 +287,9 @@ static void account(uint64_t start_us, uint64_t draw_ns, uint64_t show_ns, unsig
             ++s->gaps_paused;
         else {
             ++s->gap_hist[k <= 1 ? 0 : k == 2 ? 1 : k == 3 ? 2 : k <= 6 ? 3 : 4];
-            if (gap >= refresh * 3 / 2) {
+            if (gap >= refresh * 3 / 2 && s->frames <= 2) /* the first turns: start-up, not the motion's pace */
+                ++s->start_late;
+            else if (gap >= refresh * 3 / 2) {
                 s->dropped += (unsigned)k - 1, ++s->late;
                 s->streak = 0;
                 if (gap > s->gap_max_us) s->gap_max_us = gap, s->gap_max_flags = since_shown;
@@ -311,6 +314,11 @@ static void account(uint64_t start_us, uint64_t draw_ns, uint64_t show_ns, unsig
         f->scroll16 = list_drawn ? (int32_t)(list_drawn_scroll * 16) : INT32_MIN;
         f->flags = (moving ? FRAME_MOVING : 0) | (fb_overlap ? FRAME_OVERLAP : 0) | (text_deferred ? FRAME_DEFER : 0) |
                    (fb_page() ? FRAME_PAGE1 : 0) | (since_shown & UI_SINCE_INPUT ? FRAME_INPUT : 0);
+        f->work_us = work > 0xffffffffu ? 0xffffffffu : (uint32_t)work;
+        f->glyphs = text_made_frame, f->glyph_max_us = text_glyph_max_us;
+        struct rusage ru;
+        static long faults_before;
+        if (!getrusage(RUSAGE_SELF, &ru)) f->faults = (uint32_t)(ru.ru_majflt - faults_before), faults_before = ru.ru_majflt;
     }
     list_drawn = 0;
     last_shown_us = mono_us(), last_moving = moving;

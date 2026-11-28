@@ -47,7 +47,7 @@
  * that q2ui left for ended on demo's Now Playing (a Search result played; patch/q2ui_gate.c).
  *
  * --frame-log N keeps the last N frames shown in the stats (frame_log_*: each one's time since the one before, its
- * list's scroll and q2ui.h's FRAME_* flags) and reads the panel's shown page back before each turn (fb_overlaps);
+ * list's scroll, q2ui.h's FRAME_* flags, its work time, the glyphs it made, the slowest one's time and the major page faults since the frame before) and reads the panel's shown page back before each turn (fb_overlaps);
  * --fb-flush 1 msyncs the page turned onto before its pan, 2 writes the CPU's data cache back over it (MIPS).
  * --pan-blocks makes a panel file's pan wait for the refresh, as the Q2's FBIOPAN_DISPLAY does (a host
  * test of the stats; a real panel's pan is its own).
@@ -237,7 +237,7 @@ static void write_stats(void) {
             " \"work_hist_ms\": {\"lt1\": %u, \"lt2\": %u, \"lt4\": %u, \"lt8\": %u, \"lt12\": %u, "
             "\"lt16_7\": %u, \"lt33\": %u, \"more\": %u},\n"
             " \"pan_us_per_frame\": %.1f, \"pan_us_max\": %llu, \"vsync_wait_us_per_frame\": %.1f, "
-            "\"gap_hist_refreshes\": {\"r1\": %u, \"r2\": %u, \"r3\": %u, \"r4_6\": %u, \"more\": %u}, \"gaps_paused\": %u, \"gap_max_us\": %llu, \"gap_max_flags\": %u,\n"
+            "\"gap_hist_refreshes\": {\"r1\": %u, \"r2\": %u, \"r3\": %u, \"r4_6\": %u, \"more\": %u}, \"gaps_paused\": %u, \"gap_max_us\": %llu, \"gap_max_flags\": %u, \"start_late\": %u,\n"
             " \"latency_hist_ms\": {\"lt17\": %u, \"lt33\": %u, \"lt50\": %u, \"lt67\": %u, \"lt100\": %u, \"more\": %u}, "
             "\"latency_n\": %u, \"latency_us_mean\": %.0f, \"latency_us_max\": %llu, \"fb_checks\": %u, \"fb_overlaps\": %u,\n"
             " \"glyphs\": %u, \"glyph_bytes\": %u, \"glyphs_made\": %u, \"glyph_evictions\": %u, "
@@ -250,7 +250,7 @@ static void write_stats(void) {
             s->late, s->streak_max, fb_refresh_us(), s->deferred, s->hist[0], s->hist[1], s->hist[2], s->hist[3],
             s->hist[4], s->hist[5], s->hist[6], s->hist[7], (double)s->pan_us / frames, (unsigned long long)s->pan_max_us,
             (double)s->wait_us / frames, s->gap_hist[0], s->gap_hist[1], s->gap_hist[2], s->gap_hist[3], s->gap_hist[4], s->gaps_paused,
-            (unsigned long long)s->gap_max_us, s->gap_max_flags,
+            (unsigned long long)s->gap_max_us, s->gap_max_flags, s->start_late,
             s->lat_hist[0], s->lat_hist[1], s->lat_hist[2], s->lat_hist[3], s->lat_hist[4], s->lat_hist[5], s->lat_n,
             s->lat_n ? (double)s->lat_us / s->lat_n : 0.0, (unsigned long long)s->lat_max_us, s->fb_checks, s->fb_overlaps,
             text_stats.glyphs, text_stats.bytes,
@@ -258,15 +258,17 @@ static void write_stats(void) {
             now_get()->playing, now_get()->paused, now_cover() != 0, ui_top_name(), api_vamp, api_play_live(),
             now_get()->hearts, now_get()->liked, title, notices,
             *bench_json ? ",\n \"bench\": " : "", bench_json);
-    /* the frame log, oldest first: three lists of the same length (q2ui.h struct ui_frame_rec) */
-    for (int k = 0; k < 3 && ui_frame_log_n; ++k) {
-        fprintf(f, ",\n \"frame_log_%s\": [", k == 0 ? "dt_us" : k == 1 ? "scroll16" : "flags");
+    /* the frame log, oldest first: seven lists of the same length (q2ui.h struct ui_frame_rec) */
+    static const char *const logs[] = { "dt_us", "scroll16", "flags", "work_us", "glyphs", "glyph_max_us", "faults" };
+    for (int k = 0; k < 7 && ui_frame_log_n; ++k) {
+        fprintf(f, ",\n \"frame_log_%s\": [", logs[k]);
         for (unsigned i = 0, o = 0; i < ui_frame_log_n; ++i) {
             const struct ui_frame_rec *r = &ui_frame_log[(ui_frame_log_at + i) % ui_frame_log_n];
             if (!r->dt_us && !r->flags && !r->scroll16) continue; /* a slot not yet filled */
             if (k == 0) fprintf(f, "%s%u", o++ ? "," : "", r->dt_us);
             else if (k == 1) fprintf(f, r->scroll16 == INT32_MIN ? "%snull" : "%s%d", o++ ? "," : "", r->scroll16);
-            else fprintf(f, "%s%u", o++ ? "," : "", r->flags);
+            else
+                fprintf(f, "%s%u", o++ ? "," : "", k == 2 ? r->flags : k == 3 ? r->work_us : k == 4 ? r->glyphs : k == 5 ? r->glyph_max_us : r->faults);
         }
         fputc(']', f);
     }
