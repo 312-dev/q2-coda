@@ -43,6 +43,6 @@ void card_draw(rectf_t r, float radius, const ui_layer *layers, int n, float pus
         float room = ((float)l->im->h - ph) / 2, shift = clampf(-dy * (float)l->im->h / h, -room, room);
         image_draw_part(l->im, (rectf_t){ ((float)l->im->w - pw) / 2, room + shift, pw, ph }, box, radius, tilt, 256, -1);
     }
-    gleam_t glint = { 0, -push * h * 0.55f, w * 0.7f, h * 0.6f, 0.22f * fabsf(push) };
+    gleam_t glint = { 0, -push * h * 0.55f, w * 0.7f, h * 0.6f, 0.22f * fabsf(push), 0 };
     if (glint.strength > 0) fill_round(face, radius, tilt, RGB_GLEAM_ONLY, 1, &glint);
 }

@@ -69,7 +69,8 @@ def base_args(binary, d):
             '--now', d/'now', '--cover', d/'cover.jpg', '--ask', d/'ask', '--power', d/'power', '--wifi', d/'wifi',
             '--wireless', d/'wireless', '--told', d/'told', '--networks', d/'networks', '--bt-devices', d/'bt', '--config', d/'config.ini',
             '--library-order', d/'library-order', '--durations', d/'durations', '--home-order', d/'home-order',
-            '--notices', d/'ui.sock', '--apps', d/'apps', '--app-card', d]
+            '--notices', d/'ui.sock', '--apps', d/'apps', '--app-card', d,
+            '--living', '0']  # the plain platter, which the checks read; living() turns the cells on (a later option wins)
 
 
 class Picture:
@@ -2677,6 +2678,52 @@ def notices(binary, work):
     return good
 
 
+def living(binary, work):
+    """The living row (ui/list.c live, ui/cells.c): cells drift in the selected row's Arterial platter while the list
+    is lit, only ever darker than the platter; they come to rest after 20 s with nothing pressed and start again on a
+    tick; under Reduce Motion they are shown still; Blue's platter has none."""
+    good = True
+    def bar_k(p):  # the row the platter is on: the most platter-red pixels on its middle line
+        counts = [sum(1 for x in range(30, 345) if p.platter(x, BAR_H + k * ROW_H + 16)) for k in range(ROWS)]
+        return counts.index(max(counts))
+    def cells(p, k):  # the platter's pixels at the right of the row (no text there), and those a cell darkens
+        px = [p.at(x, y) for y in range(BAR_H + k * ROW_H + 4, BAR_H + (k + 1) * ROW_H - 4) for x in range(250, 330)]
+        return px, [c for c in px if c != ACCENT]
+    on = ('--living', '1')
+    trace, pics, _ = script(binary, work, 300, ['rest', 'shot @a.ppm', 'run 500', 'shot @b.ppm', 'run 21500', 'shot @c.ppm',
+                                                'run 1000', 'shot @d.ppm', 'tick 1', 'tick -1', 'run 500', 'shot @e.ppm'], *on)
+    k = bar_k(pics['a'])
+    a, dark_a = cells(pics['a'], k)
+    b, _ = cells(pics['b'], k)
+    _, plain, _ = script(binary, work, 303, ['rest', 'shot @a.ppm'])  # the same frame with no cells
+    good &= check('cells darken part of the platter at rest', 30 <= len(dark_a) < len(a) // 2, f'{len(dark_a)} of {len(a)}')
+    y0, y1 = BAR_H + k * ROW_H, BAR_H + (k + 1) * ROW_H
+    lighter = [(x, y) for y in range(y0, y1) for x in range(W) if any(c > p for c, p in zip(pics['a'].at(x, y), plain['a'].at(x, y)))]
+    good &= check('no pixel of the row is lighter than without them, in any channel (white text keeps its contrast)', not lighter,
+                  f"{lighter[:3]} {[(pics['a'].at(*q), plain['a'].at(*q)) for q in lighter[:3]]}")
+    good &= check('they drift: half a second later the platter differs', a != b)
+    shown = [t['shown'] for t in trace]
+    good &= check('the list at rest still shows frames while they drift, and none once they rest after 20 s',
+                  sum(shown[40:70]) >= 25 and pics['c'].rgb == pics['d'].rgb and not any(shown[-95:-35]), f'{sum(shown[40:70])} {sum(shown[-95:-35])}')
+    good &= check('a tick starts them again', pics['e'].rgb != pics['d'].rgb and any(shown[-25:]))
+    trace, pics, _ = script(binary, work, 301, ['rest', 'shot @a.ppm', 'run 1000', 'shot @b.ppm'], *on, '--reduce-motion')
+    k = bar_k(pics['a'])
+    good &= check('Reduce Motion shows them still', len(cells(pics['a'], k)[1]) >= 30 and pics['a'].rgb == pics['b'].rgb
+                  and not any(t['shown'] for t in trace[-55:]))
+    ini = pathlib.Path(tempfile.mkdtemp(dir=work))/'config.ini'
+    ini.write_text('[IPOD]\nOLED_ACCENT=10\n')
+    trace, pics, _ = script(binary, work, 302, ['rest', 'shot @a.ppm', 'run 1000', 'shot @b.ppm'], *on, '--config', ini)
+    rows = [[pics['a'].at(x, y) for y in range(BAR_H + k * ROW_H + 4, BAR_H + (k + 1) * ROW_H - 4) for x in range(30, 345)] for k in range(ROWS)]
+    # a cell would show as a darker Blue (text over the platter is lighter)
+    k = max(range(ROWS), key=lambda k: rows[k].count(BLUE))  # the platter's row (the Shuffle row's words are Blue too)
+    darker = [(x, y, pics['a'].at(x, y)) for y in range(BAR_H + k * ROW_H + 4, BAR_H + (k + 1) * ROW_H - 4) for x in range(30, 345)
+              if (lambda c: c[2] - c[0] > 100 and c[2] < BLUE[2] - 4)(pics['a'].at(x, y))]
+    good &= check("Blue's platter has no cells and draws nothing at rest", rows[k].count(BLUE) > len(rows[k]) // 2 and not darker
+                  and pics['a'].rgb == pics['b'].rgb and not any(t['shown'] for t in trace[-55:]),
+                  f"{darker[:3]} {pics['a'].rgb == pics['b'].rgb} {sum(t['shown'] for t in trace[-55:])}")
+    return good
+
+
 def main():
     try:  # the build's inputs; a compile that fails with them all there is a failure, not a skip
         ui.stb(), ui.stb_image(), ui.sqlite_include()
@@ -2715,6 +2762,8 @@ def main():
             good &= hold_menu(binary, work)
         if not only or 'clock' in only:
             good &= clock(binary, work)
+        if not only or 'living' in only:
+            good &= living(binary, work)
         if not only or 'night' in only:
             good &= night_shift(binary, work, ('--page', 'home'))
         if not only or 'playing' in only:

@@ -263,7 +263,8 @@ Every file in `patch/` and `tools/`, and `test/` by group: what it is for, where
 | `text.c`            | The faces (stb_truetype), the glyph cache by quarter-pixel phase, runs, the glyph budget | [Text](ui-rewrite.md#text)                      |
 | `image.c`           | PNG and JPEG (stb_image), scaled and leaning draws, the theme's glyphs by name          | [The toolkit](ui-rewrite.md#the-toolkit)        |
 | `input.c`           | The wheel's ticks and tug and the buttons, with holds, from their evdev devices         | [Input](ui-rewrite.md#input)                    |
-| `list.c`            | The list: row kinds, selection, the glide, the platter's lean and press, the focus layer | [Lists](ui-rewrite.md#lists-and-scrolling), [Layers](ui-rewrite.md#layers) |
+| `list.c`            | The list: row kinds, selection, the glide, the platter's lean and press, the focus layer, the living row's clock | [Lists](ui-rewrite.md#lists-and-scrolling), [Layers](ui-rewrite.md#layers) |
+| `cells.c`, `cells.h`, `cells_data.inc` | The living row's cells: their mask a frame and their ink, in whole numbers (`cells_data.inc`: tables made by the prototype's `gen.py` from its reference renderer, outside the repository; ponytail: regenerating them needs that prototype) | [Selection bar](oled-design.md#selection-bar) |
 | `card.c`            | A card of layers at different depths                                                    | [Cards](ui-rewrite.md#cards)                    |
 | `status.c`, `theme.c` | The status row; the theme's tokens                                                    | [Themes](ui-rewrite.md#themes-light-mode-night-shift) |
 | `lib.c`             | The library's songs from `database.db` and the server catalogue, and their lengths      | [The library](ui-rewrite.md#the-library)        |

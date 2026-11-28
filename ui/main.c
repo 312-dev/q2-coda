@@ -1,7 +1,8 @@
 /* q2ui's start: options, the library, the panel, the first page, then the loop (ui.c).
  *
  *     q2ui [--db FILE] [--catalogue FILE] [--fb FILE] [--input DIR] [--fonts DIR] [--icons DIR]
- *          [--limit N] [--motion 0|1] [--reduce-motion] [--light] [--panel-bits 8|6|5|565]
+ *          [--limit N] [--motion 0|1] [--living 0|1] [--living-fps N] [--reduce-motion] [--light]
+ *          [--panel-bits 8|6|5|565]
  *          [--panel-mode 24|keep] [--panel-mem FILE]
  *          [--text awtk] [--page home|songs|now|depth|gallery|card] [--stats FILE] [--bench] [--script FILE]
  *          [--trace FILE] [--clock HH:MM] [--state FILE] [--cmdq FIFO] [--ctl FD] [--playlist FILE]
@@ -17,6 +18,7 @@
  * otherwise), and --panel-mem is a file standing in for the registers, for a test. kill -HUP
  * makes q2ui start itself again in place, so this file's options, or a newer q2ui put at the
  * same path, take effect with no restart of the Q2.
+ * --living 0 leaves the selected row's cells out (ui/list.c live), --living-fps their frame rate.
  * --page depth is the card that finds it by eye; gallery and card are the toolkit's examples
  * (ui/page_gallery.c). --text awtk lays text out on whole pixels, as
  * demo does, for comparing screens.
@@ -152,6 +154,10 @@ static void parse(int argc, char **argv) {
             opt.limit = atoi(v), ++i;
         else if (!strcmp(a, "--motion"))
             list_motion = atoi(v) != 0, ++i;
+        else if (!strcmp(a, "--living"))
+            list_living = atoi(v) != 0, ++i;
+        else if (!strcmp(a, "--living-fps"))
+            list_living_fps = atoi(v), ++i;
         else if (!strcmp(a, "--panel-bits"))
             opt.bits = atoi(v), ++i;
         else if (!strcmp(a, "--panel-mode"))

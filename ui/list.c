@@ -33,6 +33,7 @@
 #include <strings.h>
 
 #include "../patch/wheel_accel.h"
+#include "px.h"
 #include "q2ui.h"
 
 #define LIST_TOP 58  /* where the first row rests, under the status row */
@@ -257,6 +258,37 @@ static rectf_t platter(const ui_list *l, float *tilt, float *lean_share) {
 }
 /* everything the focus layer can touch: the platter and its shadow */
 static ui_list *traced;
+
+/* The living row (docs/oled-design.md#selection-bar; the owner's, 2026-11-27, "i like subtle, ship it"): red cells
+ * drifting through the selected row's platter on a 70 bpm lub-dub, from ui/cells.c, a function of a clock of its own.
+ * The clock runs while the list is lit, eases to a stop over LIVE_EASE_US once nothing has been pressed or turned for
+ * LIVE_IDLE_US, and starts again on the next input; it stands still under Reduce Motion (the cells shown as they
+ * were) and in the dark. The platter is drawn with them whenever its colour leaves room for venous: every channel of
+ * LIVE_VENOUS at or under the platter's, so Arterial has them and Blue does not. A lifted row's card has none.
+ * --living 0 draws none (test/ui.py's other checks read the plain platter); --living-fps is the frame rate while only
+ * the cells move (60: the owner's "no visual sacrifice"; 30 reads coarser and costs half). */
+int list_living = 1, list_living_fps = 60;
+#define LIVE_IDLE_US 20000000ull    /* still this long and the cells come to rest */
+#define LIVE_EASE_US 1500000ull     /* over this, eased out */
+#define LIVE_VENOUS 0x5c060e        /* the colour a cell's rim pulls toward */
+#define LIVE_STRENGTH 13107         /* how far a near cell's rim goes toward it, Q16: subtle, 0.20 */
+#define LIVE_CATCH 131072           /* the sheen's catch, Q16: a cell under the gleam is up to 3 times as dark */
+static struct {
+    cells_t mask;
+    cells_ink_t ink;
+    struct cells_paint paint;
+    uint32_t ink_rgb;      /* the platter the ink was made for, its panel's bits beside it */
+    unsigned ink_bits;
+    int w, h;              /* the mask's box */
+    uint64_t drawn, t, input; /* the clock the mask was made at; the clock's last step; the last input */
+    double clock;          /* the cells' own time, us */
+} live = { .drawn = ~0ull };
+/* whether rgb, a platter's colour, takes cells */
+static int live_takes(uint32_t rgb) {
+    for (int s = 0; s < 24; s += 8)
+        if ((LIVE_VENOUS >> s & 0xff) > (rgb >> s & 0xff)) return 0;
+    return 1;
+}
 static rect_t focus_rect(const ui_list *l) { return rect_of(platter(l, 0, 0), l->lifted ? 14 : 10); }
 
 static void settle(ui_list *l) {
@@ -358,6 +390,7 @@ ui_list *list_new(const ui_source *src) {
     l->n = src->count(src->ctx);
     l->grab = -1;
     l->cap_open = l->cap_close = -1, l->cap_k = 1;
+    live.input = ui_time(); /* a list that opens is looked at */
     forget(l);
     /* a list opens on its first row that scrolls: a pinned row (Shuffle) is reached by the wheel */
     l->sel = src->pinned < l->n ? src->pinned : 0;
@@ -764,7 +797,19 @@ static void list_draw_rows(ui_list *l, rect_t r) {
     shadow_round((rectf_t){ bar.x + 2, bar.y + 3, bar.w - 4, bar.h }, SEL_R, 7, RGB_ACCENT,
                  (0.30f + 0.25f * fabsf(share)) * (1 - pressed));
     gleam_t gleam = { 0, -share * (float)l->row_h * 0.6f, bar.w * 0.45f, (float)l->row_h * 1.1f,
-                      0.42f * clampf((fabsf(share) - 0.15f) / 0.85f, 0, 1) };
+                      0.42f * clampf((fabsf(share) - 0.15f) / 0.85f, 0, 1), 0 };
+    int w = (int)ceilf(bar.w), h = (int)ceilf(bar.h);
+    if (list_living && list_motion && live_takes(blue) && w <= CELLS_MAX_W && h <= CELLS_MAX_H) {
+        if (w != live.w || h != live.h) cells_init(&live.mask, w, h), live.w = w, live.h = h, live.drawn = ~0ull;
+        if ((uint64_t)live.clock != live.drawn) live.drawn = (uint64_t)live.clock, cells_step(&live.mask, live.drawn);
+        unsigned bits = px_bits_rb << 8 | px_bits_g;
+        if (blue != live.ink_rgb || bits != live.ink_bits) {
+            cells_ink_init(&live.ink, blue, LIVE_VENOUS, LIVE_STRENGTH, LIVE_CATCH, px_bits_rb, px_bits_g);
+            live.ink_rgb = blue, live.ink_bits = bits;
+        }
+        live.paint = (struct cells_paint){ &live.mask, &live.ink };
+        gleam.cells = &live.paint;
+    }
     fill_round(bar, SEL_R, tilt, blue, 1, &gleam);
     /* what the platter covers reads in its focused inks, cut to the platter */
     if (!rect_meet(r, rect_of(bar, 0), &on)) return;
@@ -903,6 +948,8 @@ void list_select(ui_list *l, int i, int animate) {
 
 void list_event(ui_list *l, const input_t *e) {
     if (!l->n) return;
+    if (ui_time() - live.input >= LIVE_IDLE_US) ui_again(); /* the cells at rest start again */
+    live.input = ui_time();
     if (e->type == IN_TICK && l->grab >= 0) { /* a grabbed slider's: the selection stays */
         int step = wheel_steps(e->speed); /* by the wheel's speed, as demo's sliders (patch/levels.c wheel_level) */
         ui_row before = { 0 }, after = { 0 };
@@ -1076,6 +1123,18 @@ void list_step(ui_list *l) {
             if (t >= AZ_BUBBLE_US) ui_mark(az_rect()); /* the bubble gone */
             ui_wake_ms((unsigned)(((t < AZ_BUBBLE_US ? AZ_BUBBLE_US : AZ_SHOW_US - AZ_FADE_US) - t) / 1000u) + 1);
         }
+    }
+    if (l->n && !l->lifted && list_living && list_motion && live_takes(RGB_ACCENT)) { /* the living row's clock */
+        uint64_t idle = now - live.input;
+        float rate = idle < LIVE_IDLE_US ? 1 : idle >= LIVE_IDLE_US + LIVE_EASE_US ? 0 : 1 - (float)(idle - LIVE_IDLE_US) / LIVE_EASE_US;
+        rate = 1 - (1 - rate) * (1 - rate); /* eased out: slowing most at its end */
+        if (ui_reduce_motion || ui_dark()) rate = 0;
+        if (rate > 0 && live.t) {
+            live.clock += (double)(now - live.t) * rate;
+            ui_mark(rect_of(platter(l, 0, 0), 0)), ui_wake_ms(1000u / (unsigned)(list_living_fps > 0 ? list_living_fps : 60));
+        } else if (rate > 0)
+            ui_wake_ms(1000u / (unsigned)(list_living_fps > 0 ? list_living_fps : 60));
+        live.t = rate > 0 ? now : 0;
     }
     if (l->mq_at) {
         /* the selected row's cut title: rest, slide to its end, rest, back to the start */

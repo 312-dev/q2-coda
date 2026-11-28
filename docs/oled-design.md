@@ -412,6 +412,15 @@ is Radio's, edge to edge where the cover goes: design K1, approved 2026-11-20
   is unchanged: past it the bar steps a row and the next tug starts from the leftover turn. Let go short of
   it and the bar springs back over 220 ms. The mock-up's 1 degree tilt is under a pixel on a 32 px row and is
   not drawn. A touch drag scrolls the list with the bar hidden, as touch always does, so it does not tilt.
+- **The living row** (the owner's, 2026-11-27: "i like subtle, ship it"; q2ui's, `ui/list.c` `live`, `ui/cells.c`): red
+  cells drift through an Arterial platter on a 70 bpm lub-dub (lub, then dub 0.30 s later; the flow 0.62 to 1.81 times
+  its mean), about 127 in sight, 3 to 8 px across, nearer ones larger, faster and sharper, tumbling slowly. A cell only
+  darkens the platter, toward venous `#5C060E`, 0.20 of the way at a near cell's rim (subtle), and up to three times
+  that under the lean's gleam, so white text never reads less than on the plain bar. The field is a function of a clock
+  of its own, at 60 frames a second while only the cells move (`--living-fps`), the pill alone redrawn; it slows to a
+  stop over 1.5 s once nothing has been pressed or turned for 20 s, and moves again on the next input. Still under
+  Reduce Motion (shown as they were), and gone on a lifted row's card and on a platter venous cannot darken (Blue).
+  `--living 0` leaves them out. demo's bar has none.
 - **A list's end is its end** (approved on 2026-11-16): the wheel stops on the first and last rows, never wrapping
   to the other end and never bouncing. Turning on past an end, the bar's tug holds full against it, the
   selection staying, and springs back when the finger lifts. A drag stops at the ends too, with no rubber band.

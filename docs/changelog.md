@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - New UI (preview): the selected row is alive: faint red cells drift through its red bar to a resting heartbeat. They settle after 20 seconds without a press and move again when you turn the wheel; with Reduce Motion they stay still, and with the Blue accent there are none.
   - Look: the accent is now **Arterial**, a deep red, in place of the blue: the selection bar, progress bars, switches and the rest that took the blue. **Blue** is still there under Settings > Display > Appearance > Accent, and the new UI follows that choice too. The status row's download ring and Guest Play's phone stay blue whichever you pick.
   - New UI (preview): Control Center comes down from the top of the screen under your finger as you pull it, and settles open or back up when you let go, instead of sliding in from the side; Return held drops it from the top. Its Brightness and Volume sliders now stay right under your finger while you drag them.
   - New UI (preview): **Genres** and **Recently Added** are in the Library, as in the classic menus: a genre's songs with their artists, and every song newest first. In Artists, Albums and Genres the songs with no name for it are listed last.
