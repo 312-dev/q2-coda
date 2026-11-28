@@ -4,7 +4,9 @@
 #
 ################################################################################
 
-Q2UI_VERSION = $(shell cat $(VAMP_SRC)/q2ui/COMMIT)
+# the pin and this tree's commit: the glyphs (tools/vampos.py ui_art) and the install are this tree's, so a new commit
+# installs again whatever the pin (Buildroot keeps a built version's stamps)
+Q2UI_VERSION = $(shell cat $(VAMP_SRC)/q2ui/COMMIT)-$(shell cut -c1-12 $(VAMP_SRC)/vamp/COMMIT)
 Q2UI_SITE = $(VAMP_SRC)/q2ui
 Q2UI_SITE_METHOD = local
 Q2UI_LICENSE = GPL-3.0+
