@@ -206,11 +206,18 @@ What stock's init scripts and `demo`'s start leave set up, which anything after 
 | Set up at start | By, in stock | VampOS |
 | --- | --- | --- |
 | The MCU's firmware (the buzzer's click, Key Tone) | `demo`'s `buzzer_init`: three `cmd_mcu` (`/vendor/mcu/libmcu-bare.bin`, bootup) | `q2sysd`'s `mcu_up` at its start, the same ioctls; shown on the owner's Q2 in the second card boot (`click` answered `ok`) |
-| The backlight's PWM (`PC00`, 10 kHz, 111 steps) | `demo`'s `initToolsModule(23)` | `q2sysd` at the first screen or brightness change ([q2sysd: The backlight](sysd.md#the-backlight)); a boot from flash shows the saved Brightness only from that first change |
+| The backlight's PWM (`PC00`, 10 kHz, 111 steps) | `demo`'s `initToolsModule(23)` | `q2sysd`: on a boot from flash at its start, lit at the saved Brightness; on a card boot at the first screen or brightness change, today's Vamp's light kept until then ([q2sysd: The backlight](sysd.md#the-backlight)) |
 | The modules (Wi-Fi `8733bs`, touch, slider, DAC codec, PWM, MCU, watchdog) | `S11module_driver_default` | rcS runs the same script |
 | Wi-Fi up: `wpa_supplicant -B`, `udhcpc` | `demo` at start | `q2netd`; its control socket needs `/var/run` on the tmpfs ([where the services say things](vamp-os-base.md#where-the-services-say-things)) |
-| The loopback interface | `S40network`: `ifup -a` | **not done**: rcS brings up no `lo`. A card boot has stock's; a boot from flash needs `ifconfig lo 127.0.0.1 up` in rcS |
-| The random seed | `S20urandom` from `/var/lib/random-seed` | **not done**: the kernel's own entropy only; a seed file on `/mnt/data` would carry it |
+| The loopback interface | `S40network`: `ifup -a` | rcS on a boot from flash (`ifconfig lo 127.0.0.1 netmask 255.0.0.0 up`); a card boot keeps today's Vamp's |
+| The random seed | `S20urandom`: `/var/lib/random-seed` mixed in at start, saved at stop | rcS mixes `/mnt/data/vamp/random-seed` (512 bytes, owner-only) into the pool before the services and saves a new one at once, so a boot cut off before rcK never repeats it; rcK saves one at shutdown. Mixed, not credited, as stock's |
+| The hostname | inittab: `hostname -F /etc/hostname` | rcS, the same |
+| The kernel's file systems, `/dev`, `/dev/pts`, `/dev/shm`, `/tmp`, `/run` | inittab's `mount -a` over `/etc/fstab` | rcS mounts each with stock's options |
+| Device nodes and hotplug | `S10mdev`: `mdev -df` | rcS: `mdev -s`, then `mdev -d`; the card through `/etc/mdev/card` |
+| `/mnt/data` | `S10mount_ubifs`: `mount_ubifs.sh userdata` | rcS's `data`: attached and mounted, never formatted ([What boots](vamp-os-base.md#what-boots)) |
+| Swap | inittab: `swapon -a` | not applicable: stock's `fstab` names no swap, so it does nothing |
+| The serial console's login | inittab: `getty` on `ttyS3` | not carried: no login and root locked, as today's Vamp |
+| The shutdown | `rcK`: each script's `stop` (the seed saved), `umount -a -r` | rcK: the services stopped, the seed saved, the card and `/mnt/data` unmounted |
 | The splash | `S11logo_display_shell`: `display_logo` | **not done** in the image's rcS (a card boot has stock's splash before the hand-off) |
 | D-Bus | `S90play` | the `dbus` service |
 | The DAC opened, its volume and output | `demo` (`/dev/shanling_dac`) | `q2playd` at its start (`config_outputchannel`) |

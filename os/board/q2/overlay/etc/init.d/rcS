@@ -4,7 +4,8 @@
 #   2. /mnt/data, the UBIFS on the "userdata" partition: attached and mounted, never erased or formatted
 #      (on any failure it is a tmpfs for this boot, and the boot log says why), or left as it is when already
 #      mounted (a boot from the card, docs/vamp-os-base.md#card-boot); then the accounts, the packages' users
-#      added to the image's (q2pkgd accounts), and the time zone config.ini names (q2sysd zone);
+#      added to the image's (q2pkgd accounts), the time zone config.ini names (q2sysd zone), the random seed
+#      saved there mixed into the kernel's pool and a new one saved, and on a boot from flash the loopback interface;
 #   3. Shanling's own module script, /vendor/module_driver/driver_default_init_script.sh, run unchanged from
 #      its folder, as stock's S11module_driver_default runs it; then what loaded, against the .ko files there.
 #      Not run when any of them is loaded already (a boot from the card);
@@ -101,6 +102,30 @@ if /usr/bin/q2sysd zone 2>/dev/null; then
     step "clock: zone $(readlink /run/vamp/localtime), $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
 else
     step "clock: no zone set, UTC"
+fi
+
+# The random seed, as stock's S20urandom keeps one: 512 bytes from the last boot mixed into the kernel's pool before any
+# service makes a key, then replaced at once, so a boot that ends without rcK (a reset, a flat battery) never has the
+# next one start from the same seed. Written to /dev/urandom it is mixed in, not credited: the kernel's entropy count
+# does not rise. rcK saves one again at shutdown.
+seed=/mnt/data/vamp/random-seed
+mkdir -p /mnt/data/vamp
+if [ -s $seed ] && dd if=$seed of=/dev/urandom bs=512 count=1 2> /dev/null; then
+    step "seed: $(wc -c < $seed) bytes mixed into the pool"
+else
+    step "seed: none saved yet"
+fi
+if (umask 077 && dd if=/dev/urandom of=$seed.new bs=512 count=1 2> /dev/null && mv -f $seed.new $seed); then
+    step "seed: a new one saved"
+else
+    step "seed: not saved"
+fi
+
+# The loopback interface (stock's S40network, ifup -a): without it a connection to 127.0.0.1 or localhost (adb's
+# port forwards, for one) finds no route. On a boot from the card today's Vamp brought it up already, and its
+# network is left alone.
+if [ ! -e /run/vamp/card-boot ]; then
+    if ifconfig lo 127.0.0.1 netmask 255.0.0.0 up; then step "net: lo up"; else step "net: lo FAILED"; fi
 fi
 
 # loaded: which of /module_driver's modules /proc/modules has; missing: which it has not

@@ -30,7 +30,7 @@ must be left alone.
 --perturb breaks one thing in the unpacked copy, to show the check that should catch it goes red: `stock-file`
 (a vendor file inside the base image), `abi` (one program's NaN bit cleared), `order` (rcS says it is done
 before the modules), `module` (the framebuffer's insmod dropped from the copy's module script), `adb-open` (the
-Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark), `accent-blue` (with --card-boot: the accent saved Blue), `carrd-off` (no q2carrd), `carrd-card` (with --card-boot: q2carrd's run script not waiting on a card boot). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
+Wi-Fi adbd started with no key check), `adb-off` (no Wi-Fi adbd), `playd-off` (no q2playd), `sysd-off` (no q2sysd), `ui-slow` (q2ui's finish waiting 10 s after any end), `libd-off` (no q2libd), `netd-off` (no q2netd), `netd-card` (q2netd not told of a card boot), `adb-marker` (the adb services yielding on any card boot), `rescue-late` (rcS without the rescue restore), `dac-up` (the DAC loop started at boot), `pkgd-off` (no `q2pkgd serve`), `heat-card` (q2sysd not told of a card boot), `zone-off` (no zone table: the time zone never set), `light-dark` (with --card-boot: Light Mode saved dark), `accent-blue` (with --card-boot: the accent saved Blue), `carrd-off` (no q2carrd), `carrd-card` (with --card-boot: q2carrd's run script not waiting on a card boot), `seed-off` (rcS without the random seed's mix-in), `lo-off` (rcS without the loopback interface), `lo-card` (with --card-boot: lo brought up over today's Vamp's network). --no-outer-adbd, with --card-boot: today's Vamp has no adbd running, so the image's must start on USB and Wi-Fi.
 """
 import argparse
 import hashlib
@@ -682,6 +682,13 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     if perturb == 'rescue-late':  # rcS without its restore: the 60 s confirm alone would put it back
         rcs = (fs/'etc/init.d/rcS').read_text().replace('if [ -e /mnt/mmc/.vamp/rescue/pending ]; then', 'if false; then')
         (fs/'etc/init.d/rcS').write_text(rcs)
+    if perturb in ('seed-off', 'lo-off', 'lo-card'):  # rcS without the seed's mix-in, without lo, or lo on a card boot too
+        rcs = (fs/'etc/init.d/rcS').read_text()
+        old, new = {'seed-off': ('if [ -s $seed ] && dd', 'if false && dd'),
+                    'lo-off': ('    if ifconfig lo ', '    if false && ifconfig lo '),
+                    'lo-card': ('if [ ! -e /run/vamp/card-boot ]; then\n    if ifconfig lo', 'if true; then\n    if ifconfig lo')}[perturb]
+        check(old in rcs, f'--perturb {perturb}: the line it breaks is in rcS')
+        (fs/'etc/init.d/rcS').write_text(rcs.replace(old, new))
     if perturb == 'order':
         rcs = (fs/'etc/init.d/rcS').read_text()
         rcs = rcs.replace('    step "modules: start"\n', '    step "modules: start"\n    step "rcS: done, starting the services"\n')
@@ -768,6 +775,11 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
                       ('sys/devices/i2c-0/0-0062/cw2015_voltage', '3800'), ('sys/hynitron_debug/hyngescontrol', '0')):
         (fs/rel).parent.mkdir(parents=True, exist_ok=True)
         (fs/rel).write_text(text + '\n')
+    # the last boot's random seed on a boot from flash; a card boot's /mnt/data (emu/data) has none, as a first boot
+    old_seed = bytes(range(256)) * 2
+    if not card:
+        (fs/'mnt/data/vamp').mkdir(parents=True, exist_ok=True)
+        (fs/'mnt/data/vamp/random-seed').write_bytes(old_seed)
     console = open(work/'console.log', 'wb')
     extra = []
     zone_want = 'UTC'  # a fresh /mnt/data (a tmpfs here) has no zone saved
@@ -880,6 +892,20 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
           'rcS composes the accounts (q2pkgd accounts) once /mnt/data is there')
     zone_at, svc_at = first(f'clock: zone /usr/share/zoneinfo/{zone_want}, '), first('q2player: start')
     check(zone_at is not None and (svc_at is None or zone_at < svc_at), f"rcS sets the time zone (q2sysd zone, {zone_want}) before the services")
+    # the random seed (stock's S20urandom): the saved one mixed in before the services, a new one saved at once
+    seed = (emu/'data' if card else fs/'mnt/data')/'vamp/random-seed'
+    mixed, done_at = first('seed: none saved yet' if card else 'seed: 512 bytes mixed into the pool'), first('rcS: done')
+    new_seed = seed.read_bytes() if seed.exists() else b''
+    check(mixed is not None and done_at is not None and mixed < done_at and first('seed: a new one saved') is not None
+          and len(new_seed) == 512 and new_seed != old_seed and seed.stat().st_mode & 0o077 == 0,
+          'rcS mixes the saved random seed into the pool before the services and saves a new one, 512 bytes, owner-only'
+          + ('' if card else ' (a boot from flash, a seed saved)'))
+    if not card:
+        lo, lo_said = first('ifconfig lo 127.0.0.1 netmask 255.0.0.0 up'), first('net: lo up')
+        check(lo is not None and lo_said is not None and done_at is not None and lo < done_at,
+              'rcS brings up the loopback interface on a boot from flash, before the services')
+        if first('rcK: stopping the services') is not None:  # the power key's hold (sysd_checks) ran init's shutdown
+            check(first('rcK: seed saved') is not None, 'rcK saves a random seed at shutdown')
     if card:
         check(not any(s.startswith('insmod ') for s in order) and first('modules: already loaded, not run again; not loaded: none') is not None,
               'card boot: the module script is not run again over loaded modules')
@@ -928,7 +954,7 @@ def main():
     ap.add_argument('--qemu', type=pathlib.Path)
     ap.add_argument('--keep', type=pathlib.Path)
     ap.add_argument('--no-boot', action='store_true')
-    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark', 'accent-blue', 'carrd-off', 'carrd-card'])
+    ap.add_argument('--perturb', choices=['stock-file', 'abi', 'order', 'module', 'adb-open', 'adb-off', 'playd-off', 'sysd-off', 'ui-slow', 'libd-off', 'netd-off', 'netd-card', 'adb-marker', 'rescue-late', 'dac-up', 'pkgd-off', 'player-bounce', 'heat-card', 'zone-off', 'light-dark', 'accent-blue', 'carrd-off', 'carrd-card', 'seed-off', 'lo-off', 'lo-card'])
     ap.add_argument('--card-boot', action='store_true', help='boot as patch/q2vampos.sh starts it: /mnt/data mounted, modules loaded')
     ap.add_argument('--no-outer-adbd', action='store_true', help='with --card-boot: today\'s Vamp has no adbd running')
     a = ap.parse_args()

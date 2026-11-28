@@ -3,6 +3,11 @@
 . /usr/libexec/vamp/log
 step "rcK: stopping the services"
 sv -w 5 force-stop /etc/sv/* > /dev/null 2>&1
+# the random seed the next boot mixes in (rcS), replaced whole so a cut-off write leaves the last one
+if (umask 077 && dd if=/dev/urandom of=/mnt/data/vamp/random-seed.new bs=512 count=1 2> /dev/null \
+    && mv -f /mnt/data/vamp/random-seed.new /mnt/data/vamp/random-seed); then
+    step "rcK: seed saved"
+fi
 sync
 umount /mnt/mmc 2> /dev/null
 rm -f /run/vamp/keep
