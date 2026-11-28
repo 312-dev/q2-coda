@@ -3159,6 +3159,14 @@ def frame_log(binary, work):
                       'cost is its work less its pan',
                       len(pan) == len(work_us) and any(p > 0 for p in pan) and all(p <= w for p, w in zip(pan, work_us)),
                       f'{len(pan)} of {len(work_us)}; pan max {max(pan or [0])} us')
+        run.ticks(30, 0.05)  # a second and a half of motion: the once-a-second stats write lands between two frames
+        s = run.rest()
+        loop, fl = s.get('frame_log_loop_us', []), s.get('frame_log_flags', [])
+        second = [u for u, f in zip(loop, fl) if f & 64]  # FRAME_SECOND
+        good &= check("each frame logged has the loop's own work before it, and a frame after the once-a-second stats write is "
+                      'flagged so, with that write in its loop time',
+                      len(loop) == len(fl) > 0 and bool(second) and all(u > 0 for u in second),
+                      f'{len(loop)} of {len(fl)}; after the stats write {second[:6]} us')
         good &= check("a gap in the first turns after the start is counted apart (start_late), not as a motion's late frame",
                       isinstance(s.get('start_late'), int), str(s.get('start_late')))
         good &= check('each tick is timed to the first frame shown after it, inside a refresh or two on the host',
