@@ -16,6 +16,8 @@ usage: vamp [-t TARGET] COMMAND [ARGS]
   key NAME [MS] | wheel N [--step-ms MS] | tap X Y | swipe X1 Y1 X2 Y2 [MS]
   state | wake | devices | events N [S] | reboot [--wait] | prof S [--all] [--build DIR]
   pubkey                                this computer's key, an adb_keys line
+  audio [--out FILE.wav] [--play] [--seconds S] [--adb ADB]
+                                        what the player hands the DAC, bit for bit: WAV, played live, or both
 
 TARGET (or VAMP_TARGET) is a name `find` lists, HOST or HOST:PORT; without either, the Q2 `connect`
 remembered. The key is adb's own, ~/.android/adbkey (made on first use), so a computer Google's adb
@@ -746,6 +748,74 @@ class Device:
 
 # ---- commands ----
 
+# The output tap's FIFO (player/tap.c TAP_FIFO), made by its reader: the player writes to it only while one is open
+TAP_FIFO = '/tmp/q2tap.pcm'
+TAP_READ = f'[ -p {TAP_FIFO} ] || {{ rm -f {TAP_FIFO}; mkfifo {TAP_FIFO}; }}; exec cat {TAP_FIFO}'
+AUDIO_USAGE = 'usage: vamp audio [--out FILE.wav] [--play] [--seconds S] [--adb ADB]'
+
+
+def audio_args(a):
+    """vamp audio's flags: (out, play, seconds, adb). No --out: --play."""
+    out, play, seconds, adb, a = None, False, None, None, list(a)
+    while a:
+        flag = a.pop(0)
+        if flag == '--play':
+            play = True
+        elif flag in ('--out', '--seconds', '--adb') and a:
+            v = a.pop(0)
+            if flag == '--out':
+                out = v
+            elif flag == '--seconds':
+                seconds = float(v)
+            else:
+                adb = v
+        else:
+            raise ValueError(AUDIO_USAGE)
+    return out, play or not out, seconds, adb
+
+
+def audio(dev, a, say=None, player=None):
+    """vamp audio (docs/usb-audio.md#vamp-audio): the tap's stream from the Q2 (over vamp's connection, or Google's
+    adb with --adb, which reaches a Q2 on the cable) through q2tap into WAV files and/or ffplay, until --seconds of
+    the device's audio or Ctrl-C. Its summary line."""
+    import q2tap
+    out, play, seconds, adb = audio_args(a)
+    say = say or (lambda t: print(t, file=sys.stderr))
+    tap = q2tap.Tap(q2tap.sinks(out, play, say, **({'player': player} if player else {})))
+
+    class Sink:
+        def write(self, part):
+            tap.feed(part)
+
+        def flush(self):
+            pass
+
+    def done(_):
+        return seconds is not None and tap.seconds() >= seconds
+    say(f'vamp audio: listening on the Q2\'s tap (nothing comes while nothing plays)')
+    try:
+        if adb:
+            p = subprocess.Popen([adb, 'exec-out', TAP_READ], stdout=subprocess.PIPE)
+            try:
+                while not done(None):
+                    part = p.stdout.read1(1 << 16)
+                    if not part:
+                        break
+                    tap.feed(part)
+            finally:
+                p.kill()
+                p.wait()
+        else:
+            dev.exec_out(TAP_READ, None, Sink(), done)
+    except KeyboardInterrupt:
+        if dev:
+            dev.drop()
+    finally:
+        tap.close()
+    line = q2tap.summary(tap)
+    say(line)
+    return line
+
 RC = re.compile(rb'\n\0vamprc=(\d+)\n\Z')
 
 
@@ -932,8 +1002,14 @@ def main(argv=None):  # pragma: no mutate block
         print(f'connected to {dev.target["name"]} at {dev.target["ip"]}:{dev.target["port"]}'
               + (f', running {tag[2].decode()}' if len(tag) > 2 else ''))
         return 0
+    if cmd == 'audio' and '--adb' in a:
+        audio(None, a)
+        return 0
     dev = Device(resolve(spec))
     q2remote.TRANSPORT = dev
+    if cmd == 'audio':
+        audio(dev, a)
+        return 0
     if cmd == 'shell':
         if not a:
             return interactive(dev)

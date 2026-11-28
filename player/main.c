@@ -101,6 +101,7 @@ int main(int argc, char **argv) {
     pthread_t releaser;
     if (!pthread_create(&releaser, NULL, release_thread, &release)) pthread_detach(releaser);
     feed_start(); /* the car's other sources (feed.c) */
+    pcm_tap_start(); /* the output tap (tap.c), --dev builds alone */
     if (pthread_create(&engine, NULL, engine_thread, NULL)) return 1;
     ipc_thread(NULL);
     return 0;
