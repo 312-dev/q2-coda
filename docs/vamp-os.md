@@ -436,8 +436,8 @@ What the owner would lose or notice running VampOS by [card boot](vamp-os-base.m
 | 13 | Wi-Fi, network time | Device | `q2netd` built; association and DHCP on the real radio ([netd](netd.md#needs-a-q2)) |
 | 14 | USB: storage, USB DAC, adb, Car Audio | Device | Built; the gadgets on the real controller ([sysd](sysd.md#needs-a-q2), [dacloop](dacloop.md#needs-a-q2), [car-audio-os](car-audio-os.md#needs-a-q2)) |
 | 15 | Car Remote | Partial | LAN and Bluetooth LE built ([carrd](carrd.md)); `scan` and `radio` missing; across networks (`q2-iroh`) is Rust: Owner |
-| 16 | CUE tracks | Missing | Neither `q2libd` nor `q2playd` splits a CUE sheet |
-| 17 | AAC files (M4A) | Owner | No C++ in the toolchain for the decoder (the owner's decision: off) |
+| 16 | CUE tracks | Partial | `q2libd` lists a sheet's tracks as stock's rows, its file through them ([libd: CUE sheets](libd.md#cue-sheets)); `q2playd` plays a track's file from 0 to its end, not the track's span |
+| 17 | AAC over Bluetooth | Owner | AAC files (M4A, ADTS) play: `q2player`'s FFmpeg has its own AAC decoder, in C ([player-plan](player-plan.md) row 21). The Bluetooth codec is bluez-alsa's through fdk-aac, which is C++, and the toolchain has none ([AAC is off](vamp-os-base.md#bluetooth)); a headset offering SBC and AAC plays SBC |
 | 18 | Audiobooks, Podcasts | Owner | Deferred by the owner's ruling |
 | 19 | Updates | Partial | `q2pkgd download` fetches a release for the next card boot; installing to flash is not done on the owner's Q2 until a recovery is seen working |
 

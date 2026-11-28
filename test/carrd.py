@@ -48,7 +48,7 @@ def build(tmp_path_factory):
 
 
 def library(root):
-    """q2libd's library.db (docs/libd.md): stock's songtable with every column, each song's length in time"""
+    """q2libd's library.db (docs/libd.md): stock's songtable with every column, each song's length as time 0 and time_end"""
     (root/'mnt/data/vamp').mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(root/'mnt/data/vamp/library.db')
     db.execute('create table songtable(id integer primary key, filename, fileurl, album, songer, style, name, composer, '
@@ -57,8 +57,8 @@ def library(root):
     db.execute('create table playlist(id integer, name, filename, fileurl, cd_num integer)')
     for i, f, title, artist, album, secs in SONGS:
         db.execute('insert into songtable(id, filename, fileurl, album, songer, style, name, albumsonger, year, track, cd_num, '
-                   'time, time_create) values (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                   (i, f.split('/')[-1], '/mnt/mmc/' + f, album, artist, 'Rock', title, artist, 2001, i, 1, secs, i))
+                   'time, time_end, time_create) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                   (i, f.split('/')[-1], '/mnt/mmc/' + f, album, artist, 'Rock', title, artist, 2001, i, 1, 0, secs, i))
     db.commit()
     db.close()
 

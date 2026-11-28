@@ -25,6 +25,26 @@ SOURCE = pathlib.Path(os.environ.get('Q2LIBD_SOURCE') or ROOT/'libd/q2libd.c')
 Q2UI_SQL = ('select name, songer, id, album, track from (select name, songer, id, album, track from main.songtable union all '
             'select name, songer, id, album, track from cat.servertable) order by name collate nocase, id')
 
+# ui/lib.c's length of a song, as q2ui computes it (a negative number: unknown)
+Q2UI_SEC = 'select case when time_end > time then time_end - time else -1 - max(time, 0) end from songtable'
+CUE = '''REM GENRE Rock
+REM DATE 1999
+PERFORMER "Cee"
+TITLE "Live"
+FILE "live.wav" WAVE
+  TRACK 01 AUDIO
+    TITLE "One"
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    TITLE "Two"
+    PERFORMER "Dee"
+    INDEX 00 00:03:00
+    INDEX 01 00:04:00
+  TRACK 03 AUDIO
+    TITLE "Three"
+    INDEX 01 00:07:37
+'''
+
 
 @pytest.fixture(scope='session')
 def binary(tmp_path_factory):
@@ -78,8 +98,11 @@ def test_the_card_s_songs_with_their_tags(binary, card):
                    '/mnt/mmc/loose.wav': ('loose', '', '', 0, 0, '')}
     assert 'card: 3 songs, 3 read' in log
     assert (card/'mnt/data/database.db').read_bytes() == stock, "stock's database is never touched"
-    seconds = dict(sqlite3.connect(card/'mnt/data/vamp/library.db').execute('select fileurl, time from songtable').fetchall())
-    assert seconds['/mnt/mmc/loose.wav'] == 1
+    # stock's time and time_end are a CUE track's start and end (patch/offsets.inc REC_CUE_START): a whole file is 0 to
+    # its length, which q2ui's lib.c reads as time_end - time
+    spans = dict((r[0], r[1:]) for r in rows(card, 'select fileurl, time, time_end from songtable'))
+    assert spans['/mnt/mmc/loose.wav'] == (0, 1)
+    assert rows(card, Q2UI_SEC + " where fileurl = '/mnt/mmc/loose.wav'") == [(1,)]
 
 
 def test_ids_stay_unchanged_files_are_not_read_and_changes_are(binary, card):
@@ -443,3 +466,29 @@ def test_q2lib_answers_while_a_scan_runs(served, card):
 
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', '-p', 'no:cacheprovider']))
+
+
+def test_a_cue_sheet_s_tracks_are_rows_of_its_file_and_the_file_is_listed_through_them(binary, card):
+    """docs/libd.md#cue-sheets: a sheet whose FILE says .wav beside the .flac it was made into"""
+    m = card/'mnt/mmc/Music/Live'
+    song(m/'live.flac', seconds=10)
+    (m/'live.cue').write_bytes(b'\xef\xbb\xbf' + CUE.encode())
+    log = scan(binary, card)
+    got = rows(card, "select name, songer, albumsonger, album, track, year, style, time, time_end from songtable"
+                     " where fileurl = '/mnt/mmc/Music/Live/live.flac' order by time")
+    assert got == [('One', 'Cee', 'Cee', 'Live', 1, 1999, 'Rock', 0, 4), ('Two', 'Dee', 'Cee', 'Live', 2, 1999, 'Rock', 4, 7),
+                   ('Three', 'Cee', 'Cee', 'Live', 3, 1999, 'Rock', 7, 10)], got
+    lengths = rows(card, Q2UI_SEC + " where fileurl = '/mnt/mmc/Music/Live/live.flac' order by time")
+    assert lengths == [(4,), (3,), (3,)], "q2ui reads each track's length"
+    assert 'card: 6 songs, 6 read' in log, log
+    ids = rows(card, 'select id from songtable order by id')
+    log = scan(binary, card)
+    assert 'card: 6 songs, 0 read' in log and rows(card, 'select id from songtable order by id') == ids, 'kept, not read again'
+
+
+def test_a_cue_sheet_with_no_audio_beside_it_adds_nothing(binary, card):
+    m = card/'mnt/mmc/Music/Gone'
+    m.mkdir(parents=True)
+    (m/'gone.cue').write_text(CUE.replace('live.wav', 'gone.wav'))
+    log = scan(binary, card)
+    assert 'card: 3 songs' in log and 'gone.cue: no gone.wav beside it' in log, log

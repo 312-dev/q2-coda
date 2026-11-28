@@ -2,8 +2,9 @@
  * databases in the shapes q2ui and q2playd already read, so they need no change:
  *
  *   - /mnt/data/vamp/library.db: the card's songs, a songtable with stock's columns (id, filename, fileurl, album,
- *     songer, style, name, composer, albumsonger, year, track, cd_num, time, ...), from a walk of /mnt/mmc and each
- *     file's tags through FFmpeg's demuxers. A song keeps its id across scans while its path stays; a file whose size
+ *     songer, style, name, composer, albumsonger, year, track, cd_num, time, ...), from a walk of /mnt/mmc (a CUE
+ *     sheet's tracks as rows of its file) and each file's tags through FFmpeg's demuxers. A song keeps its id across
+ *     scans while its path stays; a file whose size
  *     and time are unchanged is not read again. Stock's own /mnt/data/database.db is never touched.
  *   - /mnt/mmc/.vamp/catalogue.db: the server library, a servertable of every signed-in card app's catalogue
  *     (/mnt/mmc/.<id>/catalogue.tsv, Q2CAT/1, docs/server-library.md), ids from 0x40000000 as the payload gives them.
@@ -191,108 +192,272 @@ static void cover_of(int id, AVFormatContext *f, const char *full, const char *u
     sqlite3_reset(ins_cover);
 }
 
-static void add_file(const char *full, const char *url, const struct stat *st) {
-    int id = 0, same = 0;
+/* A row's id by its key in vamp_files (a file's path; a CUE track's path#N), the last scan's when the key is there, and
+ * whether its size and time are those the last scan saw: then its rows are copied from the old library, 1, else 0. */
+static int keep_id(const char *key, long long size, long long mtime, int *id) {
+    int same = 0;
+    *id = 0;
     if (find) {
-        sqlite3_bind_text(find, 1, url, -1, SQLITE_STATIC);
+        sqlite3_bind_text(find, 1, key, -1, SQLITE_STATIC);
         if (sqlite3_step(find) == SQLITE_ROW) {
-            id = sqlite3_column_int(find, 0);
-            same = sqlite3_column_int64(find, 1) == st->st_size && sqlite3_column_int64(find, 2) == st->st_mtime;
+            *id = sqlite3_column_int(find, 0);
+            same = sqlite3_column_int64(find, 1) == size && sqlite3_column_int64(find, 2) == mtime;
         }
         sqlite3_reset(find);
     }
-    if (!id) id = next_id++;
+    if (!*id) *id = next_id++;
     if (same) {
         char *e = 0;
-        char *q = sqlite3_mprintf("insert into songtable select * from old.songtable where id = %d", id);
+        char *q = sqlite3_mprintf("insert into songtable select * from old.songtable where id = %d", *id);
         if (sqlite3_exec(db, q, 0, 0, &e) != SQLITE_OK) say("%s", e), sqlite3_free(e), same = 0;
         sqlite3_free(q);
         if (sqlite3_changes(db) != 1) same = 0;
-        q = sqlite3_mprintf("insert into vamp_cover select * from old.vamp_cover where id = %d", id);
+        q = sqlite3_mprintf("insert into vamp_cover select * from old.vamp_cover where id = %d", *id);
         if (same) sqlite3_exec(db, q, 0, 0, 0); /* none in a library from before covers: read again next time it changes */
         sqlite3_free(q);
     }
-    if (!same) {
-        AVFormatContext *f = 0;
-        const char *title = "", *artist = "", *album = "", *aa = "", *genre = "", *composer = "";
-        int year = 0, track = 0, disc = 0, seconds = 0, rate = 0, bits = 0;
-        if (avformat_open_input(&f, full, 0, 0) == 0) {
-            avformat_find_stream_info(f, 0);
-            AVDictionary *m = f->metadata;
-            if (f->nb_streams && !av_dict_count(m)) m = f->streams[0]->metadata; /* Ogg keeps them on the stream */
-            title = tag(m, "title"), artist = tag(m, "artist"), album = tag(m, "album"), aa = tag(m, "album_artist");
-            genre = tag(m, "genre"), composer = tag(m, "composer");
-            year = atoi(tag(m, "date")), track = atoi(tag(m, "track")), disc = atoi(tag(m, "disc"));
-            if (f->duration > 0) seconds = (int)(f->duration / AV_TIME_BASE);
-            for (unsigned i = 0; i < f->nb_streams; ++i)
-                if (f->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-                    rate = f->streams[i]->codecpar->sample_rate;
-                    bits = f->streams[i]->codecpar->bits_per_raw_sample;
-                    break;
-                }
-        } else {
-            say("cannot read %s", url);
-        }
-        const char *base = strrchr(url, '/') ? strrchr(url, '/') + 1 : url;
-        char name[1200];
-        snprintf(name, sizeof name, "%s", base);
-        if (!*title) { /* no title tag: the file's name without its extension, as stock lists it */
-            char *dot = strrchr(name, '.');
-            if (dot) *dot = 0;
-        }
-        int c = 1;
-        sqlite3_bind_int(ins, c++, id);
-        sqlite3_bind_text(ins, c++, base, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, c++, url, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, c++, album, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, c++, artist, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, c++, genre, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, c++, *title ? title : name, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, c++, composer, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, c++, aa, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(ins, c++, year);
-        sqlite3_bind_int(ins, c++, track);
-        sqlite3_bind_int(ins, c++, disc);
-        sqlite3_bind_int(ins, c++, seconds);
-        sqlite3_bind_int(ins, c++, (int)st->st_mtime);
-        sqlite3_bind_int(ins, c++, initial(*title ? title : name));
-        sqlite3_bind_int(ins, c++, bits);
-        sqlite3_bind_int(ins, c++, rate);
-        if (sqlite3_step(ins) != SQLITE_DONE) say("insert %s: %s", url, sqlite3_errmsg(db));
-        sqlite3_reset(ins);
-        cover_of(id, f, full, url, *aa ? aa : artist, album);
-        if (f) avformat_close_input(&f);
-        ++read_n;
-    }
-    sqlite3_bind_text(ins_file, 1, url, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(ins_file, 2, st->st_size);
-    sqlite3_bind_int64(ins_file, 3, st->st_mtime);
+    return same;
+}
+
+static void stamp(const char *key, long long size, long long mtime, int id) {
+    sqlite3_bind_text(ins_file, 1, key, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(ins_file, 2, size);
+    sqlite3_bind_int64(ins_file, 3, mtime);
     sqlite3_bind_int(ins_file, 4, id);
     sqlite3_step(ins_file);
     sqlite3_reset(ins_file);
     ++songs;
 }
 
+/* A song's tags and stream as add_file and add_cue read them */
+struct song {
+    const char *title, *artist, *album, *aa, *genre, *composer;
+    int year, track, disc, seconds, rate, bits;
+};
+
+static AVFormatContext *read_song(const char *full, const char *url, struct song *g) {
+    AVFormatContext *f = 0;
+    *g = (struct song){"", "", "", "", "", "", 0, 0, 0, 0, 0, 0};
+    if (avformat_open_input(&f, full, 0, 0) != 0) return say("cannot read %s", url), (AVFormatContext *)0;
+    avformat_find_stream_info(f, 0);
+    AVDictionary *m = f->metadata;
+    if (f->nb_streams && !av_dict_count(m)) m = f->streams[0]->metadata; /* Ogg keeps them on the stream */
+    g->title = tag(m, "title"), g->artist = tag(m, "artist"), g->album = tag(m, "album"), g->aa = tag(m, "album_artist");
+    g->genre = tag(m, "genre"), g->composer = tag(m, "composer");
+    g->year = atoi(tag(m, "date")), g->track = atoi(tag(m, "track")), g->disc = atoi(tag(m, "disc"));
+    if (f->duration > 0) g->seconds = (int)(f->duration / AV_TIME_BASE);
+    for (unsigned i = 0; i < f->nb_streams; ++i)
+        if (f->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            g->rate = f->streams[i]->codecpar->sample_rate;
+            g->bits = f->streams[i]->codecpar->bits_per_raw_sample;
+            break;
+        }
+    return f;
+}
+
+/* One songtable row. time and time_end are stock's CUE start and end in seconds (patch/offsets.inc REC_CUE_START, the
+ * column patch/catalogue.c reads as it; q2ui's lib.c takes time_end - time as the length): a whole file is 0 to its
+ * length, a CUE track its start to the next one's (docs/libd.md#cue-sheets). */
+static void insert_row(int id, const char *url, const struct song *g, const char *name, int start, int end, long long mtime) {
+    const char *base = strrchr(url, '/') ? strrchr(url, '/') + 1 : url;
+    int c = 1;
+    sqlite3_bind_int(ins, c++, id);
+    sqlite3_bind_text(ins, c++, base, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, c++, url, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, c++, g->album, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, c++, g->artist, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, c++, g->genre, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, c++, name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, c++, g->composer, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, c++, g->aa, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(ins, c++, g->year);
+    sqlite3_bind_int(ins, c++, g->track);
+    sqlite3_bind_int(ins, c++, g->disc);
+    sqlite3_bind_int(ins, c++, start);
+    sqlite3_bind_int(ins, c++, end);
+    sqlite3_bind_int(ins, c++, (int)mtime);
+    sqlite3_bind_int(ins, c++, initial(name));
+    sqlite3_bind_int(ins, c++, g->bits);
+    sqlite3_bind_int(ins, c++, g->rate);
+    if (sqlite3_step(ins) != SQLITE_DONE) say("insert %s: %s", url, sqlite3_errmsg(db));
+    sqlite3_reset(ins);
+}
+
+static void add_file(const char *full, const char *url, const struct stat *st) {
+    int id;
+    if (!keep_id(url, st->st_size, st->st_mtime, &id)) {
+        struct song g;
+        AVFormatContext *f = read_song(full, url, &g);
+        const char *base = strrchr(url, '/') ? strrchr(url, '/') + 1 : url;
+        char name[1200];
+        snprintf(name, sizeof name, "%s", base);
+        if (!*g.title) { /* no title tag: the file's name without its extension, as stock lists it */
+            char *dot = strrchr(name, '.');
+            if (dot) *dot = 0;
+        }
+        insert_row(id, url, &g, *g.title ? g.title : name, 0, g.seconds, st->st_mtime);
+        cover_of(id, f, full, url, *g.aa ? g.aa : g.artist, g.album);
+        if (f) avformat_close_input(&f);
+        ++read_n;
+    }
+    stamp(url, st->st_size, st->st_mtime, id);
+}
+
+/* ---- CUE sheets (docs/libd.md#cue-sheets) ----
+ * A .cue beside its audio: each TRACK a row of the FILE it is in, from its INDEX 01 to the next track's (the file's
+ * last track to the file's end), with the sheet's TITLE as the album and PERFORMER as the album artist, a track's own
+ * TITLE and PERFORMER over them, REM DATE, GENRE and DISCNUMBER. A FILE named with another audio extension than the
+ * file on the card has (a sheet made for the .wav before it was compressed) is found by its name without the
+ * extension. The audio a sheet names is listed only through it. ponytail: a sheet in a legacy code page (stock read
+ * GBK) shows its bytes as they are; uchardet and iconv would read it. */
+#define CUE_TRACKS 99
+#define CUE_FILES 16
+
+struct cue_track { int file, n, start; char title[256], performer[256]; };
+struct cue {
+    char title[256], performer[256], genre[128], files[CUE_FILES][256];
+    int year, disc, n_files, n;
+    struct cue_track t[CUE_TRACKS];
+};
+
+/* the word after a keyword: "quoted text" or up to the end of the line */
+static void cue_text(const char *s, char *out, size_t room) {
+    while (*s == ' ' || *s == '\t') ++s;
+    size_t k = 0;
+    if (*s == '"') {
+        for (++s; *s && *s != '"' && k + 1 < room; ++s) out[k++] = *s;
+    } else {
+        for (; *s && *s != '\r' && *s != '\n' && k + 1 < room; ++s) out[k++] = *s;
+        while (k && (out[k - 1] == ' ' || out[k - 1] == '\t')) --k;
+    }
+    out[k] = 0;
+}
+
+static int cue_read(const char *full, struct cue *c) {
+    FILE *f = fopen(full, "r");
+    char line[1100];
+    memset(c, 0, sizeof *c);
+    if (!f) return -1;
+    for (int first = 1; fgets(line, sizeof line, f); first = 0) {
+        char *l = line;
+        if (first && !strncmp(l, "\xef\xbb\xbf", 3)) l += 3; /* a UTF-8 BOM */
+        while (*l == ' ' || *l == '\t') ++l;
+        struct cue_track *t = c->n ? &c->t[c->n - 1] : 0;
+        int mm, ss, ff;
+        if (!strncasecmp(l, "FILE ", 5)) {
+            if (c->n_files < CUE_FILES) cue_text(l + 5, c->files[c->n_files++], sizeof c->files[0]);
+        } else if (!strncasecmp(l, "TRACK ", 6)) {
+            if (c->n < CUE_TRACKS && c->n_files) c->t[c->n++] = (struct cue_track){.file = c->n_files - 1, .n = atoi(l + 6), .start = -1};
+        } else if (!strncasecmp(l, "TITLE ", 6)) {
+            cue_text(l + 6, t ? t->title : c->title, sizeof c->title);
+        } else if (!strncasecmp(l, "PERFORMER ", 10)) {
+            cue_text(l + 10, t ? t->performer : c->performer, sizeof c->performer);
+        } else if (!strncasecmp(l, "INDEX 01 ", 9) && t && sscanf(l + 9, "%d:%d:%d", &mm, &ss, &ff) == 3) {
+            t->start = mm * 60 + ss; /* whole seconds, as stock's column and the player's ss= take it */
+        } else if (!strncasecmp(l, "REM DATE ", 9) && !t) {
+            c->year = atoi(l + 9);
+        } else if (!strncasecmp(l, "REM GENRE ", 10) && !t) {
+            cue_text(l + 10, c->genre, sizeof c->genre);
+        } else if (!strncasecmp(l, "REM DISCNUMBER ", 15) && !t) {
+            c->disc = atoi(l + 15);
+        }
+    }
+    fclose(f);
+    return 0;
+}
+
+/* the file a sheet's FILE names among the folder's entries: as named, else the same name with an audio extension;
+ * its name in found */
+static int cue_file(const char *named, struct dirent **e, int n, char *found, size_t room) {
+    const char *dot = strrchr(named, '.');
+    size_t stem = dot ? (size_t)(dot - named) : strlen(named);
+    for (int pass = 0; pass < 2; ++pass)
+        for (int i = 0; i < n; ++i) {
+            const char *d = e[i]->d_name;
+            if (!audio(d)) continue;
+            if (pass ? !strncmp(d, named, stem) && d[stem] == '.' : !strcmp(d, named))
+                return snprintf(found, room, "%s", d), 0;
+        }
+    return -1;
+}
+
+/* a sheet's tracks into songtable; the audio files it took, by name, added to took */
+static void add_cue(const char *rel, const char *cue_name, struct dirent **e, int n, char took[][256], int *n_took, int max_took) {
+    static struct cue c;
+    char full[1500];
+    struct stat cst;
+    snprintf(full, sizeof full, "%s%s/%s", root, rel, cue_name);
+    if (stat(full, &cst) || cue_read(full, &c)) return;
+    for (int fi = 0; fi < c.n_files; ++fi) {
+        char name[256], url[1200], afull[1500];
+        struct stat st;
+        if (cue_file(c.files[fi], e, n, name, sizeof name)) {
+            say("%s/%s: no %s beside it", rel, cue_name, c.files[fi]);
+            continue;
+        }
+        snprintf(url, sizeof url, "%s/%s", rel, name);
+        snprintf(afull, sizeof afull, "%s%s", root, url);
+        if (stat(afull, &st)) continue;
+        long long mtime = st.st_mtime > cst.st_mtime ? st.st_mtime : cst.st_mtime, size = st.st_size + cst.st_size;
+        struct song g = {"", "", "", "", "", "", 0, 0, 0, 0, 0, 0};
+        AVFormatContext *f = 0;
+        int opened = 0, rows = 0;
+        for (int i = 0; i < c.n; ++i) {
+            struct cue_track *t = &c.t[i];
+            if (t->file != fi || t->start < 0) continue;
+            char key[1300];
+            int id;
+            snprintf(key, sizeof key, "%s#%d", url, t->n);
+            ++rows;
+            if (!keep_id(key, size, mtime, &id)) {
+                if (!opened++) f = read_song(afull, url, &g);
+                int end = g.seconds;
+                for (int j = i + 1; j < c.n; ++j)
+                    if (c.t[j].file == fi && c.t[j].start >= 0) { end = c.t[j].start; break; }
+                struct song row = g;
+                char title[300];
+                row.album = c.title, row.aa = c.performer, row.artist = *t->performer ? t->performer : c.performer;
+                row.genre = c.genre, row.year = c.year, row.disc = c.disc, row.track = t->n;
+                if (*t->title) snprintf(title, sizeof title, "%s", t->title);
+                else snprintf(title, sizeof title, "Track %02d", t->n);
+                insert_row(id, url, &row, title, t->start, end, mtime);
+                cover_of(id, f, afull, url, row.aa[0] ? row.aa : row.artist, row.album);
+                ++read_n;
+            }
+            stamp(key, size, mtime, id);
+        }
+        if (f) avformat_close_input(&f);
+        if (rows && *n_took < max_took) snprintf(took[(*n_took)++], 256, "%s", name);
+    }
+}
+
 /* The card's tree under dir (its path as the Q2 names it, rel), in name order; dot folders and files are an app's or
- * the system's, not music. */
+ * the system's, not music. A folder's CUE sheets first, so the audio they name is listed as their tracks alone. */
 static void walk(const char *rel, int depth) {
     struct dirent **e;
-    char full[1200];
+    char full[1200], took[32][256];
+    int n_took = 0;
     snprintf(full, sizeof full, "%s%s", root, rel);
     int n = depth > 16 ? -1 : scandir(full, &e, 0, alphasort);
+    for (int i = 0; i < n; ++i) {
+        const char *d = e[i]->d_name, *dot = strrchr(d, '.');
+        if (d[0] != '.' && dot && !strcasecmp(dot, ".cue")) add_cue(rel, d, e, n, took, &n_took, 32);
+    }
     for (int i = 0; i < n; ++i) {
         if (e[i]->d_name[0] != '.') {
             char r[1200], f[1500];
             struct stat st;
+            int taken = 0;
+            for (int k = 0; k < n_took && !taken; ++k) taken = !strcmp(took[k], e[i]->d_name);
             snprintf(r, sizeof r, "%s/%s", rel, e[i]->d_name);
             snprintf(f, sizeof f, "%s%s", root, r);
-            if (!stat(f, &st)) {
+            if (!taken && !stat(f, &st)) {
                 if (S_ISDIR(st.st_mode)) walk(r, depth + 1);
                 else if (S_ISREG(st.st_mode) && audio(e[i]->d_name)) add_file(f, r, &st);
             }
         }
-        free(e[i]);
     }
+    for (int i = 0; i < n; ++i) free(e[i]);
     if (n >= 0) free(e);
 }
 
@@ -415,7 +580,8 @@ static int scan_card(int walk_card) {
         sqlite3_free(q);
     }
     sqlite3_prepare_v2(db, "insert into songtable(id, filename, fileurl, album, songer, style, name, composer, albumsonger, year,"
-                           " track, cd_num, time, time_create, Initial, bitdepth, samprate) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                           " track, cd_num, time, time_end, time_create, Initial, bitdepth, samprate)"
+                           " values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                        -1, &ins, 0);
     sqlite3_prepare_v2(db, "insert or replace into vamp_files values (?,?,?,?)", -1, &ins_file, 0);
     sqlite3_prepare_v2(db, "insert or replace into vamp_cover values (?,?)", -1, &ins_cover, 0);
@@ -591,7 +757,7 @@ static void dups(sqlite3 *d) {
     exec_sql(d, "begin;insert or ignore into serverdup select s.id, c.fileurl from servertable s join card.songtable c"
                 " on c.name = s.name collate nocase and c.album = s.album collate nocase and c.track = s.track"
                 " and (c.songer = s.songer collate nocase or (c.albumsonger <> '' and c.albumsonger = s.albumsonger collate nocase))"
-                " and c.time > 0 and s.time > 0 and abs(c.time - s.time) <= 2 where s.name <> '';"
+                " and c.time_end - c.time > 0 and s.time > 0 and abs(c.time_end - c.time - s.time) <= 2 where s.name <> '';"
                 "delete from servertable where id in (select id from serverdup);"
                 "delete from servermeta where id in (select id from serverdup);commit");
     sqlite3_stmt *c;
@@ -782,7 +948,8 @@ static sqlite3 *lib_open(void) {
                             " create table cat.serverpl(app, pid, name); create table cat.serveritem(app, pid, pos int, sid, path)"))
         return sqlite3_close(d), (sqlite3 *)0;
     if (exec_sql(d, "create temp view s as"
-                    " select id, name, songer, albumsonger, album, style, composer, year, track, cd_num, time, 'card' as source,"
+                    " select id, name, songer, albumsonger, album, style, composer, year, track, cd_num,"
+                    " max(time_end - time, 0) as time, 'card' as source,"
                     " fileurl, coalesce(nullif(albumsonger, ''), songer, '') as aa from main.songtable"
                     " union all select t.id, t.name, t.songer, t.albumsonger, t.album, t.style, t.composer, t.year, t.track,"
                     " t.cd_num, t.time, coalesce(m.app, ''), t.fileurl, coalesce(nullif(t.albumsonger, ''), t.songer, '')"

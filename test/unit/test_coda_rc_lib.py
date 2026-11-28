@@ -490,7 +490,7 @@ def gone_pid():
 # ---- VampOS's library (--library vampos, docs/carrd.md#the-library) ----
 
 def vampos_files(root):
-    """q2libd's library.db (docs/libd.md: stock's songtable, every column, its time in seconds; stock's playlist; no
+    """q2libd's library.db (docs/libd.md: stock's songtable, every column, a length as time 0 and time_end; stock's playlist; no
     myfav), beside a stock database.db and today's Vamp's card catalogue that VampOS leaves alone: neither is read."""
     Q2.files(root, songs=[(9, 'z/9.flac', 'Stock Only', 'Zed', 'Old', 1)], favs=(9,), server=SERVER)
     (root / 'mnt/data/vamp').mkdir(parents=True)
@@ -503,8 +503,8 @@ def vampos_files(root):
                'cd_num integer)')
     for i, f, title, artist, album, added in SONGS:
         db.execute('insert into songtable(id, filename, fileurl, album, songer, style, name, albumsonger, year, track, '
-                   'cd_num, time, time_create) values (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                   (i, f.split('/')[-1], '/mnt/mmc/' + f, album, artist, 'Rock', title, artist, 2001, i, 1, 60 * i, added))
+                   'cd_num, time, time_end, time_create) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                   (i, f.split('/')[-1], '/mnt/mmc/' + f, album, artist, 'Rock', title, artist, 2001, i, 1, 0, 60 * i, added))
     db.commit()
     db.close()
 

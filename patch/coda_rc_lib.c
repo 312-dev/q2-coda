@@ -15,8 +15,8 @@
 #define CAT "/mnt/mmc/.q2pod/catalogue.db"
 #define CARD_HOLD "/tmp/mmc_hold" /* demo's pid while it lets the card go (card_release.c) */
 #define DURATIONS "/mnt/data/ringnav-durations-v1"
-/* --library vampos: VampOS's library, q2libd's (docs/libd.md): stock's songtable with each song's length in its time
- * column, in seconds, and stock's playlist; no myfav (Favorites empty) and no durations file; the servers' songs in
+/* --library vampos: VampOS's library, q2libd's (docs/libd.md): stock's songtable, each song's length its time_end less
+ * its time (stock's CUE end and start, in seconds: a whole file 0 and its length), and stock's playlist; no myfav (Favorites empty) and no durations file; the servers' songs in
  * q2libd's catalogue on the card, whose servertable has the length in time too and whose servermeta names a row by its
  * id, so a temporary view (vmeta) gives it today's shape (fileurl, app, sid, seconds). Stock's database.db and today's
  * Vamp's catalogue are not read, as VampOS leaves both alone; the servers' playlists are q2libd's serverpl and
@@ -409,7 +409,8 @@ static int lib_open(void) {
     /* no format string: MUSIC_WHERE's LIKE patterns hold '%' */
     snprintf(sql, sizeof sql, "%s%s%s",
              crc_vampos ? "create temp table myfav(fileurl);create temp view songs as "
-                          SONG_COLS("songtable", "t", "ifnull(songtable.time,0)", "0") " from main.songtable where " MUSIC_WHERE
+                          SONG_COLS("songtable", "t", "max(ifnull(songtable.time_end,0) - ifnull(songtable.time,0), 0)", "0")
+                          " from main.songtable where " MUSIC_WHERE
                         : "create temp view songs as " SONG_COLS("songtable", "t", "dur(songtable.fileurl)", "0")
                           " from main.songtable where " MUSIC_WHERE,
              !server       ? ""
