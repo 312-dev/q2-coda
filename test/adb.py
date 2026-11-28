@@ -556,6 +556,21 @@ def gadget_checks():
         expect('audio try then keep: still on after the try\'s second, kept and remembered',
                r.returncode == 0 and k.returncode == 0 and until(lambda: said('kept')) and audio_on() and (data/'q2adb.audio').exists())
         gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
+        # a desk test's other device: the terminal type the computer records from, another product and release
+        knobs = dict(env, Q2ADB_UAC_CTERM='0x0603', Q2ADB_UAC_PID='0x0106', Q2ADB_UAC_BCD='0x0226')
+        # on, not try: a try's watchdog would outlive this check and go back to adb alone inside a later one
+        r = subprocess.run(['sh', str(script), 'audio', 'on'], env=knobs, capture_output=True, text=True, timeout=30)
+        def knobbed():
+            return g.is_dir() and rd('idProduct') == '0x0106' and rd('bcdDevice') == '0x0226' and \
+                rd('functions/uac2.q2/c_terminal_type') == '0x0603' and rd('functions/uac2.q2/function_name') == 'Q2 Output'
+        expect('audio with Q2ADB_UAC_CTERM, _PID and _BCD: that terminal type, product and release',
+               r.returncode == 0 and until(knobbed) and bound(), r.stderr + log.read_text()[-800:])
+        expect('the log names the terminal type set', until(lambda: said('c_terminal_type 0x0603')), log.read_text()[-800:])
+        gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
+        r = gadget('audio', 'on')
+        expect('audio on without the knobs: 0x0104, 0x0225, no c_terminal_type written',
+               until(audio_on) and not (g/'functions/uac2.q2/c_terminal_type').exists(), log.read_text()[-800:])
+        gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
         log.write_text('')
         r = gadget('audio', 'rehearse', '1')
         expect('audio rehearse: the gadget made again as it was, no audio, and back', r.returncode == 0

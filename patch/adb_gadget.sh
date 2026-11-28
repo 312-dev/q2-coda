@@ -61,8 +61,10 @@ gadget_make() {
         echo 0x1d6b > idVendor
         echo 0x0200 > bcdUSB
         if want_audio; then
-            echo 0x0104 > idProduct
-            echo 0x0225 > bcdDevice # 0x0224 enumerated as "Source/Sink" before function_name: a new one so Windows reads the name afresh
+            # Q2ADB_UAC_PID and _BCD: another device to Windows for a desk test, which keeps what it learned of
+            # an endpoint per device (docs/usb-audio.md#the-desk-test)
+            echo "${Q2ADB_UAC_PID:-0x0104}" > idProduct
+            echo "${Q2ADB_UAC_BCD:-0x0225}" > bcdDevice # 0x0224 enumerated as "Source/Sink" before function_name: a new one so Windows reads the name afresh
             echo 0xef > bDeviceClass
             echo 0x02 > bDeviceSubClass
             echo 0x01 > bDeviceProtocol
@@ -99,6 +101,8 @@ gadget_make() {
 # (docs/iphone-mode.md#empty-packets).
 # Q2ADB_UAC_SRATE, _SSIZE and _REQ stand for the rates, the sample size and the requests, for a desk
 # test that compares them (docs/usb-audio.md#the-desk-test); a try's environment reaches its work.
+# Q2ADB_UAC_CTERM, when set, is the terminal type the computer records from (c_terminal_type, Shanling's
+# default 0x0201, a microphone, which is the one Windows reports for this gadget although c_chmask is 0).
 audio_function() {
     mkdir functions/uac2.q2 || return 1
     echo 3 > functions/uac2.q2/p_chmask
@@ -109,6 +113,7 @@ audio_function() {
     echo "${Q2ADB_UAC_REQ:-8}" > functions/uac2.q2/req_number
     echo 0 > functions/uac2.q2/p_mute_present
     echo 0 > functions/uac2.q2/p_volume_present
+    [ -z "$Q2ADB_UAC_CTERM" ] || echo "$Q2ADB_UAC_CTERM" > functions/uac2.q2/c_terminal_type
     # the names a computer shows: Windows lists the function's (its interface association) as the
     # recording device, "Microphone (Q2 Output)"; Shanling's default is "Source/Sink"
     echo "Q2 Output" > functions/uac2.q2/function_name
@@ -176,7 +181,7 @@ audio_set() {
         gadget_remove || exit 1
         gadget_make
         say "made: $(cat "$G/idProduct" 2>/dev/null), functions $(ls "$G/functions" 2>/dev/null | tr '\n' ' ')$(
-            [ -d "$G/functions/uac2.q2" ] && for a in p_srate p_ssize req_number function_name; do
+            [ -d "$G/functions/uac2.q2" ] && for a in p_srate p_ssize req_number c_terminal_type function_name; do
                 printf ', %s %s' $a "$(cat "$G/functions/uac2.q2/$a" 2>/dev/null)"; done)"
     ) || return 1
     bind
