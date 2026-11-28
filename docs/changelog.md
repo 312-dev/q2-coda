@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - New UI (preview): it no longer writes its timing statistics to the player's internal storage once a second while a list moves or a song plays on Now Playing; they are kept in memory, sparing the flash, and the old file is removed.
   - Look: a connected Bluetooth headset shows the Bluetooth symbol alone in the status row, instead of headphones and a small battery; its battery level is on Settings > Bluetooth.
   - Look: while an app downloads, the status row shows an arrow dropping onto a small tray that fills in blue as it goes, instead of a ring with an arrow in it.
   - New UI (preview): turning the wheel scrolls a list smoothly at the speed of your finger, instead of in a small surge at each click; it still moves one row a click and stops on a row.
