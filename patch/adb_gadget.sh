@@ -62,7 +62,7 @@ gadget_make() {
         echo 0x0200 > bcdUSB
         if want_audio; then
             echo 0x0104 > idProduct
-            echo 0x0224 > bcdDevice
+            echo 0x0225 > bcdDevice # 0x0224 enumerated as "Source/Sink" before function_name: a new one so Windows reads the name afresh
             echo 0xef > bDeviceClass
             echo 0x02 > bDeviceSubClass
             echo 0x01 > bDeviceProtocol

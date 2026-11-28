@@ -503,7 +503,7 @@ def gadget_checks():
             return g.is_dir() and rd('UDC') == '13500000.otg'
         def audio_on():
             f = g/'functions/uac2.q2'
-            return g.is_dir() and rd('idProduct') == '0x0104' and rd('bcdDevice') == '0x0224' and \
+            return g.is_dir() and rd('idProduct') == '0x0104' and rd('bcdDevice') == '0x0225' and \
                 rd('bDeviceClass') == '0xef' and rd('bDeviceSubClass') == '0x02' and rd('bDeviceProtocol') == '0x01' and \
                 os.path.islink(g/'configs/c.1/uac2.q2') and os.readlink(g/'configs/c.1/uac2.q2') == 'functions/uac2.q2' and \
                 os.readlink(g/'configs/c.1/ffs.adb') == 'functions/ffs.adb' and \
