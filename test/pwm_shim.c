@@ -1,10 +1,14 @@
 /* test/sysd.py's stand-in for stock's PWM driver (soc_pwm.ko, /dev/jz_pwm): LD_PRELOADed into q2sysd, it answers the
  * four ioctls Find My Vamp's jingle uses (patch/findmy_tune.h) on a file whose path ends in jz_pwm and writes each to
  * $Q2PWM_LOG ("release CH", "request PIN", "config HZ CH", "level CH DUTY") with the time in ms; REQUEST answers
- * channel 1. $Q2PWM_REFUSE=N refuses the Nth CONFIG, as the driver does while the MCU holds the channel. Every other
- * ioctl is the real one. */
+ * channel 1. $Q2PWM_REFUSE=N refuses the Nth CONFIG, as the driver does while the MCU holds the channel.
+ * It is also stock's MCU driver (/dev/mcu, as libhardware2.so's mcu_* call it): on a file whose path ends in /mcu it
+ * writes "mcu mem OFFSET LEN" (a piece of the firmware), "mcu bootup", "mcu reset" and "mcu write TEXT LEN TIMEOUT"
+ * (mcu_write_data_timeout) to $Q2PWM_LOG; $Q2MCU_DOWN makes each refuse with ENODEV, as the driver does before the
+ * firmware is loaded, and $Q2MCU_MS holds each write that long. Every other ioctl is the real one. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +25,28 @@ int ioctl(int fd, unsigned long req, ...) {
     char link[64], p[512];
     snprintf(link, sizeof link, "/proc/self/fd/%d", fd);
     ssize_t n = readlink(link, p, sizeof p - 1);
+    if (n > 0 && (p[n] = 0, n >= 4) && !strcmp(p + n - 4, "/mcu")) {
+        struct timespec t;
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        long long ms = (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+        if (getenv("Q2MCU_DOWN")) return errno = ENODEV, -1;
+        FILE *f = fopen(getenv("Q2PWM_LOG"), "a");
+        if (req == 0x80044d73UL) {
+            const struct { unsigned off; const void *buf; unsigned len; } *m = arg;
+            if (f) fprintf(f, "%lld mcu mem %u %u\n", ms, m->off, m->len);
+        } else if (req == 0x20004d72UL) {
+            if (f) fprintf(f, "%lld mcu bootup\n", ms);
+        } else if (req == 0x20004d71UL) {
+            if (f) fprintf(f, "%lld mcu reset\n", ms);
+        } else if (req == 0x80044d76UL) {
+            const struct { const char *buf; unsigned len, timeout; } *d = arg;
+            if (f) fprintf(f, "%lld mcu write %.*s %u %u\n", ms, (int)strnlen(d->buf, d->len), d->buf, d->len, d->timeout);
+            if (getenv("Q2MCU_MS")) usleep((useconds_t)atoi(getenv("Q2MCU_MS")) * 1000);
+        } else if (f)
+            fprintf(f, "%lld mcu unknown 0x%lx\n", ms, req);
+        if (f) fclose(f);
+        return 0;
+    }
     if (n > 0 && (p[n] = 0, n >= 6) && !strcmp(p + n - 6, "jz_pwm")) {
         static int configs;
         struct timespec t;

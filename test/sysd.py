@@ -1378,17 +1378,36 @@ def test_q2ask_prints_the_greeting_and_an_answer_a_line(run, q2ask):
 
 # ---- Key Tone (docs/sysd.md#key-tone) ----
 
-def test_a_click_is_one_short_note_on_the_buzzer_and_one_while_it_sounds_is_dropped(binary, tree, tools, pwm_shim):
+def mcu_tree(tree, firmware=10000):
+    """stock's MCU driver node and the firmware the image carries (/vendor/mcu, os/vendor/V1.36.tsv), FIRMWARE bytes"""
+    put(tree, '/dev/mcu', '')
+    (tree/'vendor/mcu').mkdir(parents=True, exist_ok=True)
+    (tree/'vendor/mcu/libmcu-bare.bin').write_bytes(bytes(range(256)) * (firmware // 256) + bytes(firmware % 256))
+
+
+def test_the_mcu_is_brought_up_at_the_start_as_demo_does(binary, tree, tools, pwm_shim):
+    """demo's buzzer_init: cmd_mcu write_firmware /usr/data/libmcu-bare.bin (4096-byte pieces through mcu_write_mem),
+    then cmd_mcu bootup, then cmd_mcu reset; nothing on the PWM"""
+    mcu_tree(tree)
     f = Pwm(binary, tree, pwm_shim)
+    assert f.calls() == ['mcu mem 0 4096', 'mcu mem 4096 4096', 'mcu mem 8192 1808', 'mcu bootup', 'mcu reset'], f.calls()
+    f.end()
+
+
+def test_a_click_is_the_mcu_s_buzzer_never_a_tone_and_one_while_it_sounds_is_dropped(binary, tree, tools, pwm_shim):
+    """stock's buzzeer_switch: cmd_mcu write_str buzzer, the text with its NUL and a 300000 timeout; the PWM untouched"""
+    mcu_tree(tree)
+    f = Pwm(binary, tree, pwm_shim, env={'Q2MCU_MS': '150'})
+    up = len(f.calls())
     a = Api(tree)
     a.line()
     a.say('click')
     first = a.line()
     a.say('click')
     second = a.line()
-    time.sleep(0.2)
-    assert (first, second) == ('ok', 'err click'), 'the second while the first sounds'
-    assert f.calls() == ['release 1', 'request PC01', 'level 1 0', 'config 2637 1', 'level 1 50', 'level 1 0', 'release 1'], f.calls()
+    time.sleep(0.3)
+    assert (first, second) == ('ok', 'err click'), 'the second while the first is with the MCU'
+    assert f.calls()[up:] == ['mcu write buzzer 7 300000'], f.calls()
     a.say('click')
     assert a.line() == 'ok', 'free again'
     assert ask_sys(tree, 'find') == 'ok'
@@ -1396,4 +1415,20 @@ def test_a_click_is_one_short_note_on_the_buzzer_and_one_while_it_sounds_is_drop
     a.say('click')
     assert a.line() == 'err click', "the jingle's buzzer"
     ask_sys(tree, 'find stop')
+    f.end()
+
+
+def test_with_the_mcu_not_up_a_click_is_silent(binary, tree, tools, pwm_shim):
+    """no firmware, or a driver refusing (ENODEV, as before the load): err click, no tone on the PWM"""
+    put(tree, '/dev/mcu', '')
+    f = Pwm(binary, tree, pwm_shim)
+    assert ask_sys(tree, 'click') == 'err click'
+    time.sleep(0.1)
+    assert f.calls() == [], 'no firmware: nothing loaded, nothing sounded'
+    f.end()
+    mcu_tree(tree)
+    f = Pwm(binary, tree, pwm_shim, env={'Q2MCU_DOWN': '1'})
+    assert ask_sys(tree, 'click') == 'err click'
+    time.sleep(0.1)
+    assert f.calls() == [], 'the driver refusing: no tone either'
     f.end()

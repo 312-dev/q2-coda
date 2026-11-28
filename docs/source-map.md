@@ -258,7 +258,7 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
-| `q2sysd.c` | `q2sysd`: the power key, the screen's light, the battery, Charge Limit, USB modes and the cable, Standby, heat, the jacks, the watchdog, Q2SYS/1 on `/run/vamp/sys.sock` | `main`, `read_input`, `set_screen`, `read_battery`, `cable_poll`, `car_poll`, `wdt_start` | [sysd](sysd.md) |
+| `q2sysd.c` | `q2sysd`: the power key, the screen's light, the battery, Charge Limit, USB modes and the cable, Standby, heat, the jacks, the watchdog, the MCU's firmware load and Key Tone's click through it, Q2SYS/1 on `/run/vamp/sys.sock` | `main`, `read_input`, `set_screen`, `read_battery`, `cable_poll`, `car_poll`, `wdt_start`, `mcu_up`, `click_buzz` | [sysd](sysd.md) |
 | `Makefile` | Its build, for the image (`os/package/q2sysd`) and this machine (`test/sysd.py`) | | [sysd](sysd.md) |
 
 ## dacloop/: VampOS's USB DAC mode

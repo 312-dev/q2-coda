@@ -799,26 +799,58 @@ static void *fm_worker(void *unused) {
     return 0;
 }
 
-/* ---- Key Tone's buzzer (docs/sysd.md#key-tone) ----
- * Stock clicks the MCU's buzzer (cmd_mcu write_str buzzer, a stock program and an MCU firmware load VampOS has not
- * got); the same buzzer is PWM channel 1 through /dev/jz_pwm, as Find My Vamp plays it: a click is one short note,
- * CLICK_HZ for CLICK_MS, on a thread, the channel taken and given back as findmy_tune.h does. A click while one sounds,
- * or while the jingle plays, is dropped, as the buzzer could not play it yet. */
-#define CLICK_HZ 2637 /* inside the buzzer's loud 2 to 3 kHz, as the MCU's click is (docs/internals.md#key-tone) */
-#define CLICK_MS 12
+/* ---- Key Tone's buzzer and the MCU (docs/sysd.md#key-tone) ----
+ * The click is the MCU's, as stock's: buzzeer_switch runs `cmd_mcu write_str buzzer` and the MCU sounds its own click
+ * on the buzzer. The MCU runs nothing until its firmware is loaded, which demo's buzzer_init does at its start (cmd_mcu
+ * write_firmware /usr/data/libmcu-bare.bin, then bootup, then reset); VampOS has no demo, so mcu_up does the same at
+ * q2sysd's start from the image's copy, through the driver's ioctls on /dev/mcu as libhardware2.so's mcu_* send them.
+ * With the MCU not up (no node, no firmware, a refusal) a click is silent: never a tone on the PWM. A click is the
+ * write on a thread (the driver may wait up to its timeout); a click while one is with the MCU, or while the jingle
+ * plays, is dropped. */
+#define MCU_DEV "/dev/mcu"
+#define MCU_FIRMWARE "/vendor/mcu/libmcu-bare.bin" /* stock's /usr/data/libmcu-bare.bin (os/vendor/V1.36.tsv) */
+#define MCU_RESET 0x20004d71u                      /* _IO('M', 0x71): mcu_reset */
+#define MCU_BOOTUP 0x20004d72u                     /* _IO('M', 0x72): mcu_bootup */
+#define MCU_WRITE_MEM 0x80044d73u                  /* mcu_write_mem: {offset, data, length} */
+#define MCU_WRITE_DATA 0x80044d76u                 /* mcu_write_data_timeout: {data, length, timeout} */
+#define MCU_PIECE 4096                             /* mcu_write_firmware2's fread size */
+#define MCU_TIMEOUT 300000                         /* cmd_mcu's for write_str */
+struct mcu_mem { unsigned off; const void *data; unsigned len; };
+struct mcu_data { const void *data; unsigned len, timeout; };
+static int mcu_ok;
+static void mcu_up(void) {
+    int fd = open(path(MCU_DEV), O_RDWR | O_CLOEXEC);
+    if (fd < 0) return (void)say("mcu: %s: %s", path(MCU_DEV), strerror(errno));
+    FILE *f = fopen(path(MCU_FIRMWARE), "rb");
+    if (!f) return (void)(say("mcu: %s: %s", path(MCU_FIRMWARE), strerror(errno)), close(fd));
+    static unsigned char piece[MCU_PIECE];
+    unsigned off = 0;
+    size_t n;
+    int bad = 0;
+    while (!bad && (n = fread(piece, 1, sizeof piece, f)) > 0) {
+        struct mcu_mem m = {off, piece, (unsigned)n};
+        if (ioctl(fd, MCU_WRITE_MEM, &m) < 0) bad = 1;
+        off += (unsigned)n;
+    }
+    fclose(f);
+    if (bad || !off || ioctl(fd, MCU_BOOTUP, 0) < 0 || ioctl(fd, MCU_RESET, 0) < 0) say("mcu: not up (%u bytes: %s)", off, strerror(errno));
+    else say("mcu: up (%u bytes of firmware)", off), mcu_ok = 1;
+    close(fd);
+}
 static volatile int click_busy;
 static void *click_worker(void *arg) {
-    int fd = (int)(long)arg, ch = fm_take(fd);
-    if (!fm_note(fd, &ch, CLICK_HZ)) usleep(CLICK_MS * 1000);
-    fm_done(fd, ch);
+    int fd = (int)(long)arg;
+    static const char word[] = "buzzer";
+    struct mcu_data d = {word, sizeof word, MCU_TIMEOUT}; /* the text and its NUL, as cmd_mcu's strlen + 1 */
+    ioctl(fd, MCU_WRITE_DATA, &d);
     close(fd);
     click_busy = 0;
     return 0;
 }
-/* 0 sounding, -1 dropped (one sounding, the jingle's, or no driver) */
+/* 0 sent to the MCU, -1 dropped (one with the MCU, the jingle's, or the MCU not up) */
 static int click_buzz(void) {
-    if (click_busy || fm.live) return -1;
-    int fd = open(path("/dev/jz_pwm"), O_RDWR | O_CLOEXEC);
+    if (!mcu_ok || click_busy || fm.live) return -1;
+    int fd = open(path(MCU_DEV), O_RDWR | O_CLOEXEC);
     pthread_t th;
     if (fd < 0) return -1;
     click_busy = 1;
@@ -1364,6 +1396,7 @@ int main(int argc, char **argv) {
     cable_poll();
     heat_start();
     wdt_start();
+    mcu_up();
     unsigned long long battery_at = now_ms(), scanned_at = now_ms(), cable_at = now_ms();
     while (!stopping) {
         struct pollfd p[2 + INPUTS + CLIENTS];

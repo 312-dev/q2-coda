@@ -403,7 +403,7 @@ What the owner would lose or notice running VampOS by [card boot](vamp-os-base.m
 | 6 | Standby | Device | `mem` suspend with VampOS's services, its wake sources ([sysd](sysd.md#needs-a-q2)) |
 | 7 | Power off, battery, charging, Charge Limit | Device | Built ([sysd](sysd.md)); `poweroff` reaching the PMIC, `PE22` through the GPIO class |
 | 8 | Server songs | Partial | The catplay, offline copies, Download Ahead, a song played while it arrives (`grow`), a streamed queue at a restore; Retry and Skip missing ([playd](playd.md#what-is-missing)) |
-| 9 | Key Tone (the Clicker) | Device | `q2gate` routes `q2ui`'s clicks as the Clicker does, to the player (`mcl-click`) and the buzzer, which `q2sysd` clicks through `/dev/jz_pwm` since stock's `cmd_mcu` and MCU load are `demo`'s ([sysd: Key Tone](sysd.md#key-tone)); whether the note sounds like stock's |
+| 9 | Key Tone (the Clicker) | Device | `q2gate` routes `q2ui`'s clicks as the Clicker does, to the player (`mcl-click`) and the buzzer, the MCU's own click, which `q2sysd` asks for on `/dev/mcu` after loading the MCU's firmware at its start as `demo`'s `buzzer_init` did ([sysd: Key Tone](sysd.md#key-tone)); a PWM note in its place sounded as a beep on the owner's Q2 (2026-11-28); one detent at the next card boot checks the click |
 | 10 | Radio (`q2tuner`) | Missing | Not in the image; as a source of `q2playd` it needs `q2ui`'s page |
 | 11 | Online lyrics | Missing | Neither the lookup nor a page draws them |
 | 12 | Guest Play | Missing | `q2-guest` not packaged ([services](vamp-os-services.md#guest-play)) |
