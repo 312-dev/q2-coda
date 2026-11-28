@@ -311,7 +311,7 @@ static void wifi_paint(void *bar, void *canvas, int x, int cy) {
 }
 
 /* A card app's sync: checking, the arrows turning in Text Secondary; downloading, a ring that fills
- * in the accent from 12 o'clock clockwise with its arrow in it. */
+ * in Status Blue (the blue whatever the accent) from 12 o'clock clockwise with its arrow in it. */
 static void sync_paint(void *bar, void *canvas, int x, int cy) {
     int permille = 0;
     if (addon_sync(&permille) != 2) {
@@ -335,7 +335,7 @@ static void sync_paint(void *bar, void *canvas, int x, int cy) {
             vgcanvas_begin_path(vg);
             vgcanvas_arc(vg, cx, fy, SR_RING_R, -1.5707963f,
                          -1.5707963f + 6.2831853f * (float)permille / 1000, 0);
-            vgcanvas_set_stroke_color(vg, RGBA(scheme()->tones[0] & 0xffffffu));
+            vgcanvas_set_stroke_color(vg, RGBA(RGB_STATUS_BLUE));
             vgcanvas_stroke(vg);
         }
         vgcanvas_restore(vg);
@@ -343,7 +343,7 @@ static void sync_paint(void *bar, void *canvas, int x, int cy) {
     glyph(bar, canvas, "status_down", x, SR_RING, cy, SR_DOWN);
 }
 
-/* The Bluetooth slot: a guest playing (Guest Play), its phone in the accent, and relayed to a car
+/* The Bluetooth slot: a guest playing (Guest Play), its phone in Status Blue, and relayed to a car
  * or headset "› car"; else nothing while off or idle; the rune dim while a device connects and in
  * Text Primary once one is connected; a headset that reports its level, the headphones glyph and a
  * 15x8 battery, filled to the level and red under 20% as the status battery's; a car, its glyph. */
@@ -358,7 +358,7 @@ static void headset_paint(void *bar, void *canvas, int x, int cy) {
     case BT_SLOT_CAR:
         status_art(bar, canvas, "status_car", x, cy);
         break;
-    case BT_SLOT_GUEST: /* the guest's phone in the accent, then › and where it plays */
+    case BT_SLOT_GUEST: /* the guest's phone in Status Blue, then › and where it plays */
         paint_art(bar, canvas, theme_art("status_guest"), x, cy - (SR_GLYPH + 1) / 2);
         if (guest_relayed()) {
             int at = x + SR_GLYPH + SR_BT_GAP;
