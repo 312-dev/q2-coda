@@ -53,6 +53,8 @@ extern int fb_pan_blocks; /* a file's pan waits for the refresh, as the Q2's doe
 extern int fb_check_page; /* read the panel's shown page back before each turn (the stats' fb_overlaps) */
 extern int fb_flush;      /* between the turn and the pan: 0 nothing, 1 msync, 2 the data cache written back (MIPS) */
 extern int fb_overlap;    /* the last turn's page was the one the panel said it showed */
+extern const char *fb_lcd_site; /* --lcd-site: where the display controller's registers are read (/dev/mem), or 0 */
+extern int fb_scanned;   /* the last turn wrote into the page the display controller was reading (--lcd-site) */
 extern int fb_bits;     /* the panel's bits a channel, as given */
 unsigned fb_refresh_us(void); /* the panel's refresh period, from its timings (16667 unknown) */
 /* A second canvas a page is drawn into for a slide: canvas_swap makes it the one draw.c draws
@@ -316,6 +318,9 @@ struct ui_stats {
     unsigned lat_hist[6], lat_n;
     uint64_t lat_us, lat_max_us;
     unsigned fb_checks, fb_overlaps; /* frames whose page was read back before the turn, and those it said is shown */
+    /* --lcd-site: DC_LAY0_SITE readings (two a turn), those outside both pages, and the turns that wrote into the page
+     * it was read from */
+    unsigned lcd_site_reads, lcd_site_outside, lcd_site_into;
 };
 /* The frame log (--frame-log N): the last N frames shown, each its time since the one before, the scroll of the list
  * it drew (in 16ths of a pixel; INT32_MIN, none) and FRAME_* flags, for a device read of judder and tearing */
@@ -334,6 +339,7 @@ struct ui_frame_rec {
 #define FRAME_DEFER 4   /* glyphs were left for the next frame */
 #define FRAME_PAGE1 8   /* turned onto page 1 (else 0) */
 #define FRAME_INPUT 16  /* input came in for it */
+#define FRAME_SCANNED 32 /* its turn wrote into the page the display controller was reading (--lcd-site) */
 extern struct ui_frame_rec *ui_frame_log;
 extern unsigned ui_frame_log_n, ui_frame_log_at; /* the log's length and the next slot, oldest first from there */
 extern double list_drawn_scroll;                 /* list.c: the scroll of the list drawn last (list_drawn: one was) */

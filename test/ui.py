@@ -3104,6 +3104,34 @@ def stats_rests(binary, work):
     return good
 
 
+def lcd_site(binary, work):
+    """--lcd-site reads the display controller's DC_LAY0_SITE (the DDR address it reads layer 0's pixels from) around
+    each turn, and counts the turns that wrote into the page it was reading: tearing from the turn, told apart from
+    the panel's own (docs/ui-rewrite.md#the-frame). A file stands in for /dev/mem here, its word at 0x100 the site,
+    and a file panel's pages stand at LCD_FILE_PHYS (ui/fb.c)."""
+    good, page = True, 320 * 375 * 4
+    for name, site, expect in (('page 1', 0x10000000 + page + 4096, 'some'), ('none', 0, 'outside')):
+        path = pathlib.Path(tempfile.mkdtemp(dir=work))/'site'
+        path.write_bytes(bytes(0x100) + struct.pack('<I', site) + bytes(4096 - 0x104))
+        run = Run(binary, work, 400, '--lcd-site', path)
+        try:
+            run.rest()
+            run.ticks(8, 0.05)
+            s = run.rest()
+            reads, into, out = (s.get('lcd_site_' + k) for k in ('reads', 'into', 'outside'))
+            if expect == 'some':
+                ok = isinstance(reads, int) and reads > 4 and 0 < into < reads // 2 and out == 0  # two readings a turn, half the turns onto page 1
+                what = ('a site inside page 1 counts the turns onto page 1 as into the page being read, and only those'
+                        f' ({name})')
+            else:
+                ok = isinstance(reads, int) and reads > 4 and into == 0 and out == reads
+                what = f'a site outside both pages is counted apart, never as into ({name})'
+            good &= check(what, ok, f'reads {reads}, into {into}, outside {out}')
+        finally:
+            run.proc.kill(), run.proc.wait(timeout=5), os.close(run.queue)
+    return good
+
+
 def frame_log(binary, work):
     """--frame-log keeps the last frames shown for a device read of judder (the scroll a frame drew, against the one
     before) and the latency from the wheel's input to the first frame shown after it (docs/ui-rewrite.md#the-frame)."""
@@ -3565,6 +3593,7 @@ def main():
             good &= live_stats(binary, work)
             good &= stats_rests(binary, work)
             good &= frame_log(binary, work)
+            good &= lcd_site(binary, work)
             good &= routes(binary, work)
             good &= reload(binary, work)
             good &= early_hup(binary, work)
@@ -3610,6 +3639,8 @@ def main():
             good &= stats_rests(binary, work)
         if not only or 'wheelscroll' in only:
             good &= wheel_scroll(binary, work)
+        if 'lcdsite' in only:  # --lcd-site alone ('live' runs it too)
+            good &= lcd_site(binary, work)
         if 'framelog' in only:  # --frame-log alone ('live' runs it too)
             good &= frame_log(binary, work)
         if 'danger' in only:  # the danger card alone ('pages' runs it too)
