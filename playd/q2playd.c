@@ -243,7 +243,9 @@ static void player_send(const char *name, const char *arg) {
  * cache in KB by the file's kind and its fill percent, the Gapless setting, the Q2's hardware type 17; set-gapless as
  * mclAutoChange sends it, its cache -1 and no hardware type. */
 static int gapless_on(void);
+static void speed_for(const char *file);
 static void send_song(const char *cmd, const char *file, int ss) {
+    if (strcmp(cmd, "set-gapless")) speed_for(file); /* a song opened: its folder's speed first (a preload has it) */
     char url[1100], arg[1200];
     size_t j = 0;
     for (const char *p = file; *p && j + 6 < sizeof url; ++p)
@@ -269,6 +271,93 @@ static void send_song(const char *cmd, const char *file, int ss) {
 static struct { int sent, at; } gl;
 static void gapless_forget(void) {
     if (gl.sent) player_send("mcl-closegapless", "null"), gl.sent = 0;
+}
+
+/* ---- Speed per folder (docs/playd.md#speed) ----
+ * Today's Vamp's (patch/playback.c speed_read, ringnav_speed): stock's play speed, 0 to 3 (1, 1.25, 1.5 and 2 times),
+ * kept per parent folder, so each book or podcast keeps its own. /mnt/data/ringnav-speed-%08x, the folder's FNV-1a with
+ * fnv's separator (coverflow.c fnv), holds the folder's full path, zero-padded to 1024 bytes, and the mode as a 32-bit
+ * word; one whose path is not the folder's (a hash's collision) or whose mode is past 3 reads as normal speed. A song
+ * with no folder (a stream's URL) takes a speed for itself alone, unsaved. The player keeps the last speed it was sent
+ * (stock's decoder does), so a song's start sends its folder's when it is not the one the player has; a preload
+ * across a change of speed is not sent (ringnav_open_preload), since a preloaded song opens at the speed it was
+ * opened at. */
+#define SPEED_FOLDER 1024
+typedef struct {
+    char folder[SPEED_FOLDER];
+    unsigned mode;
+} folder_speed;
+_Static_assert(sizeof(folder_speed) == 1028, "playback.c's folder_speed");
+static struct {
+    int mode;              /* the song playing's */
+    int sent;              /* what the player was last sent: 0 for one just connected, as it starts */
+    char file[1100];       /* the song mode is for */
+} sp;
+
+static int speed_folder(const char *file, char folder[SPEED_FOLDER]) { /* playback.c speed_folder: through the last '/' */
+    const char *end = file && *file == '/' ? strrchr(file, '/') : 0;
+    size_t n = end ? (size_t)(end - file) + 1 : 0;
+    if (!end || n >= SPEED_FOLDER || !end[1]) return 0;
+    memset(folder, 0, SPEED_FOLDER), memcpy(folder, file, n);
+    return 1;
+}
+
+static unsigned fnv(unsigned h, const void *p, size_t n);
+static void speed_file(char *out, size_t room, const char *folder) {
+    snprintf(out, room, "/mnt/data/ringnav-speed-%08x", fnv(2166136261u, folder, strlen(folder)) * 16777619u);
+}
+
+static int speed_saved(const char *file) {
+    char folder[SPEED_FOLDER], rel[64];
+    folder_speed saved;
+    if (!speed_folder(file, folder)) return 0;
+    speed_file(rel, sizeof rel, folder);
+    FILE *f = fopen(path(rel), "rb");
+    int ok = f && fread(&saved, sizeof saved, 1, f) == 1;
+    if (f) fclose(f);
+    return ok && !saved.folder[SPEED_FOLDER - 1] && !strcmp(saved.folder, folder) && saved.mode < 4 ? (int)saved.mode : 0;
+}
+
+static void speed_send(void) {
+    char m[4];
+    if (player < 0 || sp.mode == sp.sent) return;
+    snprintf(m, sizeof m, "%d", sp.mode);
+    player_send("mcl-playspeed", m);
+    sp.sent = sp.mode;
+}
+
+/* file about to open: its folder's speed, or a folderless song's own as set while it played (an output's move opens
+ * the same song again) */
+static void speed_for(const char *file) {
+    if (strcmp(file, sp.file)) {
+        snprintf(sp.file, sizeof sp.file, "%s", file);
+        sp.mode = speed_saved(file);
+    }
+    speed_send();
+}
+
+/* Q2PLAY/1 `speed MODE`: the song playing's folder keeps it (written whole beside and renamed); a song with no
+ * folder takes it alone. A preload, opened at the old speed, is closed. -1 when it could not be saved: nothing
+ * changes. */
+static int speed_set(int mode) {
+    char rel[64], tmp[80];
+    folder_speed saved;
+    if (mode < 0 || mode > 3 || !q.loaded) return -1;
+    if (speed_folder(q.file, saved.folder)) {
+        saved.mode = (unsigned)mode;
+        speed_file(rel, sizeof rel, saved.folder);
+        snprintf(tmp, sizeof tmp, "%s.tmp", rel);
+        FILE *f = fopen(path(tmp), "wb");
+        int ok = f && fwrite(&saved, sizeof saved, 1, f) == 1;
+        if (f && (fflush(f) || fsync(fileno(f)))) ok = 0;
+        if (!f || fclose(f) || !ok || rename(path(tmp), path(rel))) return unlink(path(tmp)), -1;
+    }
+    snprintf(sp.file, sizeof sp.file, "%s", q.file);
+    sp.mode = mode;
+    gapless_forget();
+    speed_send();
+    ++q.seq;
+    return 0;
 }
 
 /* The song at q.order[q.at] to the player: set-songurl when nothing plays, set-nexturl to cut the one that does. */
@@ -2840,7 +2929,8 @@ static void gapless_tick(int sec, int len) {
     char next[sizeof q.file];
     int at;
     if (gl.sent || src.on || !q.loaded || q.state != PLAYING || len < GAPLESS_MIN_S || sec < 0 || len - sec >= GAPLESS_AHEAD_S ||
-        !gapless_on() || (at = gapless_next()) < 0 || dsd(q.file) || !peek_file(at, next, sizeof next) || dsd(next))
+        !gapless_on() || (at = gapless_next()) < 0 || dsd(q.file) || !peek_file(at, next, sizeof next) || dsd(next) ||
+        speed_saved(next) != sp.mode) /* opened at this song's speed: the next opens on its own at its own */
         return;
     send_song("set-gapless", next, 0);
     gl.sent = 1, gl.at = at;
@@ -2854,6 +2944,7 @@ static int gapless_took(void) {
     resume_leave();
     q.at = gl.at, q.errors = 0;
     if (q.paths ? path_lookup(q.at) : song_lookup(q.ids[q.order[q.at]]))
+        snprintf(sp.file, sizeof sp.file, "%s", q.file), /* at the speed it was sent ahead at, this song's */
         set_cover(q.paths ? -1 : q.ids[q.order[q.at]], q.paths || *q.row_url ? q.row_url : q.file);
     q.state = PLAYING, q.pos_ms = 0, q.len_s = 0;
     ++q.seq;
@@ -3420,7 +3511,7 @@ static void client_line(struct client *c, char *line) {
         return;
     }
     if (!strcmp(line, "caps")) { /* Vamp API 1's capability words (docs/platform/README.md#capabilities) */
-        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode");
+        client_say(c, "caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode speed");
     } else if (!strncmp(line, "source ", 7)) {
         client_say(c, source_take((int)(c - cl), line + 7) ? "err source" : "ok");
     } else if (!strcmp(line, "focus")) {
@@ -3450,6 +3541,11 @@ static void client_line(struct client *c, char *line) {
         else player_send("mcl-click", line + 6), client_say(c, "ok");
     } else if (sscanf(line, "mode %d %d%n", &a, &b, &n) == 2 && !line[n]) { /* the FIFO's mode */
         client_say(c, set_mode(a, b) ? "err %s" : "ok", line);
+    } else if (!strcmp(line, "speed")) { /* the song playing's: 0 to 3, and whether its folder keeps it */
+        char folder[SPEED_FOLDER];
+        client_say(c, "speed mode=%d folder=%d", q.loaded ? sp.mode : 0, q.loaded && speed_folder(q.file, folder));
+    } else if (sscanf(line, "speed %d%n", &a, &n) == 1 && !line[n]) {
+        client_say(c, speed_set(a) ? "err %s" : "ok", line);
     } else if (!strcmp(line, "eq")) {
         int m = eq_mode();
         client_say(c, "eq on=%d mode=%s", m != EQ_OFF, m == EQ_PEQ ? "peq" : m == EQ_3 ? "3eq" : "off");
@@ -3693,7 +3789,7 @@ int main(int argc, char **argv) {
         if (src.on && cl[src.holder].fd < 0) source_release(src.holder); /* its holder gone (here and after the reads): before a new client takes its slot */
         if (p[0].revents & POLLIN) {
             player = accept4(listen_fd, 0, 0, SOCK_CLOEXEC);
-            if (player >= 0) logf_("the player connected");
+            if (player >= 0) logf_("the player connected"), sp.sent = 0; /* a player starts at normal speed */
             if (player >= 0 && way) player_send("mcl-setoutputway", "1"), volume_apply(); /* a player started again: the output it had */
             if (player >= 0 && mp.go) start_from(q.at, mp.go - 1), mp.go = 0; /* car mode's kept queue */
         }

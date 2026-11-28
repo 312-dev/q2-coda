@@ -26,7 +26,9 @@
 | `click wheel`, `click button`, `click beep` | `ok`: the Clicker's click mixed into what the player plays ([q2playd: Key Tone](../playd.md#key-tone)); `err click` while a source holds the player or with no player |
 | `eq` | `eq on=O mode=M`: O 1 while an EQ plays; M `off`, `3eq` (the three-band EQ) or `peq` (the parametric EQ) |
 | `eq on`, `eq off` | `ok`: the EQ switch, Control Center's EQ circle ([q2playd: The EQ switch](../playd.md#the-eq-switch)). `on` plays the parametric EQ, or keeps an EQ already playing; `off` plays none. `err eq on` or `err eq off` when the state cannot be saved |
-| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode` |
+| `speed` | `speed mode=M folder=F`: the song playing's play speed, M 0 normal, 1 1.25, 2 1.5 and 3 2 times; F 1 when its folder keeps it, 0 for a song with no folder (a stream). `speed mode=0 folder=0` with nothing playing |
+| `speed M` | `ok`: the song playing at M (0 to 3) from now on, and every song in its folder from their start, as today's Vamp keeps it ([q2playd: Speed](../playd.md#speed)); a song with no folder takes it for itself alone. `err speed M` for another M, with nothing playing, or when the folder's speed cannot be saved |
+| `caps` | `caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode speed` |
 
 ## Ratings
 
@@ -81,7 +83,7 @@ The holder is told, by a line between answers, when it loses the player for any 
 > Q2PLAY/1
 < Q2PLAY/1 ok
 > caps
-< caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode
+< caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click eq queue mode speed
 > now
 < ~ now title= artist= album= state=0 pos=0 len=0 volume=\d+ id=0 shuffle=\d repeat=\d
 > play 1 0 3
@@ -123,6 +125,16 @@ The holder is told, by a line between answers, when it loses the player for any 
 < ok
 > eq
 < eq on=0 mode=off
+> speed
+< ~ speed mode=0 folder=\d
+> speed 2
+< ok
+> speed
+< ~ speed mode=2 folder=\d
+> speed 0
+< ok
+> speed 4
+< err speed 4
 > output
 < output dac
 > output bluetooth

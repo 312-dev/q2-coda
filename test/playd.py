@@ -11,6 +11,7 @@ import pathlib
 import re
 import socket
 import sqlite3
+import struct
 import subprocess
 import sys
 import time
@@ -2811,6 +2812,114 @@ def test_no_ask_without_resume_1_or_with_every_saved_song_on_the_card(run):
     root, pl = run
     assert not wait_for(root/'tmp/q2-navi.resume', 2.5)
     assert now(root)['title'] == 'Cloud One'
+
+
+# ---- speed per folder (docs/playd.md#speed) ----
+
+def speed_record(folder, mode):
+    """patch/playback.c's folder_speed: the folder's path zero-padded to 1024 bytes and the mode as a 32-bit word"""
+    return folder.encode().ljust(1024, b'\0') + struct.pack('<I', mode)
+
+
+def speed_name(folder):
+    """/mnt/data/ringnav-speed-%08x: coverflow.c's fnv, FNV-1a and its separator"""
+    h = 2166136261
+    for b in folder.encode():
+        h = ((h ^ b) * 16777619) & 0xffffffff
+    return f'ringnav-speed-{(h * 16777619) & 0xffffffff:08x}'
+
+
+def test_a_folder_s_saved_speed_is_sent_before_its_song_opens(run):
+    """today's Vamp's file, as playback.c writes it: its folder's songs open at its mode, another folder's at normal"""
+    root, pl = run
+    (root/'mnt/data'/speed_name('/mnt/mmc/Music/')).write_bytes(speed_record('/mnt/mmc/Music/', 2))
+    play_list(root, [1], 0)
+    pl.pump()
+    assert pl.got[:2] == [('mcl-playspeed', '2'), ('set-songurl', pl.got[1][1])] and pl.songs() == [('set-songurl', '/mnt/mmc/Music/a.flac')], pl.got
+    a = Api(root)
+    a.line()
+    a.say('speed')
+    assert a.line() == 'speed mode=2 folder=1'
+
+
+@pytest.mark.parametrize('record', ['other', 'mode', 'short'])
+def test_a_speed_file_that_is_not_the_folder_s_reads_as_normal(run, record):
+    """a hash's collision (another folder's path), a mode past 3 and a cut file each play at normal speed"""
+    root, pl = run
+    data = {'other': speed_record('/mnt/mmc/Other/', 2), 'mode': speed_record('/mnt/mmc/Music/', 4),
+            'short': speed_record('/mnt/mmc/Music/', 2)[:1027]}[record]
+    (root/'mnt/data'/speed_name('/mnt/mmc/Music/')).write_bytes(data)
+    play_list(root, [1], 0)
+    pl.pump()
+    assert 'mcl-playspeed' not in pl.names(), pl.got
+
+
+def test_speed_is_saved_for_the_folder_heard_at_once_and_kept_for_its_next_song(run):
+    root, pl = run
+    play_list(root, [1, 2], 0)
+    pl.pump()
+    a = Api(root)
+    a.line()
+    a.say('speed 3')
+    assert a.line() == 'ok'
+    pl.pump()
+    assert pl.got[-1] == ('mcl-playspeed', '3')
+    assert (root/'mnt/data'/speed_name('/mnt/mmc/Music/')).read_bytes() == speed_record('/mnt/mmc/Music/', 3)
+    assert not list((root/'mnt/data').glob('*.tmp'))
+    fifo(root, 'next')
+    pl.pump()
+    assert pl.names().count('mcl-playspeed') == 1, 'the same folder: the player has it already'
+    a.say('speed 9')
+    assert a.line() == 'err speed 9'
+
+
+def test_a_song_from_a_folder_at_another_speed_is_not_sent_ahead_and_opens_at_its_own(run):
+    """ringnav_open_preload: a preload opens at the speed it was sent at, so none across a change of speed"""
+    root, pl = run
+    (root/'mnt/data'/speed_name('/mnt/mmc/Music/')).write_bytes(speed_record('/mnt/mmc/Music/', 1))
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    db.execute("insert into songtable values (7, '/mnt/mmc/Podcasts/Show/ep1.mp3', 'Episode', 'Host', 'Show', 0)")
+    db.commit()
+    db.close()
+    play_list(root, [1, 7], 0)
+    pl.pump()
+    heard(root, pl, 20, [15, 16, 17])
+    assert 'set-gapless' not in pl.names(), pl.got
+    pl.say('player-status', 'exit')
+    pl.pump(0.6)
+    assert pl.got[-2:] == [('mcl-playspeed', '0'), ('set-songurl', pl.got[-1][1])] and pl.songs()[-1][1] == '/mnt/mmc/Podcasts/Show/ep1.mp3', pl.got
+
+
+def test_a_stream_takes_a_speed_for_itself_unsaved_and_the_next_song_its_folder_s(run):
+    root, pl = run
+    a = Api(root)
+    a.line()
+    a.say('source http://radio.example/live')
+    assert a.line() == 'ok'
+    pl.pump()
+    a.say('speed 1')
+    assert a.line() == 'ok'
+    a.say('speed')
+    assert a.line() == 'speed mode=1 folder=0'
+    assert not list((root/'mnt/data').glob('ringnav-speed-*'))
+    a.say('focus release')
+    assert a.line() == 'ok'
+    play_list(root, [1], 0)
+    pl.pump()
+    assert pl.got[-2:] == [('mcl-playspeed', '0'), ('set-songurl', pl.got[-1][1])], pl.got
+
+
+def test_a_player_started_again_is_sent_the_speed_at_the_next_song(run):
+    root, pl = run
+    (root/'mnt/data'/speed_name('/mnt/mmc/Music/')).write_bytes(speed_record('/mnt/mmc/Music/', 2))
+    play_list(root, [1], 0)
+    pl.pump()
+    pl.s.close()
+    assert now(root)['state'] == '0'
+    pl2 = Player(root)
+    fifo(root, 'resume')
+    pl2.pump()
+    assert ('mcl-playspeed', '2') in pl2.got, pl2.got
 
 
 # ---- gapless (docs/playd.md#gapless) ----
