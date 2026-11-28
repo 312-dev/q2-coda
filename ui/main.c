@@ -644,6 +644,7 @@ int main(int argc, char **argv) {
     }
     input_open(opt.input);
     input_flush(); /* nothing pressed before it had the screen is its to act on (a FIFO standing in for a device keeps such) */
+    ui_clock_read(); /* the pages open at the time it is (a list's living row runs from its opening, ui/list.c live) */
     first_page();
     state_restore();
     then_open();

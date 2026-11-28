@@ -3413,6 +3413,22 @@ def living(binary, work):
     good &= check("Blue's platter has no cells and draws nothing at rest", rows[k].count(BLUE) > len(rows[k]) // 2 and not darker
                   and pics['a'].rgb == pics['b'].rgb and not any(t['shown'] for t in trace[-55:]),
                   f"{darker[:3]} {pics['a'].rgb == pics['b'].rgb} {sum(t['shown'] for t in trace[-55:])}")
+    # live, on the clock: the cells keep q2ui drawing while the screen is lit, and it draws nothing once it is dark
+    run = Run(binary, work, 400, *on, at=lit_folder(work, 400))
+    try:
+        time.sleep(1.5)
+        f0 = run.stats()['frames']
+        time.sleep(1.0)
+        f1 = run.stats()['frames']
+        (run.dir/'backlight/panel/bl_power').write_text('1\n')
+        time.sleep(1.5)
+        f2 = run.stats()['frames']
+        time.sleep(1.0)
+        f3 = run.stats()['frames']
+        good &= check('the living row draws about 60 frames a second lit, and none in the dark', f1 - f0 >= 40 and f3 == f2,
+                      f'{f1 - f0} frames in a lit second, {f3 - f2} in a dark one')
+    finally:
+        run.proc.kill(), run.proc.wait(timeout=5), os.close(run.queue)
     return good
 
 

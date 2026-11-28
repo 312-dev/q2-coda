@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - New UI (preview): after it starts or reloads, the red cells in the selected row drift at once, as they do in any list you open, instead of standing still until the first press.
   - Look: on a question that deletes or forgets something, the red answer has a small red trash can before it, and when you move onto it the bar is gray with the words in white, instead of a solid red bar. In Light Mode reds are a deeper red that reads on white.
   - New UI (preview): it no longer quits when asked to reload while it is still starting (as VampOS asks after its first library update); it reloads once it is up.
   - New UI (preview): lists take your finger: tap a row to open it, hold a row for its menu, and drag to scroll; flick and the list coasts on and settles on a row. Pulled past the top or the end, it gives a little and springs back.
