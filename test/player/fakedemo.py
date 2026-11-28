@@ -112,6 +112,9 @@ def scenarios(m):
         # a held Next heard at 4 times (patch/seek.c's mcl-scan), let go, then a held Previous heard backward at twice
         'scan': boot + [(1.0, song('set-songurl', f'{m}/pos.flac', start=10)), (3.0, '{mcl-scan\\400}'), (5.0, '{mcl-scan\\0}'),
                         (7.0, '{mcl-scan\\-200}'), (9.0, '{mcl-scan\\0}'), (11.0, '{mcl-stop\\null}'), (12.0, None)],
+        # a folder's Play Speed (mcl-playspeed 2: 1.5 times), taken at the song's start: from 10 s for 4 s
+        'playspeed': boot + [(1.0, '{mcl-playspeed\\2}'), (1.0, song('set-songurl', f'{m}/pos.flac', start=10)),
+                             (5.0, '{mcl-stop\\null}'), (6.0, None)],
         # a start offset (a resumed song): from 7 s to the end
         'start': boot + [(1.0, song('set-songurl', a1, start=7)), (16.0, None)],
         # a CUE sheet's three tracks of one file: demo starts each by ss= and cuts the one before with set-nexturl when

@@ -356,6 +356,22 @@ def test_scan(player, songs, tmp):
 
 
 
+def test_play_speed(player, songs, tmp):
+    """mcl-playspeed 2, a folder's Play Speed (docs/player.md#commands): pos.flac (44.1 kHz) from 10 s, heard for 4 s
+    at 1.5 times through the stretch with its pitch kept: every window on its second's tone, nothing skipped, and past
+    the 14 s its own speed would reach (6 s of song in 4, less the run's start and the half second the file sink keeps
+    of what the stop drops)."""
+    s, pcm, names = play(player, songs, 'playspeed', tmp/'playspeed', speed=2)
+    heard = [(n, e) for n, e in heard_seconds(b''.join(pcm)) if n is not None]
+    off = [e for i, (n, e) in enumerate(heard) if abs(e) > 3 and 0 < i < len(heard) - 1 and heard[i - 1][0] == n == heard[i + 1][0]]
+    assert len(off) <= len(heard) // 100, f'{len(off)} of {len(heard)} windows off their tone within a second, by up to {max(map(abs, off))} Hz'
+    secs = [n for n, e in heard if abs(e) <= 3]
+    steps = [b - a for a, b in zip(secs, secs[1:])]
+    assert secs[0] == 10 and all(0 <= d <= 1 for d in steps), f'from {secs[0]} s, steps {sorted(set(steps))}'
+    assert 15 <= max(secs) <= 16, f'reached {max(secs)} s in 4 s (14 at its own speed, 16 at 1.5 times)'
+    return f'{len(heard)} windows: 10 s to {max(secs)} s in 4 s; {len(off)} off their tone'
+
+
 def test_scan_keeps_the_pcm_close_ahead(player, songs, tmp):
     """While a scan runs, forward at 4 times and backward at twice, the PCM holds at most SCAN_LEAD_MS (150 ms,
     player/engine.c) and one write ahead of what is heard, not the PCM's half second, so a change of speed and the

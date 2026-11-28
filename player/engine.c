@@ -457,8 +457,14 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
     int fb = f->channels * f->bytes;
 
     pthread_mutex_lock(&c->mu);
-    int way = car_way(c->outputway);
+    int way = car_way(c->outputway), playspeed = c->speed;
     pthread_mutex_unlock(&c->mu);
+    /* mcl-playspeed, a folder's Play Speed (docs/player.md#commands), taken at the song's start as stock takes it: 1, 2
+     * and 3 heard at 1.25, 1.5 and 2 times through the stretch, pitch kept, and only at 48 kHz or less; a scan's speed
+     * is heard over it and this one comes back at the release */
+    static const double PLAYSPEED[] = {0, 1.25, 1.5, 2};
+    double base = sx && f->rate <= 48000 && playspeed >= 1 && playspeed <= 3 ? PLAYSPEED[playspeed] : 0;
+    if (base) stretch_speed(sx, base);
     /* mcl-setoutputway takes effect here, at a song's start, as stock's: a song playing goes on where it is (captured).
      * A DSD song opened for another output (a preload) is opened again for this one. */
     if (untouched && f->dsd != dsd_out(way, song->hw, c->dsdmode)) return MOVED;
@@ -593,7 +599,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
                 pthread_mutex_unlock(&c->mu);
             }
         }
-        if (want_scan != scan) stretch_speed(sx, (scan = want_scan) < 0 ? -scan / 100.0 : scan / 100.0);
+        if (want_scan != scan) stretch_speed(sx, (scan = want_scan) < 0 ? -scan / 100.0 : scan ? scan / 100.0 : base);
         if (volume >= 0 && (way == 1 || way == 2)) output_volume(out, volume);
         if (paused) { /* a preload or a seek taken while paused: back to waiting; a click sounds in silence first */
             /* on Bluetooth the session was the warm hold: the PCM is let go as it ends, not BT_PAUSE_MS on */
