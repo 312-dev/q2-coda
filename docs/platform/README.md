@@ -10,6 +10,8 @@ The API VampOS offers a program that is not part of it ([roadmap: Platform](../v
 | Bluetooth | `q2btd` | `/run/vamp/bt.sock` | [Q2BT/1](bt.md) | `bluetooth` |
 | Media library | `q2libd` | two SQLite files, read-only; `/run/vamp/lib.sock` | [Library 1](library.md), [Q2LIB/1](library.md#q2lib1-the-library-socket) | `library` |
 | Packages: the manifest, users, starting and stopping | `q2pkgd` | the card; `/run/vamp/pkg.sock` | [Packages](packages.md), [Q2PKG/1](packages.md#starting-and-stopping-q2pkg1) | none: each command checks the caller's uid |
+| Guest Play | `q2-guest --socket` (not yet in the image) | `/run/vamp/guest.sock` | [Q2GUEST/1](guest.md) | none: root's alone (`q2ui`) |
+| Radio tuner (designed, not served) | `q2tuner` | `/run/vamp/radio.sock` | [Q2RADIO/1](radio.md) | `playback` |
 | Notices and questions (designed, not served) | `q2ui` | `/run/vamp/ui.sock` | [Q2UI/1 notices](notices.md) | `notices`, `ask` |
 
 Not in API 1 yet: the declarative UI (Q2SPOT/1 stays API 0, served by today's Vamp; VampOS has no shim for it yet), `libvampui`, the canvas, input, a settings namespace, storage folders, power holds and notices, and the checks of the permissions no socket guards yet ([Packages: Users and groups](packages.md#users-and-groups)).

@@ -430,9 +430,9 @@ What the owner would lose or notice running VampOS by [card boot](vamp-os-base.m
 | 7 | Power off, battery, charging, Charge Limit | Device | Built ([sysd](sysd.md)); `poweroff` reaching the PMIC, `PE22` through the GPIO class |
 | 8 | Server songs | Partial | The catplay, offline copies, Download Ahead, a song played while it arrives (`grow`), a streamed queue at a restore; Retry and Skip missing ([playd](playd.md#what-is-missing)) |
 | 9 | Key Tone (the Clicker) | Device | `q2gate` routes `q2ui`'s clicks as the Clicker does, to the player (`mcl-click`) and the buzzer, the MCU's own click, which `q2sysd` asks for on `/dev/mcu` after loading the MCU's firmware at its start as `demo`'s `buzzer_init` did ([sysd: Key Tone](sysd.md#key-tone)); a PWM note in its place sounded as a beep on the owner's Q2 (2026-11-28); one detent at the next card boot checks the click |
-| 10 | Radio (`q2tuner`) | Missing | Not in the image; as a source of `q2playd` it needs `q2ui`'s page |
-| 11 | Online lyrics | Missing | Neither the lookup nor a page draws them |
-| 12 | Guest Play | Missing | `q2-guest` not packaged ([services](vamp-os-services.md#guest-play)) |
+| 10 | Radio (`q2tuner`) | Missing | Not in the image; its contract is designed ([Q2RADIO/1](platform/radio.md)), with what it takes: the receiver's sound into `q2player`, ICY titles, the package; then `q2ui`'s page |
+| 11 | Online lyrics | Partial | A song's lyrics from its `.lrc` or tags are served (Q2LIB/1 `lyrics`, [library](platform/library.md#q2lib1-the-library-socket)); the LRCLIB lookup is designed, not served; no page draws them yet |
+| 12 | Guest Play | Partial | `q2-guest --socket` serves [Q2GUEST/1](platform/guest.md) (tested beside stand-in BlueZ); not packaged in the image, and no page draws it yet ([services](vamp-os-services.md#guest-play)) |
 | 13 | Wi-Fi, network time | Device | `q2netd` built; association and DHCP on the real radio ([netd](netd.md#needs-a-q2)) |
 | 14 | USB: storage, USB DAC, adb, Car Audio | Device | Built; the gadgets on the real controller ([sysd](sysd.md#needs-a-q2), [dacloop](dacloop.md#needs-a-q2), [car-audio-os](car-audio-os.md#needs-a-q2)) |
 | 15 | Car Remote | Partial | LAN and Bluetooth LE built ([carrd](carrd.md)); `scan` and `radio` missing; across networks (`q2-iroh`): decided, the pinned binary, not yet packaged ([Toolchain decisions](vamp-os-base.md#toolchain-decisions)) |
