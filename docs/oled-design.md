@@ -1640,7 +1640,8 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
   settles open, or back up when let go less than a third of the way down unless flung down (faster than 300 px/s; a
   fling up closes it from anywhere). Open, a finger dragged up or down anywhere on it (the owner's, 2026-11-28: "move
   WITH finger up and down and have a trigger point to collapse") holds its foot as far above the screen's foot as the
-  finger has gone up, in the frame that takes each move, and let go the sheet goes back up past a third of the way up or
+  finger has gone up once it has gone 10 px up or down, even after going sideways first (a thumb from the screen's
+  foot does), in the frame that takes each move, and let go the sheet goes back up past a third of the way up or
   flung up, else it settles open again: the pull's rule from the other side. A slider dragged across is still a slider.
   Return held drops it from the top; Return sends it back up. Each
   settle is cubic out, 260 ms over the whole screen and its share of that for less; under Reduce Motion it stands

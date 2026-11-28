@@ -1429,6 +1429,7 @@ def control_center_touch(binary, work, home):
                   shut == [('home', []), ('home', [])], str(shut))
     good &= control_center_motion(binary, work, home, told)
     good &= control_center_lift(binary, work, home, told)
+    good &= control_center_lift_device(binary, work, home, told)
     good &= control_center_usb(binary, work, home)
     return good
 
@@ -1522,6 +1523,56 @@ def control_center_lift(binary, work, home, told):
                   stats['top'])
     return good
 
+
+
+def device_strokes(path):
+    """A Q2's hyn_ts capture (16-byte input_events: a 32-bit timeval, type, code, value) as strokes, each a list of (ms
+    from its start, x, y) upright: x is the panel's ABS_Y, y 319 minus its ABS_X; a finger is ABS_PRESSURE 1 to 0."""
+    data = pathlib.Path(path).read_bytes()
+    strokes, cur, ax, ay, t0 = [], None, 0, 0, 0
+    for i in range(0, len(data) - 15, 16):
+        sec, usec, kind, code, value = struct.unpack_from('<IIHHi', data, i)
+        ms = sec * 1000 + usec // 1000
+        if kind == EV_ABS and code == ABS_X:
+            ax = value
+        elif kind == EV_ABS and code == ABS_Y:
+            ay = value
+        elif kind == EV_ABS and code == ABS_PRESSURE:
+            if value:
+                cur, t0 = [], ms
+            elif cur is not None:
+                strokes.append(cur)
+                cur = None
+        elif kind == EV_SYN and cur is not None:
+            cur.append((ms - t0, ay, 319 - ax))
+    return strokes
+
+
+def control_center_lift_device(binary, work, home, told):
+    """The owner's own drags closing the open sheet, recorded on a Q2 (test/data/ccdrag-20261127.bin; the owner's,
+    2026-11-28: "its just closing after i finish drag vs. moving with my thumb"): each starts at the screen's foot
+    and goes sideways before it goes up. Replayed at their own times, the sheet's foot is under the finger (320 px
+    below where it went down, moved as far as the finger) in the frame of every move once the finger has gone 10 px
+    up, and the lift closes it."""
+    good = True
+    for n, stroke in enumerate([s for s in device_strokes(ROOT/'test/data/ccdrag-20261127.bin') if s[0][2] > 200]):
+        lines, t = ['rest', 'hold return', 'rest'], 0
+        x0, y0 = stroke[0][1], stroke[0][2]
+        lines.append(f'touch {x0} {y0}')
+        for ms, x, y in stroke[1:]:
+            if ms > t + 1:
+                lines.append(f'run {ms - t}')
+                t = ms
+            lines.append(f'move {x} {y}')
+        lines += ['lift', 'rest']
+        trace, _, stats = script(binary, work, 60, lines, *home, '--told', told)
+        feet = [int(r['reveal']) for r in trace if 'reveal' in r]
+        rest = feet.index(320) if 320 in feet else len(feet)
+        want = [max(0, 320 + y - y0) for _, _, y in stroke[1:] if y0 - y >= 10]
+        moved = [f for f in feet[rest:] if f < 320]
+        good &= check(f"the owner's drag {n + 1} up from the foot: the sheet's foot follows the finger move by move, and it closes",
+                      want and all(w in moved for w in want) and stats['top'] == 'home', (len(want), want[:5], moved[:8]))
+    return good
 
 def control_center_usb(binary, work, home):
     """The USB row (a cable in) inside the glass's rounded corners (oled-design.md#corners: GLASS_R, CORNER_SLACK more for
