@@ -55,6 +55,16 @@ int snd_pcm_open(snd_pcm_t **p, const char *name, int stream, int mode) {
     return 0;
 }
 int snd_pcm_close(snd_pcm_t *p) { return 0; }
+/* the USB audio sink's control (uac.c, linked for the output tap output.c copies into): no such card here, and the
+ * sink never starts, as no q2adb-gadget is there for the tap's gate */
+int snd_ctl_open(snd_ctl_t **c, const char *name, int mode) { return -19; /* ENODEV */ }
+int snd_ctl_close(snd_ctl_t *c) { return 0; }
+int snd_ctl_elem_value_malloc(snd_ctl_elem_value_t **v) { return -12; }
+void snd_ctl_elem_value_free(snd_ctl_elem_value_t *v) {}
+void snd_ctl_elem_value_set_interface(snd_ctl_elem_value_t *v, int i) {}
+void snd_ctl_elem_value_set_name(snd_ctl_elem_value_t *v, const char *n) {}
+int snd_ctl_elem_read(snd_ctl_t *c, snd_ctl_elem_value_t *v) { return -19; }
+long snd_ctl_elem_value_get_integer(const snd_ctl_elem_value_t *v, unsigned int i) { return 0; }
 int snd_pcm_hw_params_malloc(snd_pcm_hw_params_t **p) { *p = calloc(1, sizeof **p); return *p ? 0 : -12; }
 void snd_pcm_hw_params_free(snd_pcm_hw_params_t *p) { free(p); }
 int snd_pcm_hw_params_any(snd_pcm_t *p, snd_pcm_hw_params_t *h) { return 0; }

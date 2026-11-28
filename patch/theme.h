@@ -129,7 +129,7 @@ typedef struct {
     const scheme_t *schemes; /* [n_schemes], indexed by accent value: each scheme's dark half */
     const scheme_t *light; /* [n_schemes] each scheme's light half; == schemes when the theme states
                               no final value */
-    unsigned char n_schemes; /* ACCENT_N, then the theme's own (OLED: 10) */
+    unsigned char n_schemes; /* ACCENT_N, then the theme's own (OLED: 12) */
     const option_t *opts;    /* the Appearance rows, in order */
     unsigned char n_opts;
     /* settings.values.switch: an on/off settings row shows a switch (list_marks.c switch_mark), on

@@ -1,7 +1,7 @@
 # OLED design standard
 
 The OLED theme gives Vamp the look of a present-day iPod classic: a black screen, white
-sentence-case type, one blue accent, and nothing on screen that is not music or a way to reach
+sentence-case type, one red accent, and nothing on screen that is not music or a way to reach
 it. This file is the standard the theme is built and reviewed against. It states what each
 surface looks like on the Q2's 375x320 screen, in pixels, and why.
 
@@ -18,8 +18,8 @@ its rules. Where the concept contradicts itself, this file picks one answer and 
    glows are not used to separate things; spacing and gray levels are. One glow is used, as
    atmosphere and not to separate: the album art's, behind Now Playing's lyrics and
    [rating](#rating-page) pages, fading to black.
-3. **One accent.** Accent Blue marks the one thing that is selected, playing or on. If two
-   blue things compete on a screen, one of them is wrong.
+3. **One accent.** Accent marks the one thing that is selected, playing or on. If two
+   accent things compete on a screen, one of them is wrong.
 4. **Type does the work.** Hierarchy comes from size, weight and gray level, in that order.
    No capitals, no letter spacing, no outlines.
 5. **The wheel decides the layout.** Lists move one row per tick and the selection is always
@@ -137,24 +137,33 @@ its glyphs' inks. A test fails on a colour literal equal to a token anywhere els
 | Text Tertiary  | `#858585` | Second lines ("1,234 Songs", "Connected"), section headers, captions         | `#7D` to `#8C` by ratio (est)                              |
 | Chevron        | `#999999` | List chevrons on black                                                       | `#8C8C8C` read on a 1 px stroke, so lighter in truth (est) |
 | Track          | `#333333` | Unfilled progress and slider tracks; switch off (the storage bar's is its own) | `#313131`                                                  |
-| Accent Blue    | `#2160D8` | Selection bar, progress fill, switch on, slider knob ring, big status glyphs | Bar `#1544B2` to `#225BCB`, progress `#2368D9`             |
+| Accent         | `#B8141C` | Selection bar, progress fill, switch on, slider knob ring, big status glyphs | Arterial, the default; Blue `#2160D8` when chosen (the concept's bar `#1544B2` to `#225BCB`) |
+| Accent Pressed | `#C03038` | The selection bar while Centre is held ([Press](#selection-bar))             | The Accent 12% of the way to white                         |
+| Accent Text    | `#C84C50` | Words in the accent on black (an action row, a link); on white `#B8141C`     | The Accent lifted until 4.5:1 on black                     |
+| Status Blue    | `#2160D8` | A download's tray and Guest Play's phone in the status row, whatever the Accent | The blue they had before Arterial (the owner's, 2026-11-27) |
 | On Accent      | `#FFFFFF` | Text and chevrons on the selection bar                                       |                                                            |
 | Positive       | `#34C759` | "Connected" dots, charging, OK to Disconnect, a song added                    | Green dot on Bluetooth                                     |
 | Warning        | `#FF9F0A` | A charger too weak, Charge to Update                                         |                                                            |
-| Negative       | `#FF453A` | The low battery (under 20%), a failed step                                  |                                                            |
+| Negative       | `#FF453A` (Light `#D70015`) | The low battery (under 20%), a failed step                                  |                                                            |
 | Favorite       | `#FF375F` | Now Playing's heart while the song is liked (iOS's dark systemPink; not Negative, which means a failure) | the same in Light Mode |
 | Raised         | `#1C1C1E` | Toasts, cards, the modal's panel, keys                                       |                                                            |
 | Raised 2       | `#2C2C2E` | Pills and placeholders on a raised surface, a lifted row                     |                                                            |
 | Off            | `#3A3A3C` | A gray glyph's circle, a control that is off                                 |                                                            |
-| Caption on accent | `#D6E2FA` | A selected row's caption, on the bar                                      |                                                            |
+| Caption on accent | `#F4D4D8` | A selected row's caption, on the bar                                      | 18% of the Accent over white, 4.5:1 on it                  |
 
-The concept grades its blue differently in each image. Accent Blue is one value between the bar
-and the progress fill, chosen so white text on it reads at about 5:1. Use it everywhere; do not
-add a lighter or darker blue.
+The Accent is the Accent setting's (`[IPOD] OLED_ACCENT`: Arterial unless Blue is chosen; `assets/themes/oled/theme.xml`
+`oled-arterial`, `oled-blue`). Arterial is the owner's `#B8121B` at the level the Q2's 6-bit panel shows: of its two
+neighbours `(184, 16, 28)` and `(184, 20, 28)`, the second is nearer by Delta E 2000 (0.18 against 0.39) and is where q2ui's
+turn rounds `#B8121B` (`ui/fb.c` `narrow`), so a flat bar of it goes to the glass without dither. White on it reads 6.7:1.
+Accent Pressed, Accent Text and Caption on accent are derived from whichever Accent is chosen by one rule
+(`tools/theme.py` `accent_set`), so Blue brings its own: pressed `#3C74DC`, text `#3870DC` on black and `#2060D8` on
+white, caption `#DCE8F8`. The tokens table holds the default's; q2ui takes the chosen one's (`patch/tokens.h`
+`UI_ACCENTS`). Use the Accent everywhere; do not add a lighter or darker one.
 
 ### Light Mode
 
-The concept has no light screens; Vamp's Light Mode exists and must keep working. The light
+The concept has no light screens; Vamp's Light Mode exists and must keep working. It is Auto unless
+chosen (light from 7:00 to 19:00; the owner's default from 2026-11-27, `[IPOD] LIGHT` absent reading as 2). The light
 half flips grays, not hues:
 
 | Token          | Dark      | Light     |
@@ -165,7 +174,8 @@ half flips grays, not hues:
 | Text Tertiary  | `#858585` | `#6E6E6E` |
 | Chevron        | `#999999` | `#8A8A8A` |
 | Track          | `#333333` | `#D9D9D9` |
-| Accent Blue    | `#2160D8` | `#2160D8` |
+| Accent         | `#B8141C` | `#B8141C` |
+| Status Blue    | `#2160D8` | `#2160D8` |
 | Raised, Raised 2, Off | as dark | flipped as every gray: `#DCDCDA`, `#CECECC`, `#C2C2C0` |
 | Positive, Warning, Negative, Caption on accent | as dark | the same |
 
@@ -254,38 +264,41 @@ All lists share one grid.
     2026-11-16). On Home, while its first row is in sight, they lead that row instead ([Home's first
     row](#homes-first-row)).
   - **Wi-Fi**, left of the play state: iOS's fan, a 90 degree sector 11 px in radius from an apex on the digits'
-    baseline (15.6 x 11 px), cut into a dot (radius 3.6) and two bands (5.0 to 7.3, 8.7 to 11) with 1.4 px gaps;
-    the signal lights the dot, then the bands, in Text Primary and the rest is `#3A3A3C` (`#C7C7CC` in Light
-    Mode), so the shape keeps its size; Phosphor `wifi-x` (bold) connected with no internet; nothing with Wi-Fi
+    baseline (15.6 x 11 px), cut into a dot (radius 3) and two 2 px bands (5 to 7, 9 to 11) with 2 px gaps, on whole
+    pixels up its centre so the gaps are wholly dark (the owner's, chosen by eye on a Q2, 2026-11-27);
+    the signal lights the dot, then the bands, in Text Primary and the rest is Text Primary at 30% (iOS's rule,
+    the owner's, 2026-11-27: faint white on black, faint black in Light Mode), so the shape keeps its size; connected with no internet, the fan whole and faint with a small x at full ink where its right edge meets the baseline, the fan cut away round it (`tools/art.py` status_wifi_none; the review sheet's No net option A, taken by default 2026-11-28, the owner may revisit); nothing with Wi-Fi
     off or not connected (`mock_wifi_status.py`, `mock_status_icons.py`).
   - **Sync**, left of the glyph before it: while a card app checks its server or its metadata, Phosphor
     `arrows-clockwise` (bold) turning in Text Primary, 30 frames a second, a half turn a second (S1, the user's
     30 fps and white, 2026-11-20, `sync-heart-1120/sync-arrows-white.mp4`), its box its upright ink's 12 px so
-    the 6 px either side match the row's (turning, its corners pass up to 1 px nearer); while it downloads songs, a 14 px ring (1.6 px) in
-    `#333333` filling clockwise from 12 o'clock in the accent, Phosphor `arrow-down` (bold, 8 px, Text Primary) in
-    it (S2, `mock_sync_status.py`).
+    the 6 px either side match the row's (turning, its corners pass up to 1 px nearer); while it downloads songs, a 14 px box: a 12 x 2 tray on
+    its rows 11 and 12 in Text Primary at 30%, filling from the left in Status Blue to the share downloaded, and over it
+    an arrow (2 px stem, open head) falling 4 px onto it once a second, eased in and fading out over the last 30%, 30
+    frames a second (`tools/art.py` status_drop; the review sheet's Download option A, taken by default 2026-11-28,
+    the owner may revisit).
   - **Wired headphones**, left of the sync: Phosphor `headphones` (regular) in Text Primary, 12 px tall on rows 16 to
     27 as the battery's body (its ink 13.6 px wide), while the sound goes to a jack (3.5 mm or 4.4 mm) or a USB DAC
-    (USB-C headphones among them) (the user's, 2026-11-25, `hpicon/mockup2.png`). With no output connected (nothing
-    plugged in, no Bluetooth device connected, no guest or AirPlay speaker playing), a deaf ear in the same place:
-    Phosphor `ear-slash` (regular), 12 px tall on the same rows, in a 10 px box, its ink as far from the fan's as the
-    headphones' (the user's, 2026-11-25: "a deaf ear icon ... ship it"), in Negative (red) in both halves (the user's, 2026-11-26).
+    (USB-C headphones among them) (the user's, 2026-11-25, `hpicon/mockup2.png`); nothing otherwise, with no output
+    connected too (the owner's, 2026-11-27: no deaf ear), the glyphs left of it closing up.
   - **Bluetooth** (P9 in `design/bt-redesign`), left of wired headphones: nothing while Bluetooth is off or nothing
     is connected, or while wired headphones take the sound (a jack plugged in over a linked headset plays there, and
     the row shows where the sound goes: one glyph, never both); Phosphor `bluetooth` (bold, 12 px tall on rows 16 to
-    27 as wired headphones, 8.4 px wide) in Text Tertiary while a device connects and in Text Primary once one is connected; a
-    headset that reports its level, `headphones` (bold) and a 15x8 battery 2 px after it, filled to the level as
-    the status battery's (red under 20%); a car, `car-profile` (bold, 18.5 px wide at 11 tall). While a guest plays
-    ([Guest Play](#guest-play)), `device-mobile` (fill) in the accent, and while it is relayed to the Q2's
+    27 as wired headphones, 8.4 px wide) in Text Tertiary while a device connects and in Text Primary once one is connected,
+    a headset that reports its battery level too (option A, 2026-11-28: the level is on Settings > Bluetooth, and
+    the row stays short); a car, `car-profile` (bold, 18.5 px wide at 11 tall). While a guest plays
+    ([Guest Play](#guest-play)), `device-mobile` (fill) in Status Blue, and while it is relayed to the Q2's
     Bluetooth device a `›` (8 px, Text Secondary) and that device's glyph.
   - **Buttons Lock**: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
   - **Offline**, the leftmost, so it reads first after the clock: Phosphor `cloud-slash` (bold) in Warning
-    `#FF9F0A`, 14 px wide at 11 tall, while a card app (Subsonic) says its server can't be reached (no answer, a
-    name that doesn't resolve, a proxy's 502, 503 or 504) and Wi-Fi is connected, until a request to the server
-    succeeds; with no Wi-Fi the missing fan already says why. On Now Playing too (`mock_subsonic_offline.py`, the
-    user's, 2026-11-19; [internals](internals.md#card-app-reach)).
+    `#FF9F0A`, 14 px wide at 11 tall, while Wi-Fi is connected and any cloud service can't be reached (the owner's,
+    2026-11-27: one glyph for all of them): a card app's server (Subsonic: no answer, a name that doesn't resolve,
+    a proxy's 502, 503 or 504), scrobbling, online lyrics and covers, updates and the App Store, the time zone
+    lookup, the radio directory; each until a request to it is answered. With no Wi-Fi the missing fan already
+    says why. On Now Playing too (`mock_subsonic_offline.py`, the user's, 2026-11-19;
+    [internals](internals.md#cloud-reach)).
 - **The strip.** The glyphs left of the battery have the room from 8 px past the widest clock, at the row's left, to
-  the battery (about 170 px: every slot at once with a headset's battery takes about 145). When they need more, that strip (never the battery) scrolls as a marquee: at rest its
+  the battery (about 170 px: every slot at once takes 112, or 148 with a guest relayed to a car). When they need more, that strip (never the battery) scrolls as a marquee: at rest its
   left end shows, the first glyph after the clock, for 2.75 s; then it slides left at 35 px/s until its right end
   meets the battery's 6 px, holds there 1.5 s and goes back, as Now Playing's lines do. Each end whose glyphs are cut
   fades over 6 px, the house marquee's 12 tightened: the right at rest, both while it slides, the left at its end.
@@ -295,7 +308,7 @@ All lists share one grid.
   headphones, 12 px on rows 16 to 27 as the battery's body, so their ink centres on row 21.5 with the battery's and
   the fan's (the user's, 2026-11-25): the Phosphor ones sized by
   their ink's height, not its longer side, so a wide one (`wifi-x`, the car) is as tall as the rest; strokes come
-  out about 2 px (the fan's bands 2.3, the bars 2, the pause 3). 6 px of black part two glyphs, 8 px the clock
+  out about 2 px (the fan's bands 2, the bars 2, the pause 3). 6 px of black part two glyphs, 8 px the clock
   from the first, as iOS spaces them (`mock_status_icons.py`, the user's, 2026-11-16).
 - Battery, in iOS's proportions: a 25x12 body on rows 16 to 27 (a row past the digits' top, as iOS's stands)
   with 4 px corners and a 1 px `#6E6E6E` outline,
@@ -389,7 +402,7 @@ is Radio's, edge to edge where the cover goes: design K1, approved 2026-11-20
 
 ### Selection bar
 
-- Accent Blue, flat (raised at rest, see Press below), the full row pitch tall, inset 16 px each side on every row, 8 px corners,
+- Accent, flat (raised at rest, see Press below), the full row pitch tall, inset 16 px each side on every row, 8 px corners,
   (`list.selection.inset`, `list.selection.radius`).
 - Text and chevron on it are On Accent, the second line too. Nothing else on the row changes (no
   bold, no indent).
@@ -401,6 +414,15 @@ is Radio's, edge to edge where the cover goes: design K1, approved 2026-11-20
   is unchanged: past it the bar steps a row and the next tug starts from the leftover turn. Let go short of
   it and the bar springs back over 220 ms. The mock-up's 1 degree tilt is under a pixel on a 32 px row and is
   not drawn. A touch drag scrolls the list with the bar hidden, as touch always does, so it does not tilt.
+- **The living row** (the owner's, 2026-11-27: "i like subtle, ship it"; q2ui's, `ui/list.c` `live`, `ui/cells.c`): red
+  cells drift through an Arterial platter on a 70 bpm lub-dub (lub, then dub 0.30 s later; the flow 0.62 to 1.81 times
+  its mean), about 127 in sight, 3 to 8 px across, nearer ones larger, faster and sharper, tumbling slowly. A cell only
+  darkens the platter, toward venous `#5C060E`, 0.20 of the way at a near cell's rim (subtle), and up to three times
+  that under the lean's gleam, so white text never reads less than on the plain bar. The field is a function of a clock
+  of its own, at 60 frames a second while only the cells move (`--living-fps`), the pill alone redrawn; it slows to a
+  stop over 1.5 s once nothing has been pressed or turned for 20 s, and moves again on the next input. Still under
+  Reduce Motion (shown as they were), and gone on a lifted row's card and on a platter venous cannot darken (Blue).
+  `--living 0` leaves them out. demo's bar has none.
 - **A list's end is its end** (approved on 2026-11-16): the wheel stops on the first and last rows, never wrapping
   to the other end and never bouncing. Turning on past an end, the bar's tug holds full against it, the
   selection staying, and springs back when the finger lifts. A drag stops at the ends too, with no rubber band.
@@ -408,8 +430,9 @@ is Radio's, edge to edge where the cover goes: design K1, approved 2026-11-20
   glyphs and down into the fade.
 - **Press** (approved on 2026-11-16 from `design/row-press`, option C; [internals](internals.md#row-press)): the bar
   sits raised at 1.02 with a soft accent shadow; Centre's press sinks it to 0.965 over 90 ms and brightens its
-  blue to `#4080F0`; the release springs it back past 1.02 once over 280 ms and the blue fades back over 120 ms. A
-  press during a tug wins; the lean goes. Reduce Motion: the brighter blue only, no scale and no shadow.
+  accent to Accent Pressed (`#C03038` for Arterial); the release springs it back past 1.02 once over 280 ms and the
+  brighter step fades back over 120 ms. A press during a tug wins; the lean goes. Reduce Motion: the brighter step
+  only, no scale and no shadow.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
   page behind was left at (`list.reopen.top`).
 - Exactly one per screen. A dialog over a list takes the selection; the list's bar is hidden
@@ -439,17 +462,17 @@ is Radio's, edge to edge where the cover goes: design K1, approved 2026-11-20
   or the value's own width when shorter) shrinks to leave it that, and scrolls the same way
   (`patch/ui_kit.c` `kv_fit`, `patch/settings_pages.c` `kv_row`).
 - **Switch row:** every on/off setting, a 40x24 fully round switch ending on the right column, its
-  20 px white knob 2 px in: Track when off, Accent Blue when on. A flip slides the knob over 200 ms,
+  20 px white knob 2 px in: Track when off, Accent when on. A flip slides the knob over 200 ms,
   easing out, the track's color crossing with it; flipped again mid-slide it turns back from where it
   is. One painter draws every switch (`patch/list_marks.c` `switch_mark`), stock's image switches too,
   whose art is emptied and drawn over, so they all move alike; a switch appearing (a page opening, a
   list scrolling) stands still. On the selection bar: on is a white
-  track with an Accent Blue knob, off a 1.5 px white outline round the white knob. No "On"/"Off"
+  track with an Accent knob, off a 1.5 px white outline round the white knob. No "On"/"Off"
   text beside it. A setting with two or three named choices (Gain's High and Low, Charge Limit's
   Off and 80%) is a key/value row that Center cycles; the value is never part of the label.
 - **Captioned row** (Smart Wi-Fi's and the other rows `pod_caption` names; approved as S3 on 2026-11-15, `mock_radio.py` `caption_rows('reveal')`):
   the caption shows only under the selected row. That row grows over 150 ms, its title and switch where
-  they were, to hold the caption under them inside the bar: Inter 13 px in `#D6E2FA`, 17 px lines from the
+  they were, to hold the caption under them inside the bar: Inter 13 px in Caption on accent, 17 px lines from the
   title's column, wrapped at words to the right column, 5 px under the last; every other captioned row is one
   row high. The list scrolls by whole rows to keep the grown row's foot on or above the list end, y 282 (`patch/settings_pages.c`).
   Every caption but Smart Wi-Fi's is one line there, under 327 px of Inter 13 (the bar's 343 less its 8 px insets).
@@ -556,7 +579,7 @@ Search's All, Songs, Artists and Albums ([ipod](ipod.md#search)), the theme's on
 - A `#1C1C1E` track rounded 9 px: on EQ from x 20 to 355, 34 px tall, centered in the 48 px tab bar; on Search
   from x 16 to 359, 30 px tall, in the results' first 32 px row.
 - The open tab a segment 2 px inside the track, rounded 8 px: raised `#3A3A3C` while the wheel is
-  elsewhere, Accent Blue only while the wheel is on the tabs, so the open tab reads apart from the
+  elsewhere, Accent only while the wheel is on the tabs, so the open tab reads apart from the
   wheel's place. In Light Mode the track is `#E5E5EA` and the raised segment white.
 - **The wheel** reaches the tabs past the first row (or control) under them. On them it moves between the tabs, each
   opening as the wheel reaches it, left to right going down; a turn down past the last tab, or Center, goes into the
@@ -596,7 +619,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
 - The artist's baseline is the title's; on the right column it takes at most half the row.
 - **The Shuffle row** stands first on Songs and a playlist's songs, in place of
   Play All (a song already plays the rest of its list in order): Phosphor `shuffle` (regular, 20
-  px) on the text column and "Shuffle" 28 px after it, both Accent Blue, white on the selection.
+  px) on the text column and "Shuffle" 28 px after it, both Accent, white on the selection.
   The wheel reaches it from the first song; Center shuffles the list, and Return from Now Playing
   lands on it again. Sort has no place on the row: Songs' order is Settings > Playback > Library > Sorting's
   Songs ([ipod: Settings](ipod.md#settings)). An album's page has Play and Shuffle above its tracks instead
@@ -634,8 +657,8 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   in every song list (Songs and a genre's, an artist's, an album's tracks and Cover Flow's, Folder view, a playlist's
   songs, Search's results, Most Played, Long Songs, the Ratings lists, the card's songs; Up Next already heads with
   it): the song playing or paused, known by its path and CUE track (a server song by its row, the copy playing it
-  mapped back), never its title. Its title is Accent Blue, and four bars stand on the right: Up Next's level bars'
-  shape (3 px wide, 4.5 px apart), 8, 12, 5 and 10 px high, centred on the row, Accent Blue, still (no list repaints
+  mapped back), never its title. Its title is Accent, and four bars stand on the right: Up Next's level bars'
+  shape (3 px wide, 4.5 px apart), 8, 12, 5 and 10 px high, centred on the row, Accent, still (no list repaints
   for them). **B:** where the row has a length, the bars stand SONG_COL_GAP (12 px) before it and the title ends 12 px
   before them. **A:** where it has none (a mixed list, a two-line row), or the title would keep under 80 px beside
   both, the bars take the length's place on the right column. On the selection the title and bars are white. A
@@ -654,7 +677,7 @@ clock, centered.
 | Song title     | 192, top 64                    | Inter Medium 22 px, Text Primary, one line, scrolls when long                              |
 | Artist         | 192, top 96                    | Inter Regular 18 px, Text Secondary                                                        |
 | Album          | 192, top 120                   | Inter Regular 18 px, Text Secondary, up to two lines                                       |
-| Progress bar   | 24 to 347, y 228, 6 px         | Track `#333333`, fill Accent Blue, round ends                                              |
+| Progress bar   | 24 to 347, y 228, 6 px         | Track `#333333`, fill Accent, round ends                                              |
 | Elapsed        | left on 24, centered on y 250   | 16 px, Text Primary, tabular                                                               |
 | Remaining      | right on 347, centered on y 250 | 16 px, Text Primary, with a leading minus; a tap shows the length instead (Track Time)     |
 | State row      | centered on y 286, x 53 to 322  | Shuffle, radio, repeat, Up Next: Phosphor bold 22 px, even gaps (below)                    |
@@ -690,11 +713,11 @@ has no place for keeps a place of its own:
   opens them as a page titled About, an [info grid](#track-details), and Return goes back to ⋯.
 - **The state row** is four buttons on stock's play mode button, `shuffle`, `broadcast` (radio),
   `repeat` and `queue`, the outer two's edges fixed at x 53 and 322 and the three gaps between them
-  even. Shuffle and repeat are Text Secondary off; on, Accent Blue with a 4 px Accent Blue dot 2 px
+  even. Shuffle and repeat are Text Secondary off; on, Accent with a 4 px Accent dot 2 px
   under the glyph (repeat-once's glyph for One). A tap on shuffle turns it on or off, a tap on
   repeat steps Off, All, One, and each keeps the other as it was. Stock's Shuffle never ends, so
   shuffle with repeat Off plays on as with All. Radio is the antenna in Text Secondary; while a
-  radio plays (the playing app's, or the Q2's own) it is a 92 x 34 Accent Blue pill holding the antenna (18 px, white) and
+  radio plays (the playing app's, or the Q2's own) it is a 92 x 34 Accent pill holding the antenna (18 px, white) and
   "Radio" (Inter Medium 16 px, white): turning on, the pill grows from the glyph's width over
   200 ms (ease out) while the gaps shrink, the word fading in over the last 40 %, and back the same
   way off. While radio is on, shuffle and repeat are `#444446` and ignore taps and the Center
@@ -793,7 +816,7 @@ Tertiary), 46 px right of the text column. The list runs edge to edge to the foo
 as a menu's; a lit row's foot never passes y 282.
 
 - **The playing song** is the sheet's header and takes no selection: its cover, its title with
-  three Accent Blue [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px high) 7 px after it, moving
+  three Accent [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px high) 7 px after it, moving
   while it plays and still while paused, and its artist and album
   ("Pink Floyd · The Dark Side of the Moon").
 - **Under a shuffle, what played** stands above the header, a row each as the rest of the queue's,
@@ -802,7 +825,7 @@ as a menu's; a lit row's foot never passes y 282.
 - **Playing Next** (Inter Medium 13 px, Text Secondary) heads the songs queued with Play Next, Play
   Last and the bump, with a **Clear** pill on its right, 22 px high, ending at x 359 with the
   selection bar: `#2C2C2E` with `#7FA6F5` Inter Medium 15 px at rest (Light Mode `#E5E5EA`, the tab
-  track's gray, with Accent Blue words: the dark pill does not flip well), Accent Blue with white
+  track's gray, with Accent words: the dark pill does not flip well), Accent with white
   when the wheel is on it. It is a stop of its own; Center on it empties Playing Next, no confirm.
 - **From** the list, album or page the queue was played from ("Next in Queue" when that is not
   known) heads the rest of the queue in play order.
@@ -815,7 +838,7 @@ as a menu's; a lit row's foot never passes y 282.
   with the loading spinner and it plays once enough of it is there; nothing refuses.
 - **The bump arrow**, Phosphor `arrow-up` (regular, 16 px, Text Tertiary; white on the selection),
   stands on the right column of each queued song but the first. A tap on it, or Play/Pause held on
-  the row, moves the song to the top of Playing Next, where a 3 px Accent Blue edge marks it for
+  the row, moves the song to the top of Playing Next, where a 3 px Accent edge marks it for
   0.7 s. The rest of the queue has no arrow and Play/Pause does nothing on it.
 - **Moving a queued song**: a lifted song sits on a `#2C2C2E` card with 10 px corners, its title
   in Inter Medium 18 px; Playing Next's songs show a grip (three 18 x 2 px bars) on the right
@@ -843,12 +866,12 @@ as a menu's; a lit row's foot never passes y 282.
 
 ### Progress and sliders
 
-- **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
+- **Progress:** 6 px, round ends, Track and Accent. Used for playback, scans and
   downloads.
 - **Slider page** (Volume, Resume Songs, Night Shift, Wheel Sensitivity; stock's Max Volume, Default Volume, Channel
   Balance and Brightness pages keep the form where they still open): a feature with a switch has it as the
   first row, selected; the value in Inter Medium 22 centered on y 150; a 6 px track from the text
-  column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
+  column to the right column with its top at y 186, Track behind and Accent filled to a 14 px
   white knob (Channel Balance fills from the center; in Light Mode, where white is the canvas, the
   knob is edged 1 px in Track, as iOS edges its white thumb); the range's ends in 15 px Text
   Tertiary centered on y 214, at the two columns. The wheel moves it; there are no +/- buttons. Center
@@ -860,7 +883,7 @@ as a menu's; a lit row's foot never passes y 282.
 - <a id="inline-sliders"></a>**Inline slider rows** (Playback's Max Volume, Balance and Default
   Volume's Level, Display's Brightness; the user's, 2026-11-16, from `design/mockups/mock_inline_slider.py`): a setting
   with one value changes in its list, not on a slider page. At rest the row holds its title, a 4 px track from x 190 to
-  62 px short of the right column (Track behind, Accent Blue filled to a 12 px white knob; on the selection bar the track
+  62 px short of the right column (Track behind, Accent filled to a 12 px white knob; on the selection bar the track
   is `#7DA2EA` and the fill white) and its value in 15 px Text Secondary (Caption On Accent on the bar) ending on the
   right column; no chevron. Center or a tap grabs it: the row grows to 64 px over 150 ms, as a captioned row grows (at
   once under Reduce Motion), its value in Inter Medium 20 on the right column and a full-width track 10 px in from the
@@ -869,8 +892,8 @@ as a menu's; a lit row's foot never passes y 282.
   step set and saved as stock's page for it sets a step; Center or Return sets it down, as does the selection moving
   off it. A setting with a switch and a value (Default Volume) is a switch row with its slider row under it,
   shown only while the switch is on (`patch/inline_slider.c`).
-- **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value (Text Tertiary
-  while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it
+- **Vertical slider (EQ):** 4 px Track line, Accent fill from 0 dB to the value (Text Tertiary
+  while the EQ is off), a 14 px white knob, ringed 2 px in Accent while the wheel is on it
   (1 px in Track otherwise in Light Mode, as the slider page's). The band's name and gain under it
   in 15 px Text Tertiary, Text Primary on the band the wheel is on. Above the three, the EQ's
   switch (Enabled), Presets and Reset are rows; while an Advanced preset plays, its name is
@@ -878,7 +901,7 @@ as a menu's; a lit row's foot never passes y 282.
 - **Storage bar** (Settings > Storage, approved from `mock_radio.py`'s storage sheet on 2026-11-15): "33.9 GB of 60
   GB used" in 15 px Text Secondary centered on y 62 at the text column, then a 10 px bar with round ends from the
   text column to the right column, its top at y 76: the track `#2C2C2E`, then from the left Your Music in white,
-  Downloads in Accent Blue and Stream Cache in `#6E6E73`, square where they meet with 1 px of track between them.
+  Downloads in Accent and Stream Cache in `#6E6E73`, square where they meet with 1 px of track between them.
   The rows from y 100 are its legend: a 10 px dot in the segment's color on the text column (Free's in the track's),
   the label at x 44 and the size as the row's value, Downloads and Stream Cache with a chevron. Two footers follow.
 - **Footer:** a grouped list's caption under its last row, as iOS's: 13 px Text Tertiary (`#858585`) on the text
@@ -888,7 +911,7 @@ as a menu's; a lit row's foot never passes y 282.
 
 Shown for a moment after a mode change (Shuffle, Repeat).
 
-- Centered glyph (Phosphor `shuffle` or `repeat`, bold), 56 px, Accent Blue, centered on y 140;
+- Centered glyph (Phosphor `shuffle` or `repeat`, bold), 56 px, Accent, centered on y 140;
   label Inter Medium 22 px centered on y 200; count in Text Tertiary 15 px centered on y 228.
   Nothing else on screen but the status row.
 - Dismisses itself after 1.2 s or on any input, which it takes.
@@ -958,11 +981,14 @@ as its callers move onto it.
   case, wrapped at words to the text column on as many lines as it needs (four at most), the card growing with it; a code (a pairing's "482
   913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
   column) and the answers, 32 px rows of Inter Regular 20 centered, stacked; 8 px of padding.
-- **Kinds:** destructive (Cancel, then the verb in Negative red; opens on Cancel), consequential
-  (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK). The lit
-  answer's bar is the accent, 8 px in from the card's sides, or Negative red on a destructive verb. Every kind's
+- **Kinds:** destructive (Cancel, then the verb in Negative red after an 18 px trash in Negative; opens on Cancel),
+  consequential (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK).
+  The lit answer's bar is the accent, 8 px in from the card's sides; on a destructive card it is a neutral gray
+  platter (`#3A3A3C`, Light `#E5E5EA`) whichever answer is lit, Cancel too, with the words in Text Primary, the trash staying Negative, so red never fills a
+  row (the owner's danger-card ruling, 2026-11-28). The trash and verb are centred together and show the same lit or
+  not, so the verb never moves with the selection. Every kind's
   answers stand 32 px apart, with no gap before a destructive one, as Shut Down's (the user's, 2026-11-19).
-- **Red:** Negative `#FF453A`, the design's one red, not the mock's `#FF3B30` (iOS's light-mode red, darker on black).
+- **Red:** Negative `#FF453A`, the design's one red, not the mock's `#FF3B30` (iOS's light-mode red, darker on black). In Light Mode Negative is `#D70015` (iOS's high-contrast light red), 5.38:1 on the white card where `#FF453A` was 3.6:1.
 - **Input:** the wheel moves the bar; Center answers the lit row or flips the switch;
   Return answers the safe row; Play/Pause, Next and Previous do nothing while the card asks.
 - **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
@@ -1038,7 +1064,7 @@ service with no link open a page of their own holding only the empty state (`emp
 Library's pages say so (`empty_card`).
 
 <a id="buttons"></a>**Buttons** (`mock_empty_cta.py`, the user's, 2026-11-16; `patch/ui_kit.c` `ui_cta_paint`): one
-is a filled Accent Blue capsule 38 px tall, its label Inter Medium 17 in white, 24 px each side, at least 140 px; a
+is a filled Accent capsule 38 px tall, its label Inter Medium 17 in white, 24 px each side, at least 140 px; a
 pair is two equal capsules 10 px apart (20 px each side, at least 120, the two within the 327 px text box), the second
 gray (`#2C2C2E`, Light Mode `#E5E5EA`) with its label in Text Primary. Selected, a button wears a 2 px Text Primary
 ring 3 px out, under the [focus rule](#focus-ring); pressed, its fill darkens a step (`#1A4DAD`; gray `#3A3A3C`,
@@ -1533,7 +1559,7 @@ one is a bare one the strip takes in its first frame (`patch/keyboard.c` `kb_hos
   `heart-slash.svg` for Favorites' empty state: Phosphor's regular heart cut as its outline `bell-slash`
   is (a 16 unit slash from (48,40) to (208,216) joined to the ring below it, the ring above it ending in
   round caps 32 units from the slash), traced to filled paths.
-- Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's `wifi-x`, sync, Bluetooth and `cloud-slash`, Now
+- Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's sync, Bluetooth and `cloud-slash`, Now
   Playing's and the confirmation's shuffle and repeat, About's quality badge and Now Playing's heart while off, `regular`
   for row symbols and Now Playing's More. Sizes are the design's: 13 px padlock, 11 px tall status glyphs ([Status row](#status-row)), 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
@@ -1563,7 +1589,7 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
 
 - **Toggles block**: 158 x 210 from (20, 38), `#1C1C1E` with 22 px corners. Six 40 px circles two by three,
   26 px apart both ways (centers x 66 and 132, y 68, 134 and 200): Wi-Fi, Bluetooth / AirPlay, Car Remote /
-  Smart Wi-Fi, EQ. Accent Blue when on, `#3A3A3C` off.
+  Smart Wi-Fi, EQ. Accent when on, `#3A3A3C` off.
 - **Glyphs**: Phosphor fill, each at one optical size, its ink's longer side 18 px (`tools/art.py` `CC_INK`):
   Bluetooth `bluetooth`, AirPlay `airplay`, Car Remote `car-profile`, Smart Wi-Fi `leaf`, EQ `equalizer`. White on
   a lit circle; in Light Mode a circle that is off takes Text Primary (`CC_LIGHT`).
@@ -1591,7 +1617,8 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start (white in Light Mode, where the
   fill is dark). Volume ends at y 248, the toggles block's foot.
 - <a id="cc-usb-row"></a>**USB row** (approved 2026-11-17 from `design/usb-row` `mock_usb_row.py`), only while a cable is
-  in: 335 x 38 from (20, 258), 10 px under the blocks, fully round as the sliders, in the block's color: Phosphor's
+  in: 319 x 38 from (28, 258), 10 px under the blocks, its ends 8 px in from theirs so that it, its ring and the landing's
+  overshoot stay inside the glass's bottom corners ([Corners](#corners); the owner's, 2026-11-28: it ran off the rounded edge), fully round as the sliders, in the block's color: Phosphor's
   `usb` (fill, 20 px, Text Primary) centered 22 px in, "USB" in Inter Medium 15 from 40 px in, the remembered choice
   (Automatic, Transfer Files, USB Audio, Charge Only, Ask Every Time, USB Debugging) in 15 px Text Secondary ending 30 px from its
   end, and a 13 px bold `caret-right` in the chevron's gray centered 18 px from it. The wheel's ring round it is the
@@ -1601,7 +1628,7 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
   Sleep Timer its row in Playback, and Guest Play its row in Bluetooth (Home's first row reads Guest Play while a
   guest plays).
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
-  Accent Blue. The stops, in order: Wi-Fi, Bluetooth, AirPlay, Car Remote, Smart Wi-Fi, EQ, the Now Playing block
+  Accent. The stops, in order: Wi-Fi, Bluetooth, AirPlay, Car Remote, Smart Wi-Fi, EQ, the Now Playing block
   (only while something is playing or paused, as Home's Now Playing row), Brightness, Volume, the USB row (only while
   a cable is in). The ring is not there
   when the page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the
@@ -1610,7 +1637,20 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
 - **Sliders and the wheel**: Volume steps exactly as Now Playing's volume does (1 a tick turned slowly, up to 10
   a tick on a fast spin, `vol_next`), and Brightness by the same curve over its own range, identically here and
   on Settings > Display > Brightness (`bright_wheel`); each fill eases to its level at Now Playing's bar's speed
-  (`VOL_EASE_MS`).
+  (`VOL_EASE_MS`). A finger on a slider is direct manipulation: the fill stands under the finger in the frame that
+  takes each move, with no ease while it is down (the owner's, 2026-11-27); it eases only for the wheel's steps and a
+  tap.
+- **Coming and going** (the owner's, 2026-11-27: it comes down from the top, never in from the side): a finger pulled
+  down from the top edge holds the sheet's foot under it as it moves (an interactive transition), and let go the sheet
+  settles open, or back up when let go less than a third of the way down unless flung down (faster than 300 px/s; a
+  fling up closes it from anywhere). Open, a finger dragged up or down anywhere on it (the owner's, 2026-11-28: "move
+  WITH finger up and down and have a trigger point to collapse") holds its foot as far above the screen's foot as the
+  finger has gone up once it has gone 10 px up or down, even after going sideways first (a thumb from the screen's
+  foot does), in the frame that takes each move, and let go the sheet goes back up past a third of the way up or
+  flung up, else it settles open again: the pull's rule from the other side. A slider dragged across is still a slider.
+  Return held drops it from the top; Return sends it back up. Each
+  settle is cubic out, 260 ms over the whole screen and its share of that for less; under Reduce Motion it stands
+  or goes at once, and a finger still pulls it. The page under it stays as it was.
 - **Now Playing block**: a tap anywhere on it but the transport, or Center on it, closes the page and opens Now
   Playing; Previous, Play/Pause and Next keep their own taps. With nothing loaded it does nothing.
 - **Holds**: a toggle held 550 ms (`QUICK_HOLD_MS`), by a finger or by Center with the ring on it, closes the page
@@ -1831,12 +1871,12 @@ in mode pages as USB's:
   (Settings > Wi-Fi) there. The wheel reaches the line after the button (an underline marks it); Center acts on the
   one in focus.
 - **Downloading the Update**, its percent ("Verifying…" while the signature is checked) and the restart's bar
-  filling in Accent Blue; Return leaves and cancels it. Then the card's check runs on what it fetched.
+  filling in Accent; Return leaves and cancels it. Then the card's check runs on what it fetched.
 - **Install Update?** on the [confirmation card](#confirmation-card) over the check's page: "Install Vamp 1.8.3 ·
   V1830?", its body "SIZE MB, over TAG. Takes about 2 min;" over "your music and settings stay.", then Cancel
   (selected) and Install and Restart.
-- **Restarting to Install**, "Don't turn off the Q2": `arrow-clockwise` bold on Accent Blue, and a 180 x 6 bar with
-  round ends under the stack (top + 172), Track `#333333` filled in Accent Blue with the unpacking (the user's, 2026-11-16: progress fills are the accent).
+- **Restarting to Install**, "Don't turn off the Q2": `arrow-clockwise` bold on Accent, and a 180 x 6 bar with
+  round ends under the stack (top + 172), Track `#333333` filled in Accent with the unpacking (the user's, 2026-11-16: progress fills are the accent).
 - **Results**, each a fill glyph on its circle: You're Up to Date (check, bold, Positive green, "VERSION (TAG) is
   installed"), No Update Found and No SD Card (`file-arrow-down`, `#3A3A3C`), Charge to Update and Not Enough Space
   (`battery-warning` and `warning`, `#FF9F0A`), Update Can't Be Used (`warning`, `#FF453A`), each with the online
@@ -1876,7 +1916,7 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
   The button is a row of the page's own list after the switch, so the wheel moves between the two. ponytail: the
   mock-up's address line under the hint ("Vamp at 192.168.1.30") needs a fourth line in the shared empty state;
   the how-to page shows the address meanwhile.
-- **Phones:** 10 px under the switch, Pair a Phone as the blue top-action row (the accent's `plus-circle`, 18 px at x 26,
+- **Phones:** 10 px under the switch, Pair a Phone as the accent top-action row (the accent's `plus-circle`, 18 px at x 26,
   its label at x 54 in the accent; white on the selection, as a playlist's action rows), then each phone as a
   [two-line row](#two-line-row) 52 px tall: Phosphor `device-mobile` (regular, 20 px, Text Secondary, centred on x 34),
   the name at x 56 over its state in Text Tertiary: "Connected over Wi-Fi" after a 7 px Positive dot, or
@@ -2026,7 +2066,7 @@ interruptible: a turn mid-run starts from where it is.
   value or chevron on its row. A 12 px fade covers its right end while the text goes on past it,
   and its left end while it is scrolled away from its start, so it rests crisp; over it the text
   itself fades out, whole at the inside to gone at the end, onto whatever is behind it (the Canvas,
-  the selection's blue, a destructive answer's red, a cover), never a band of a guessed color. A
+  the selection's accent, a destructive answer's red, a cover), never a band of a guessed color. A
   truncated text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
 - **A value cut off scrolls too** (the user's, 2026-11-16, from About's CFW. Version): on the selected
   row the marquee takes the first text cut off at its column, the title, else a key/value row's value,
@@ -2069,9 +2109,9 @@ pattern.
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
 | Automatic Time Set (time zones)     | Switch rows, then a Picker  | Automatic Time Set's switch, then Automatic Time Zone's ([captioned](#list-row): "Sets the zone from your network's location"; on by default, [internals](internals.md#automatic-time-zone)), then the zones as a picker: the saved one pinned first with its check, the rest west to east by the offset they have now, ties by city; each a key/value row, the city and its offset ("Chicago", "UTC-6", Text Secondary), the checked row's value clear of the check; no A-Z strip, as the order is by offset |
 | About                               | [Label/value rows](#labelvalue-rows) | Model, Firmware (V1.36), the product's version under its name, Capacity and Available with their unit ("779.72 GB"), Wi-Fi Address, IP Address ("Not connected" with no network); the wheel walks the rows and nothing opens; values in Text Secondary |
-| Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
+| Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent check on the right column                                   |
 | Storage                             | Storage bar                 | [Progress and sliders](#progress-and-sliders): the bar, its legend rows (Downloads and Stream Cache open pages) and two footers |
-| Storage > Downloads                 | Key/value rows              | Limit (its picker the menu sheet's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centered on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |
+| Storage > Downloads                 | Key/value rows              | Limit (its picker the menu sheet's), then each item: Phosphor `arrow-circle-down` (18 px, Accent) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centered on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, the one header, "Searching..." on its line; glyphs at right; the network joining, joined or whose join failed is the first row under it, one line like the rest (in scan order), with the list's spinner, the Accent check (and its trash) or the Negative `warning-circle` before its lock and signal, and "Connecting…", "Connected", "Wrong password" or "Couldn't connect" as a [caption](#list-row) under its bar while selected; a press moves the network there with the selection; a failed one stays first until the next join or scan (variant E, the owner's, 2026-11-23); Reset Network Settings last |
@@ -2098,7 +2138,7 @@ page became Settings > Storage. Spotify's pages follow the list patterns.
 | Do                                                   | Don't                                       |
 | ---------------------------------------------------- | ------------------------------------------- |
 | Separate with space and gray                         | Add boxes, cards or panels behind lists     |
-| Use Accent Blue for the one selected or active thing | Tint icons, headers or second lines blue    |
+| Use Accent for the one selected or active thing | Tint icons, headers or second lines in it   |
 | Keep every list on the 32 px grid                    | Mix pitches in one list                     |
 | Let titles scroll when selected                      | Shrink type to fit                          |
 | Inset from the glass with `corner_x`                 | Put anything in the corners the glass hides |

@@ -339,7 +339,8 @@ def test_scan(player, songs, tmp):
     # second for where a window falls. A player stopped 300 ms a second reached 17 s (1 of 20), as a busy Q2 would: 15
     # s is past what playing on would reach (14 s). Back at twice is twice its hold at most, less on a busy machine,
     # where it went back 1 s in a hold of 1.25 s: it must go back, and no further than that and the turn's 2 s, the
-    # hold read from the transcript's milliseconds (10 ms: 22 s back to 16 s in a hold read as 1.996 s).
+    # hold read from the transcript's milliseconds (idle, 21 s back to 16 s in a hold of 2.00 s: a second inside it, with
+    # the PCM SCAN_LEAD_MS ahead, as test_scan_keeps_the_pcm_close_ahead holds it).
     sent = {l.split()[-1]: float(l.split()[0]) for l in reversed(s.lines) if l.split()[1] == '>' and 'mcl-scan' in l}
     sent0 = [float(l.split()[0]) for l in s.lines if l.endswith('{mcl-scan\\0}')]
     fwd, hold = sent0[0] - sent['{mcl-scan\\400}'], sent0[1] - sent['{mcl-scan\\-200}']
@@ -352,6 +353,33 @@ def test_scan(player, songs, tmp):
     assert jumps in ([], [-2]), f'jumps of {jumps} s'  # -2: the dropped half second, never heard on a Q2
     assert secs[0] == 10 and secs[-1] > back, f'from {secs[0]} s, ending at {secs[-1]} s'
     return f'{len(heard)} windows: 10 s to {max(secs)} s, back to {back} s, on to {secs[-1]} s; {len(off)} off their tone'
+
+
+
+def test_scan_keeps_the_pcm_close_ahead(player, songs, tmp):
+    """While a scan runs, forward at 4 times and backward at twice, the PCM holds at most SCAN_LEAD_MS (150 ms,
+    player/engine.c) and one write ahead of what is heard, not the PCM's half second, so a change of speed and the
+    release are heard that soon (docs/player.md#scan). Read from the car trace's delay, a line each second (a quiet
+    window of 300 ms, looked at each second), on the lines made well inside each run of the scan."""
+    cp, car = car_player(), tmp/'scanlead.audio'
+    car.write_text('hw:CARD=UAC1Gadget,0\n44100\n')
+    s = fakedemo.Session(tmp/'scanlead')
+    s.music = songs
+    runs = ((2.0, 4.0), (4.0, 7.0))  # forward, then backward: the commands' times, the song sent at 1.0
+    s.run(fakedemo.scenarios(str(songs))['scan'][:4] + [
+        (1.0, fakedemo.song('set-songurl', f'{songs}/pos.flac', start=10)), (2.0, '{mcl-scan\\400}'),
+        (4.0, '{mcl-scan\\-200}'), (7.0, '{mcl-scan\\0}'), (8.0, '{mcl-stop\\null}'), (9.0, None)],
+          fakedemo.launch_host(cp, str(songs), 1, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
+                                                   'Q2PLAYER_CAR_QUIET_MS': '300'}), 1)
+    lines, at, inside = car_trace((tmp/'scanlead/player.log').read_text()), 1.0, []
+    for l in lines:  # each line made at the end of its window, the windows one after another from the PCM's open
+        at += l['ms'] / 1000
+        if any(a + 0.4 <= at <= b - 0.1 for a, b in runs): inside.append((round(at, 1), l['delay']))
+    assert len(inside) >= 3, [(l['ms'], l['delay']) for l in lines]
+    worst = max(d for _, d in inside)
+    # one write: a block of at most 4096 frames at 2 times or more, and a 40 ms segment the stretch held, under 4096
+    assert worst <= 44100 * 150 // 1000 + 4096, f'the PCM {worst * 1000 // 44100} ms ahead while scanning: {inside}'
+    return f'the PCM at most {worst * 1000 // 44100} ms ahead over {len(inside)} lines inside the scan'
 
 
 def test_cue_tracks(player, songs, tmp):
@@ -723,10 +751,12 @@ def tool(tmp, name, *defines):
     """test/player/NAME.c with patch/peq.c (and player/dsp.c for dsp_test) as the player builds them, for this
     machine."""
     out = tmp/name
-    if not out.exists() and name in ('volume_test', 'alsa_test'):  # output.c and the car's trace it counts into, with FFmpeg's headers
+    if not out.exists() and name in ('volume_test', 'alsa_test'):  # output.c, the car's trace it counts into and the output tap
+        # it copies into (tap.c, whose USB audio sink is uac.c), with FFmpeg's headers
         ff = pathlib.Path(subprocess.run([sys.executable, ROOT/'tools/player.py', 'ffmpeg', 'host'], check=True, capture_output=True, text=True).stdout.strip())
         subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-O2', '-Wall', '-Werror', *defines, '-I', ROOT/'player', '-I', ff/'include', HERE/f'{name}.c',
-                        ROOT/'player/output.c', ROOT/'player/cartrace.c', '-L', ff/'lib', '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
+                        ROOT/'player/output.c', ROOT/'player/cartrace.c', ROOT/'player/tap.c', ROOT/'player/uac.c', '-L', ff/'lib',
+                        '-lswresample', '-lavutil', '-lm', '-lpthread', '-o', out], check=True)
     if not out.exists():
         subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-DPEQ_HOST', *defines, '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                         '-I', ROOT/'player', '-I', ROOT/'patch', HERE/f'{name}.c', *([ROOT/'player/dsp.c'] if name == 'dsp_test' else []), ROOT/'patch/peq.c',
@@ -3316,21 +3346,234 @@ def test_car_feed_does_not_block_a_source_the_car_does_not_take(player, songs, t
     return f'3 s of sound dropped in {took:.2f} s'
 
 
+def test_car_feed_drops_at_the_source_rate_when_wakes_are_late(player, songs, tmp):
+    """test_car_feed_does_not_block_a_source_the_car_does_not_take with every sleep of the player's waking up to
+    10 ms late (a timer slack of 10 ms, as a busy Q2 or an idle virtual machine wakes a thread late): the drop keeps
+    to the source's rate over the whole run, so 3 s of sound is still done in about 3 s. A drop paced only by a sleep
+    of each read's length adds every wake's lateness to the source's time: 4.6 to 5 s here."""
+    car, feed = tmp/'feed6.audio', tmp/'feed6.fifo'
+    wrap = tmp/'feed6.py'  # prctl(PR_SET_TIMERSLACK), kept across the exec and by every thread the player makes
+    wrap.write_text(f'#!{sys.executable}\nimport ctypes, os\nctypes.CDLL(None).prctl(29, 10_000_000, 0, 0, 0)\n'
+                    f'os.execv({car_player()!r}, [{car_player()!r}])\n')
+    wrap.chmod(0o755)
+    src, f = tone(3.0), Feeder(feed)
+    s = fakedemo.Session(tmp/'feed6')
+    s.music = songs
+    s.run([(0.0, '{mcl-setoutputway\\1}'), (0.5, f.send(src)), (6.5, None)],
+          fakedemo.launch_host(str(wrap), str(songs), 1, {'Q2PLAYER_CAR': str(car), 'Q2PLAYER_FORMATS': 's16',
+                                                                        'Q2PLAYER_FEED': str(feed)}), 1)
+    assert not list((tmp/'feed6/pcm').glob('*.raw'))
+    assert len(f.runs) == 1, 'the source finished'
+    took = f.runs[0][1] - f.runs[0][0]
+    assert 2.5 < took < 3.8, f'{took:.2f} s for 3 s of sound, the player\'s wakes up to 10 ms late'
+    return f'3 s of sound dropped in {took:.2f} s, the player\'s wakes up to 10 ms late'
+
+
 # Tests that read another's output, run after it in its folder: {test: the test whose folder it reads}.
+# ---- the output tap (player/tap.c, docs/usb-audio.md#the-tap)
+
+sys.path.insert(0, str(ROOT/'tools'))
+import q2tap  # noqa: E402  the tap's reader, vamp audio's
+
+
+class TapReader:
+    """A reader of the player's tap FIFO in a thread, through q2tap.Tap into bytes per format run: sessions[i] is
+    the i-th reader's [(Format, bytes)]. stall_s: after the first bytes, this long without reading. sessions: how
+    many readers one after another; each but the last closes after its first `close_after` bytes, and the next
+    opens `gap_s` later."""
+    def __init__(self, fifo, stall_s=0.0, sessions=1, close_after=0, gap_s=0.0):
+        os.mkfifo(fifo)
+        self.fifo, self.stall_s, self.n, self.close_after, self.gap_s = fifo, stall_s, sessions, close_after, gap_s
+        self.sessions, self.taps = [], []
+        self.thread = threading.Thread(target=self.run, daemon=True); self.thread.start()
+
+    def run(self):
+        for i in range(self.n):
+            runs = []
+            def sink(fmt, runs=runs):
+                runs.append([fmt, bytearray()])
+                class S:
+                    def write(self, b): runs[-1][1].extend(b)
+                    def close(self): pass
+                return S()
+            tap = q2tap.Tap(sink)
+            self.sessions.append(runs); self.taps.append(tap)
+            fd = os.open(self.fifo, os.O_RDONLY)  # waits for the player's writer, as cat on the Q2 does
+            got, stalled = 0, False
+            while True:
+                b = os.read(fd, 65536)
+                if not b: break
+                tap.feed(b); got += len(b)
+                if self.stall_s and not stalled: stalled = True; time.sleep(self.stall_s)
+                if i < self.n - 1 and got >= self.close_after: break
+            os.close(fd); tap.close()
+            if i < self.n - 1: time.sleep(self.gap_s)
+
+    def join(self):
+        self.thread.join(20)
+        assert not self.thread.is_alive(), 'the tap reader never saw the stream end'
+
+
+def tap_play(player, songs, out, scenario, speed=8, exits=0, gate=True, **reader):
+    """scenario played with a tap reader there before the player starts (and the gate file, q2adb-gadget, unless
+    not gate): the session, the file sink's PCMs and their names, the reader."""
+    s = fakedemo.Session(out)
+    s.music, s.wait_exits = songs, exits
+    if gate:
+        (s.out/'usr/bin').mkdir(parents=True, exist_ok=True); (s.out/'usr/bin/q2adb-gadget').write_text('')
+    r = TapReader(s.tmp/'q2tap.pcm', **reader)
+    s.run(fakedemo.scenarios(str(songs))[scenario], fakedemo.launch_host(player, str(songs), speed), speed)
+    s.proc.wait(10)
+    r.join()
+    pcm = sorted((s.out/'pcm').glob('*.raw'))
+    return s, [x.read_bytes() for x in pcm], [x.name for x in pcm], r
+
+
+def test_tap_is_the_pcm(player, songs, tmp):
+    """Two FLACs played gapless with a reader on the tap: what the reader puts together is, bit for bit, what the
+    device was handed (the file sink's PCM), in its format, with nothing dropped."""
+    s, pcm, names, r = tap_play(player, songs, tmp/'tap', 'gapless-flac-full', exits=2)
+    (runs,), (tap,) = r.sessions, r.taps
+    assert [str(f) for f, _ in runs] == ['44100 Hz, 2 ch, 16-bit integer'], [str(f) for f, _ in runs]
+    got, want = bytes(runs[0][1]), b''.join(pcm)
+    at = first_difference(got, want)
+    assert at is None, f'{len(got) // 4} frames from the tap, {len(want) // 4} written; first difference at frame {(at or 0) // 4}'
+    assert tap.lost == 0 and tap.unheld == 0, (tap.lost, tap.unheld)
+    return f'{len(got) // 4} frames, bit for bit'
+
+
+def test_tap_takes_back_what_a_click_rewound(player, songs, tmp):
+    """Clicks are mixed into frames the device already holds (output_click's rewind): the tap's take-backs leave the
+    reader with what the device ended with, the clicks in it once, bit for bit."""
+    s, pcm, names, r = tap_play(player, songs, tmp/'tapclick', 'click', speed=1)
+    (runs,), (tap,) = r.sessions, r.taps
+    got, want = b''.join(bytes(b) for _, b in runs), b''.join(pcm)
+    at = first_difference(got, want)
+    assert tap.back > 0, 'no take-back came: the clicks were not rewound in'
+    assert at is None, f'{len(got) // 4} frames from the tap, {len(want) // 4} written; first difference at frame {(at or 0) // 4}'
+    return f'{len(got) // 4} frames with {tap.back} taken back, bit for bit'
+
+
+def test_tap_reader_behind_drops_and_never_holds_the_player(player, songs, tmp):
+    """A reader that stops reading for 3 s: the player plays on at its pace (the 40 s at 8x end on time), the tap
+    drops what did not fit and says so, and the reader's stream keeps time: as long as the PCM, and different from it
+    in no more frames than were dropped."""
+    s, pcm, names, r = tap_play(player, songs, tmp/'tapslow', 'gapless-flac-full', exits=2, stall_s=3.0)
+    (runs,), (tap,) = r.sessions, r.taps
+    took = s.end_at / 8  # real seconds: end_at is the player's clock, 8 times real time
+    assert took < 40 / 8 + 1.5, f'the player took {took:.1f} s for 5 s of its clock: the reader held it'
+    got, want = bytes(runs[0][1]), b''.join(pcm)
+    assert tap.lost > 0, 'nothing dropped: the stall did not fill the ring (the check would pass on a blocking tap)'
+    assert len(got) == len(want), f'{len(got) // 4} frames from the tap, {len(want) // 4} written'
+    a, b = memoryview(got).cast('I'), memoryview(want).cast('I')
+    wrong = sum(1 for i in range(0, len(a), 441) if a[i] != b[i]) * 441
+    assert wrong <= tap.lost + 441, f'about {wrong} frames differ, {tap.lost} dropped'
+    return f'{took:.1f} s for 5 s; {tap.lost} frames dropped and counted; the rest bit for bit'
+
+
+def test_tap_a_new_reader_starts_with_the_format(player, songs, tmp):
+    """A reader that leaves (EPIPE) and another that comes 1.5 s later: the player plays on, and the second reader's
+    stream begins with its format and is the end of the PCM, bit for bit."""
+    s, pcm, names, r = tap_play(player, songs, tmp/'tapagain', 'gapless-flac-full', exits=2, sessions=2,
+                                close_after=200000, gap_s=1.5)
+    first, second = r.sessions
+    assert first and second, f'{len(first)} and {len(second)} format runs: a reader got nothing'
+    want = b''.join(pcm)
+    got = bytes(second[0][1])
+    assert len(second) == 1 and 0 < len(got) < len(want), (len(second), len(got), len(want))
+    assert want.endswith(got), f'the second reader\'s {len(got) // 4} frames are not the PCM\'s last'
+    return f'the second reader: the last {len(got) // 4} frames of {len(want) // 4}'
+
+
+def test_tap_off_without_the_gate(player, songs, tmp):
+    """Without q2adb-gadget (a release build) the player never looks for a reader: no open of the FIFO, and a reader
+    there gets nothing."""
+    d, trace = tmp/'tapoff', tmp/'tapoff.strace'
+    d.mkdir(parents=True, exist_ok=True)
+    wrap = tmp/'tapoff.sh'
+    wrap.write_text(f'#!/bin/sh\nexec strace -f -e trace=openat,open -o {trace} {player}\n')
+    wrap.chmod(0o755)
+    s = fakedemo.Session(d)
+    s.music = songs
+    os.mkfifo(s.tmp/'q2tap.pcm')
+    s.run(fakedemo.scenarios(str(songs))['click'], fakedemo.launch_host(str(wrap), str(songs), 1), 1)
+    s.proc.wait(10)
+    opens = [l for l in trace.read_text().splitlines() if 'q2tap' in l]
+    assert not opens, opens[:3]
+    return 'no open of the tap FIFO'
+
+
+# ---- the USB audio sink (player/uac.c, docs/usb-audio.md#the-player-s-output-in-the-gadget)
+
+def uac_play(player, songs, out, rate, flag=True, speed=2):
+    """gapless-flac-full with the gate and, when flag, q2adb-gadget's audio flag, the sink's card a file at rate: the
+    file sink's PCM, the card's frames (S32 stereo, as array 'i'), the player's log."""
+    s = fakedemo.Session(out)
+    s.music, s.wait_exits = songs, 2
+    (s.out/'usr/bin').mkdir(parents=True, exist_ok=True); (s.out/'usr/bin/q2adb-gadget').write_text('')
+    if flag: (s.tmp/'q2adb.audio').write_text('')
+    card = s.out/'uac.raw'
+    steps = fakedemo.scenarios(str(songs))['gapless-flac-full']
+    steps = steps[:-1] + [(steps[-1][0] + 4.0, None)]  # 2 s more after the end: the held half second goes, at pace
+    s.run(steps,
+          fakedemo.launch_host(player, str(songs), speed, {'Q2PLAYER_UAC': str(card), 'Q2PLAYER_UAC_RATE': str(rate)}), speed)
+    s.proc.wait(10)
+    pcm = b''.join(x.read_bytes() for x in sorted((s.out/'pcm').glob('*.raw')))
+    return pcm, array.array('i', card.read_bytes() if card.exists() else b''), (s.out/'player.log').read_text()
+
+
+def test_uac_sink_is_the_song(player, songs, tmp):
+    """With the gadget's audio on and the computer at the song's rate, the card is given the song: every 16-bit sample
+    moved to the top of 32 bits, none lost, none twice, in order, with only silence between (the card's periods
+    before the first frames, and where the buffer ran short)."""
+    pcm, card, log = uac_play(player, songs, tmp/'uac', 44100)
+    want = array.array('h', pcm)
+    assert card, f'nothing reached the card: {log[-500:]}'
+    assert all(v & 0xffff == 0 for v in card), 'a sample with bits below the 16 a 16-bit song has'
+    frames = lambda a: [(a[i], a[i + 1]) for i in range(0, len(a) - 1, 2)]
+    got = [f for f in frames(array.array('h', (v >> 16 for v in card))) if f != (0, 0)]
+    ref = [f for f in frames(want) if f != (0, 0)]
+    at = next((i for i, (a, b) in enumerate(zip(got, ref)) if a != b), None)
+    assert at is None and len(got) == len(ref), f'{len(got)} sounding frames at the card, {len(ref)} in the song; first difference at {at}'
+    return f'{len(got)} frames, the song\'s, in order'
+
+
+def test_uac_sink_resamples_to_the_computer_s_rate(player, songs, tmp):
+    """At 48 kHz the card is given the 44.1 kHz song resampled: as many sounding frames as 48/44.1 makes, within 1%."""
+    pcm, card, log = uac_play(player, songs, tmp/'uac48', 48000)
+    sounding = sum(1 for i in range(0, len(card) - 1, 2) if card[i] or card[i + 1])
+    song = sum(1 for i in range(0, len(pcm) // 2 - 1, 2) if array.array('h', pcm[2 * i:2 * i + 4]) != array.array('h', [0, 0]))
+    ratio = sounding / song if song else 0
+    assert abs(ratio - 48000 / 44100) < 0.01, f'{sounding} frames at the card for {song}: {ratio:.4f}'
+    return f'{sounding} for {song} frames, {ratio:.4f}'
+
+
+def test_uac_sink_off_without_the_flag(player, songs, tmp):
+    """Without q2adb-gadget's audio flag the sink opens nothing."""
+    pcm, card, log = uac_play(player, songs, tmp/'uacoff', 44100, flag=False, speed=8)
+    assert not card and 'usb audio' not in log, log[-300:]
+    return 'no card opened'
+
+
 AFTER = {'test_exact_mp3_no_step_at_the_cut': 'test_exact_mp3_gapless'}
 # Tests that run alone, after everything else, each tried again when it failed on a run the machine starved:
 # those whose assertions bound what happens in real time (a scan's 150 ms turn, a feed's 3 s of sound, the car trace's
 # lines a second, a preload's opening against the song's end, the clicks' 130 ms mute, the positions sampled in a
 # window of seconds while a growing song's seek waits), each failed side by side (2026-11-22), and the one that
 # asserts on the host's own /tmp/notsupport, which any player whose song fails writes.
-SERIAL = ('test_scan', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_car_trace', 'test_car_feed_reaches_the_car', 'test_car_feed_hands_over_both_ways',
+SERIAL = ('test_scan', 'test_scan_keeps_the_pcm_close_ahead', 'test_grow_seek_beyond', 'test_grow_seek_inside', 'test_car_trace', 'test_car_feed_reaches_the_car', 'test_car_feed_hands_over_both_ways',
           'test_car_feed_paused_is_silence_not_a_stall', 'test_car_feed_source_gone_leaves_the_song_resumable',
-          'test_car_feed_does_not_block_a_source_the_car_does_not_take', 'test_preload_outrun', 'test_click_idle',
+          'test_car_feed_does_not_block_a_source_the_car_does_not_take',
+          'test_car_feed_drops_at_the_source_rate_when_wakes_are_late', 'test_preload_outrun', 'test_click_idle',
           'test_a_failure_already_replaced_is_not_reported',
           # fix/stream-start's: a song with a cover opened by 3.0 s, the feed's 150 ms lead, the feed reader's wakeups
           # counted over seconds, the car's PCM fds read from /proc right after each release
           'test_grow_opens_a_song_with_a_cover_on_its_first_audio', 'test_car_feed_keeps_the_car_close_behind',
           'test_car_feed_reader_sleeps_while_no_source_writes', 'test_car_release_while_paused',
+          # the tap's: a reader's 3 s stall against the player's 5 s, a second reader 1.5 s after the first
+          'test_tap_reader_behind_drops_and_never_holds_the_player', 'test_tap_a_new_reader_starts_with_the_format',
+          # the USB audio sink's: its card paced by the clock, a buffer of 300 ms of audio
+          'test_uac_sink_is_the_song', 'test_uac_sink_resamples_to_the_computer_s_rate',
           # smart-crossfade's: the player on one core shared with busy loops
           'test_smart_crossfade_starved', 'test_tail_file_starved')
 WIDTH = 8  # tests and fixtures side by side: each mostly waits on a player running in real time or faster

@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Prove test/ui.py's checks can fail (docs/ui-rewrite.md#requirements): one source change at a time, each taking
+out the behaviour a check holds, the suite's part run and that check expected red, the file put back from a copy.
+
+    python3 ui/tools/perturb.py [NAME ...]    # all of them without names; about a minute each
+
+A case is (file, the text to change, what to change it to, the part of test/ui.py to run, words of the check that
+must fail). "SOURCE NOT FOUND" means the code moved on and the case needs its text again. The payload's gate
+(patch/q2ui_gate.c) is checked the same way by hand against test/fw/test_q2ui_gate.py."""
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+KEEP = pathlib.Path(tempfile.mkdtemp(prefix='q2ui-perturb-'))
+CASES = {
+ 'snap': ('ui/list.c', '    kick(l);\n}\n\nvoid list_select', '    spring_set(&l->scroll, l->scroll.to);\n    kick(l);\n}\n\nvoid list_select', 'scripts', 'the list glides a row'),
+ 'retarget-jump': ('ui/list.c', '    l->scroll.to = (float)((l->top - p) * l->row_h);', '    l->scroll.x = l->scroll.to;\n    l->scroll.to = (float)((l->top - p) * l->row_h);', 'scripts', 'never back and never by a jump'),
+ 'two-rows': ('ui/list.c', '        l->sel = sel;\n        /* a tick throws', '        l->sel = sel + (sel > 6 && sel < l->n - 1);\n        /* a tick throws', 'scripts', 'moves the selection one row'),
+ 'focus-clipped': ('ui/list.c', '    rect_t on;\n    clip_set(r);\n', '    rect_t on;\n    clip_set(rows);\n', 'scripts', 'drawn over the pinned row'),
+ 'focus-faded': ('ui/list.c', '        row_paint(l, i, y, 1, l->lean.x * over);\n    }\n    clip_set(r);', '        row_paint(l, i, y, 1, l->lean.x * over);\n    }\n    clip_set(r);\n    shade_rows(l->box.y + l->box.h, SCREEN_H, FOOT_KEEP, 0);', 'scripts', 'over the fade, as bright as ever'),
+ 'content-flat': ('ui/list.c', '#define CONTENT_DEPTH 1.4f', '#define CONTENT_DEPTH 1.0f', 'scripts', 'further than it does'),
+ 'never-rests': ('ui/list.c', '    traced = l;\n', '    traced = l;\n    ui_mark(sb_rect());\n', 'scripts', 'draws no frame for three seconds'),
+ 'no-dither': ('ui/px.h', 'unsigned k = 65536 - a, n = noise << 8;', 'unsigned k = 65536 - a, n = 128 << 8; (void)noise;', 'engine', 'most of its rows mix two levels'),
+ 'no-narrow-dither': ('ui/fb.c', 'uint32_t add1 = n >> fb_bits,', 'uint32_t add1 = (n >> fb_bits) * 0,', 'engine', '0x53 dithered to 6 bits'),
+ 'no-guard': ('ui/ui.c', '    if (ui_painting) {\n        fprintf', '    if (0 && ui_painting) {\n        fprintf', 'engine', 'a draw that marks is aborted'),
+ 'hard-edge': ('ui/draw.c', '            unsigned a = (unsigned)(cov * (float)whole + 0.5f);\n            *p = a >= 256 ? 0xff000000 | ink', '            unsigned a = cov > 0.5f ? whole : 0;\n            *p = a >= 256 ? 0xff000000 | ink', 'engine', 'a box edge half over a pixel'),
+ 'whole-pixel-glyph': ('ui/draw.c', '    if (sx == 16) sx = 0, ++x;', '    sx = sy = 0;\n    if (sx == 16) sx = 0, ++x;', 'engine', 'half a pixel right'),
+ 'no-reduce': ('ui/list.c', '        if (!list_motion || ui_reduce_motion) return;\n        float a', '        if (!list_motion) return;\n        float a', 'scripts', 'Reduce Motion leans nothing'),
+ 'flat-card': ('ui/page_gallery.c', '{ s->badge, 0, 7, 0, 52 }', '{ s->badge, 0, 0, 0, 52 }', 'scripts', 'the layer in front of it moves further'),
+ 'grey-selectable': ('ui/list.c', 'return !(r.flags & (ROW_GREY | ROW_HEADER));', 'return !(r.flags & ROW_HEADER);', 'scripts', 'passes over a greyed row'),
+ 'knob-jumps': ('ui/list.c', '    if (!list_motion) spring_set(&l->knob, l->knob.to);\n    else kick(l);', '    spring_set(&l->knob, l->knob.to);', 'scripts', 'its knob slides there'),
+ 'play-wrong-song': ('ui/page_songs.c', 'player_play(lib_ids(), lib_songs(), i ? i - 1 : 0, !i);', 'player_play(lib_ids(), lib_songs(), i, !i);', 'live', 'sends one play, from that song'),
+ 'play-no-list': ('ui/player.c', '    if (!ok || rename(tmp, player_list)) return -1;', '    if (!ok) return -1;', 'live', "every song's id"),
+ 'no-restore': ('ui/main.c', '    first_page();\n    state_restore();', '    first_page();', 'live', 'opens on the row it was ended on'),
+ 'never-dark': ('ui/ui.c', '        if (got && dark()) quiet_until = mono_us() + 400000;', '        if (0 && got && dark()) quiet_until = mono_us() + 400000;', 'live', 'with the backlight off'),
+ 'spin-skips-top': ('ui/list.c', '    if (l->top < p || l->sel < p) l->top = p;', '    if (l->top < p) l->top = p;', 'scripts', 'every one leaves the songs at their top'),
+ 'no-playing-row': ('ui/page_home.c', 'static int state_now(void) { return now_get()->playing ? 1 : now_get()->paused ? 2 : 0; }', 'static int state_now(void) { return 0; }', 'pages', 'Home has one row more'),
+ 'bar-empty': ('ui/page_now.c', '    float share = n->len_s ? clampf((float)pos / ((float)n->len_s * 1000), 0, 1) : 0;', '    float share = 0 * pos;', 'pages', "bar is filled to 14 s"),
+ 'centre-not-toggle': ('ui/page_now.c', '        player_send("toggle");', '        player_send("pause");', 'pages', 'Centre is play and pause'),
+ 'group-plays-library': ('ui/page_library.c', '    player_play(s->ids, s->n, i, 0);', '    player_play(lib_ids(), lib_songs(), i, 0);', 'pages', "plays that artist's songs"),
+ 'album-by-title': ('ui/lib.c', '    if (group_kind == LIB_ALBUM && lib.track[x] != lib.track[y]) return lib.track[x] - lib.track[y];', '', 'pages', "its tracks in order"),
+ 'old-menus-stays': ('ui/page_home.c', '        ui_quit(0); /* demo', '        (void)0; /* demo', 'pages', 'Centre on Old Menus ends q2ui'),
+ 'route-forgotten': ('ui/main.c', '        else if (!library_route(seg))\n            break;', '        else\n            break;', 'live', 'on the page and the row it was ended on'),
+ 'no-volume-bar': ('ui/page_now.c', '        s->volume = to, s->volume_at = ui_time();', '        s->volume = to;', 'pages', 'shows the volume in the bar'),
+ 'volume-bar-stays': ('ui/page_now.c', '    if (s->volume_at && ui_time() - s->volume_at >= VOLUME_SHOW_US) s->volume_at = 0,', '    if (0 && s->volume_at) s->volume_at = 0,', 'pages', 'shows the volume in the bar'),
+ 'dithers-share-noise': ('ui/fb.c', 'narrow(src[i], noise[((r.x + i + 17) & 63) * 64])', 'narrow(src[i], dither64[(y & 63) * 64 + ((r.x + i) & 63)])', 'engine', 'keeps its mean at 6 bits'),
+ 'panel-any-link': ('ui/panel.c', "    if (!dsi || dsi[DPI_COLOR_CODING / 4] != PANEL_CODING || dsi[VID_PKT_SIZE / 4] != PANEL_PKT) return 0;", "    if (!dsi) return 0;", 'panel', "a link that is not the Q2's"),
+ 'panel-no-wait': ('ui/panel.c', "        if (waited == 20) return 0; /* 20 ms and still full: left for the next time */", "        if (waited == 20) break;", 'panel', 'FIFOs that stay full'),
+ 'panel-keep-ignored': ('ui/panel.c', "    if (panel_keep) return 0;", "", 'panel', '--panel-mode keep'),
+ 'panel-wrong-word': ('ui/panel.c', "    dsi[GEN_PLD_DATA / 4] = COLMOD | COLMOD_24 << 8;", "    dsi[GEN_PLD_DATA / 4] = COLMOD | 0x55 << 8;", 'panel', 'sent COLMOD 0x77'),
+ 'hup-ends': ('ui/ui.c', "            if (ui_restart) ui_restart(); /* does not come back when it works */", "", 'live', 'SIGHUP starts q2ui again in place'),
+ 'battery-always-full': ('ui/status.c', "        float full = (body.w - 4) * clampf((float)S.level / 100, 0.08f, 1);", "        float full = (body.w - 4);", 'status', "half a charge fills the battery's left half"),
+ 'battery-never-red': ('ui/status.c', "S.cable ? tok(TOK_POSITIVE) : S.level < LOW ? tok(TOK_NEGATIVE) : ink;", "S.cable ? tok(TOK_POSITIVE) : ink;", 'status', 'under a fifth it is red'),
+ 'no-play-glyph': ('ui/status.c', "    if (play != S.play) S.play = play, ui_mark(glyphs_rect());", "    (void)play;", 'status', 'a song playing puts three bars'),
+ 'fan-always-full': ('ui/status.c', "        wifi = quality >= 45 ? 3 : quality >= 25 ? 2 : 1;", "        wifi = 3;", 'status', "Wi-Fi's fan is lit by its signal"),
+ 'no-volume-in-row': ('ui/status.c', "        S.volume_at = ui_time();\n        ui_mark(volume_rect());", "        ui_mark(volume_rect());", 'status', 'a volume change shows its level'),
+ 'title-never-slides': ('ui/page_now.c', "            x = (float)(t - MQ_REST_US) / 1e6f * MQ_SPEED, ui_again();", "            ui_again();", 'pages', 'a long title is still for its first two seconds'),
+ 'title-no-fade': ('ui/page_now.c', "        fade_set(TEXT_X, TEXT_X + room, s->mq_x > 0.5f ? MQ_FADE : 0,", "        fade_set(TEXT_X, TEXT_X + room, 0,", 'pages', "at its end it fades out at the column"),
+ 'hup-runs-old-file': ('ui/main.c', "    if (strchr(started_with[0], '/')) execv(started_with[0], started_with);", "", 'live', 'the program now at the path runs'),
+ 'modes-always-off': ('ui/page_now.c', '    const char *mode[] = { n->shuffle ? "mode_shuffle_on." : "mode_shuffle_d.", "mode_radio_d.",', '    const char *mode[] = { "mode_shuffle_d.", "mode_radio_d.",', 'pages', "shuffle, repeat and heart are drawn by what is set"),
+ 'cc-never-lit': ('ui/page_control.c', '    return switch_on(s, i);\n}\nstatic int level', '    return 0;\n}\nstatic int level', 'pages', 'Wi-Fi, AirPlay and EQ lit as demo says'),
+ 'cc-ring-moves': ('ui/page_control.c', '    return !was;\n}', '    return 0 && !was;\n}', 'pages', 'does not move'),
+ 'cc-ring-stays': ('ui/page_control.c', '#define RING_US 5000000u', '#define RING_US 50000000u', 'pages', 'the ring goes 5 s'),
+ 'cc-usb-always': ('ui/page_control.c', '            if (!cable()) continue;', '            if (0) continue;', 'pages', 'no cable, no USB row'),
+ 'cc-wifi-no-link': ('ui/page_control.c', '    return bars ? bars : told_int', '    return 0 ? bars : told_int', 'pages', "the Wi-Fi circle's glyph is the link's"),
+ 'cc-no-landing': ('ui/page_control.c', '    if (!s->landed || ui_reduce_motion || !list_motion) return 0;', '    return 0;', 'pages', 'overshoot 8 px down'),
+ 'cc-landing-reduced': ('ui/page_control.c', '    if (!s->landed || ui_reduce_motion || !list_motion) return 0;', '    if (!s->landed || !list_motion) return 0;', 'pages', 'under Reduce Motion they land still'),
+ 'cc-light-fill': ('ui/page_control.c', 'light ? FILL_RGB_L : FILL_RGB', 'FILL_RGB', 'pages', 'Light Mode: the block'),
+ 'cc-no-volmax': ('ui/page_control.c', 'top = i == VOLUME ? told_int("volmax", 100) : 100;', 'top = 100;', 'pages', 'and no further'),
+ 'cc-grab-ring-white': ('ui/page_control.c', '1 + (s->grab == i) : 0;', '1 : 0;', 'pages', 'in the accent once it has the wheel'),
+ 'cc-np-never': ('ui/page_control.c', '        if (next == NOW && !loaded()) next += e->value;', '        if (next == NOW) next += e->value;', 'pages', 'is the stop after EQ'),
+ 'cc-np-always': ('ui/page_control.c', '        if (next == NOW && !loaded()) next += e->value;', '', 'pages', 'Brightness, grabbed, goes up two'),
+ 'cc-hold-wrong': ('ui/page_control.c', '    if (i == WIFI || i == SMART) wifi_push();', '    if (i == WIFI || i == SMART) bluetooth_push();', 'pages', 'held open'),
+ 'cc-flip-late': ('ui/page_control.c', '        s->want[i] = on, s->set_at[i] = ui_time();\n        ui_mark_all();', '        ui_mark_all();', 'pages', 'turns its circle off at once'),
+ 'cc-airplay-wrong': ('ui/page_control.c', 'ui_demo_page(i == AIRPLAY ? "systemset/netservice_page" : "usbpick_page");', 'ui_demo_page("usbpick_page");', 'pages', "AirPlay's Centre"),
+ 'cc-level-late': ('ui/page_control.c', '    s->want[i] = to, s->set_at[i] = ui_time();\n}', '}', 'pages', 'shows the level set at once'),
+ 'cc-no-pull': ('ui/main.c', '    ui_on_pull(control_center);\n', '', 'pages', 'pulled down from the top edge'),
+ 'cc-pull-anywhere': ('ui/ui.c', 'pull.y0 < PULL_Y && ', '', 'pages', 'one landing under the edge does not'),
+ 'touch-axes-unturned': ('ui/input.c', 'int x = ts.raw_y, y = SCREEN_H - 1 - ts.raw_x', 'int x = ts.raw_x, y = ts.raw_y', 'live', 'a finger pulled down on the glass'),
+ 'cc-tap-nothing': ('ui/page_control.c', '        act(s, i);\n        if (closes) return 1;', '        (void)closes;', 'pages', 'a tap on Bluetooth turns it on'),
+ 'cc-tap-rings': ('ui/page_control.c', '        touch(s, e); /* touch never brings the ring */', '        touch(s, e), wake(s);', 'pages', 'touch brings no ring'),
+ 'cc-no-drag': ('ui/page_control.c', 'slider && abs(dx) > abs(dy);', '0;', 'pages', 'dragged along Volume'),
+ 'cc-transport-dead': ('ui/page_control.c', '        player_send(i == PREV ? "previous" : i == NEXT ? "next" : "toggle");', '', 'pages', 'the transport'),
+ 'cc-finger-hold-never': ('ui/page_control.c', '        ui_time() - s->touch.at >= QUICK_HOLD_MS * 1000u) {', '        0) {', 'pages', 'held 550 ms by a finger'),
+ 'cc-finger-hold-at-once': ('ui/page_control.c', '        ui_time() - s->touch.at >= QUICK_HOLD_MS * 1000u) {', '        1) {', 'pages', 'a shorter touch on EQ is a tap'),
+ 'cc-no-swipe-close': ('ui/page_control.c', '        if (dy <= -SWIPE_PX && -dy > abs(dx)) return ui_pop(), 1;', '', 'pages', 'a swipe up closes the sheet'),
+ 'display-no-bright': ('ui/page_display.c', 'static int at(int i) { return i == 0 ? D_BRIGHT : i <= D_BRIGHT ? i - 1 : i; }', 'static int at(int i) { return i; }', 'pages', 'Brightness leads Display'),
+ 'volume-no-speed': ('ui/page_now.c', '+ e->value * wheel_steps(e->speed);', '+ e->value;', 'volume', 'a fast spin 10'),
+ 'speed-never-measured': ('ui/input.c', '    speed_sample(d * FINE, at);\n', '', 'volume', 'spun fast take the volume further'),
+ 'playing-row-unmarked': ('ui/list.c', '    if (id && l->src.song(l->src.ctx, i) == id) r->flags |= ROW_PLAYING;', '', 'playing', 'has the level bars'),
+ 'playing-row-plays-again': ('ui/list.c', '        } else if (was && row_text_flags(l, l->sel) & ROW_PLAYING) {', '        } else if (0) {', 'playing', 'sends no play'),
+ 'playing-row-by-index': ('ui/page_songs.c', '    return i ? lib_ids()[i - 1] : 0;', '    return i;', 'playing', 'has the level bars'),
+ 'fan-unlit-grey': ('ui/status.c', 'rgb_mix(*p & 0xffffff, ink, k < lit ? cov : cov * UNLIT);', 'rgb_mix(*p & 0xffffff, k < lit ? ink : tok(TOK_OFF), cov);', 'status', "unlit bands are its ink at 30%"),
+ 'slider-never-grabs': ('ui/list.c', '            l->grab = l->grab == l->sel ? -1 : l->sel;', '            l->grab = -1;', 'scripts', 'Centre grabs the slider'),
+ 'slider-track-plain': ('ui/list.c', '#define SLIDER_TRACK_ON 0x7da2ea', '#define SLIDER_TRACK_ON 0x333333', 'scripts', "the grabbed row's track on the bar"),
+ 'art-never-again': ('ui/art.c', '            if (t.tv_sec == seen_at.tv_sec && t.tv_nsec == seen_at.tv_nsec) continue;', '            continue;', 'pages', 'drawn within seconds'),
+ 'home-narrow': ('ui/page_home.c', '#define LIST_W 204', '#define LIST_W 196', 'pages', "Home's rows run to x 204"),
+ 'np-no-dot': ('ui/page_now.c', '        if (lit[k]) fill_round(', '        if (0) fill_round(', 'pages', 'has the accent dot under it'),
+ 'np-repeat-swapped': ('ui/page_now.c', 'n->repeat == 1 ? "mode_repeat1_on."', 'n->repeat == 2 ? "mode_repeat1_on."', 'pages', 'Repeat One its own glyph'),
+ 'np-modes-stale': ('ui/page_now.c', '        if (marks != s->marks_s) {', '        if (0) {', 'pages', 'turned on while Now Playing is open'),
+ 'np-no-more': ('ui/page_now.c', '    if (more && *n->title)', '    if (0)', 'pages', "More is drawn"),
+ 'np-hold-nothing': ('ui/page_now.c', '        ui_demo_page("playermore_page");', '        ;', 'pages', "Centre held on Now Playing opens demo's More"),
+ 'library-order-ignored': ('ui/page_library.c', '    FILE *f = fopen(library_order_file, "rb");', '    FILE *f = 0;', 'pages', "user's own order"),
+ 'library-hidden-shown': ('ui/page_library.c', ' && find(hidden, h, out[i]) < 0) lib_shown', ') lib_shown', 'pages', "user's own order"),
+}
+names = sys.argv[1:] or list(CASES)
+bad = 0
+for name in names:
+    path, old, new, part, want = CASES[name]
+    f = ROOT/path
+    text = f.read_text()
+    if text.count(old) != 1:
+        print(f'{name}: SOURCE NOT FOUND ({text.count(old)} matches)'); bad += 1; continue
+    KEEP.mkdir(exist_ok=True)
+    shutil.copy2(f, KEEP/f.name)
+    try:
+        f.write_text(text.replace(old, new))
+        out = subprocess.run(['bash', '-c', f'ulimit -c 0; timeout 300 python3 test/ui.py {part}'], cwd=ROOT, capture_output=True, text=True)
+        fails = [l for l in out.stdout.splitlines() if l.startswith('FAIL')]
+        red = any(want in l for l in fails)
+        print(f"{name}: {'RED as expected' if red else 'NOT CAUGHT'} ({len(fails)} failed: {'; '.join(l[5:60] for l in fails)}) {out.stderr[-200:] if not fails else ''}")
+        bad += not red
+    finally:
+        shutil.copy2(KEEP/f.name, f)
+        f.touch()  # newer than the object built from the changed text, so make builds it again
+        assert f.read_text() == text
+print('perturb:', 'every check went red' if not bad else f'{bad} NOT CAUGHT')

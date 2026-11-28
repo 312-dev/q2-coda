@@ -11,7 +11,7 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 from build import ROOT, check, need
 from ipod import inc
-from theme import CHOICES, token
+from theme import CHOICES, accent_default, token
 
 SUB = 8  # sub-rows per pixel; columns are exact within a sub-row
 
@@ -235,7 +235,7 @@ def phosphor(name, px, rgb, ink=0.0):
 
 def status_fit(polys, w, ink=None, top=None):
     """polys, a glyph laid in a STATUS_PX box, as the status row sizes it: scaled until its ink is ink px tall
-    (STATUS_INK by default; its height, not its longer side, so a wide glyph such as wifi-x is as tall as the clock's
+    (STATUS_INK by default; its height, not its longer side, so a wide glyph such as the car is as tall as the clock's
     digits too), its ink's top on row top (STATUS_TOP) and centred across a w px wide box."""
     ink, top = STATUS_INK if ink is None else ink, STATUS_TOP if top is None else top
     xs, ys = [x for poly in polys for x, _ in poly], [y for poly in polys for _, y in poly]
@@ -260,12 +260,40 @@ def wifi_fan(w):
             [(ax + r0 * math.cos(t), ay + r0 * math.sin(t)) for t in reversed(angles)] for r0, r1 in STATUS_FAN]
 
 
-def status_wifi(level, lit, unlit):
+def status_wifi(level, ink):
     """The status row's Wi-Fi at level (1 to 3 lit of wifi_fan's dot and bands, from the dot), a STATUS_WIFI_W x
-    STATUS_PX PNG: the lit part in lit, the rest in unlit, so the shape keeps its size at every level."""
+    STATUS_PX PNG: the lit part in ink, the rest in ink at STATUS_UNLIT, so the shape keeps its size at every level."""
     w, box = STATUS_WIFI_W, (0, 0, STATUS_WIFI_W, STATUS_PX)
-    return png(w, STATUS_PX, laid(w, STATUS_PX, [(coverage_nonzero([band], box), lambda x, y, c=lit if i < level else unlit: (c, 1))
+    return png(w, STATUS_PX, laid(w, STATUS_PX, [(coverage_nonzero([band], box), lambda x, y, a=1 if i < level else STATUS_UNLIT: (ink, a))
                                                  for i, band in enumerate(wifi_fan(w))]))
+
+
+def status_wifi_none(ink):
+    """Wi-Fi joined with no internet, a STATUS_WIFI_W x STATUS_PX PNG: the fan whole at STATUS_UNLIT, and a small x
+    (1.6 px strokes, 4 px across) in ink where the fan's right edge meets the clock's baseline, the fan cut away a
+    rounded 7 px square round it so the x stands clear (the review sheet's No net option A, a default the owner may
+    revisit; docs/oled-design.md#status-row)."""
+    w, box = STATUS_WIFI_W, (0, 0, STATUS_WIFI_W, STATUS_PX)
+    x = coverage_nonzero(stroke([[(10.5, 9.5), (14.5, 13.5)], [(14.5, 9.5), (10.5, 13.5)]], 1.6), box)
+    r, x0, y0, side = 2, 9, 8, 7  # the cut: a 7 px square at (9, 8), corners of 2 px
+    corner = lambda cx, cy, a0: [(cx + r * math.cos(math.radians(a0 + 90 * i / 8)), cy + r * math.sin(math.radians(a0 + 90 * i / 8)))
+                                 for i in range(9)]
+    cut = coverage_nonzero([corner(x0 + side - r, y0 + r, -90) + corner(x0 + side - r, y0 + side - r, 0) +
+                            corner(x0 + r, y0 + side - r, 90) + corner(x0 + r, y0 + r, 180)], box)
+    fan = [max(0.0, min(c, 1) - k) for c, k in zip(coverage_nonzero(wifi_fan(w), box), cut)]
+    return png(w, STATUS_PX, laid(w, STATUS_PX, [(fan, lambda px, py: (ink, STATUS_UNLIT)), (x, lambda px, py: (ink, 1))]))
+
+
+def status_drop(ink, phase):
+    """A download's arrow at phase (0 to 1 of its second), a STATUS_PX square PNG in ink: a 2 px stem and an open head
+    falling STATUS_DROP_FALL px, eased in as a weight falls, onto the tray q2ui and demo draw under it (ui/status.c
+    drop, patch/status_row.c sync_paint), and fading out over the last STATUS_DROP_FADE of the second (the review
+    sheet's Download option A, a default the owner may revisit; docs/oled-design.md#status-row)."""
+    dy = STATUS_DROP_FALL * phase * phase
+    alpha = 1 - max(0.0, (phase - (1 - STATUS_DROP_FADE)) / STATUS_DROP_FADE)
+    box = (0, 0, STATUS_PX, STATUS_PX)
+    arrow = coverage_nonzero(stroke([[(7, 1 + dy), (7, 8 + dy)], [(3.8, 5 + dy), (7, 8.2 + dy), (10.2, 5 + dy)]], 2), box)
+    return png(STATUS_PX, STATUS_PX, laid(STATUS_PX, STATUS_PX, [(arrow, lambda x, y: (ink, alpha))]))
 
 
 def status_turn(name, px, ink, rgb, turn):
@@ -304,35 +332,37 @@ STATE_INKS = inks('primary', 'd', 'l')
 # (STATE_INKS). Every one but STATUS_TALL_FIT's is STATUS_INK px tall, the clock's digits' height, with its ink's top STATUS_TOP rows into a
 # STATUS_PX tall box that status_row.c puts on the row's centre less 7, so the glyphs stand on rows 17 to 27 with the
 # digits. STATUS_FIT's are Phosphor's, sized by their ink's height (status_fit), centred across their box: STATUS_PX
-# square, or wider where the ink is (wifi-x, the car); the volume pill's speakers among them. The Bluetooth rune dims while
+# square, or wider where the ink is (the car); the volume pill's speakers among them. The Bluetooth rune dims while
 # a device connects (BT_SPIN_INKS).
 # Wi-Fi is iOS's fan, drawn here (wifi_fan): its levels light 1 to 3 of the dot and two bands over the rest in
-# STATUS_UNLIT. The play state and the padlock are 13 px boxes drawn as they were (their ink 10.6 and 11 px); the
+# the same ink at STATUS_UNLIT's opacity (iOS's rule; the owner's, 2026-11-27). The play state and the padlock are 13 px boxes drawn as they were (their ink 10.6 and 11 px); the
 # sync arrows turn through STATUS_SPIN frames of a half turn (the glyph repeats every half turn), sized by their
-# longer side as they turn, in Text Primary (the user's, 2026-11-20); the download's arrow sits in its ring, white.
+# longer side as they turn, in Text Primary (the user's, 2026-11-20); a download's arrow falls onto its tray (status_drop).
 STATUS_PX = 14
 STATUS_INK = 11.0
 STATUS_TOP = 1.0
 STATUS_WIFI_W = 16  # the fan's 15.6 px, status_row.c SR_WIFI_W
 STATUS_CAR_W = 19  # car-profile-bold's 18.5 px at 11 tall, status_row.c SR_CAR_W
 STATUS_FAN_DEG = 90
-STATUS_FAN = ((0, 3.6), (5.0, 7.3), (8.7, 11.0))  # the dot and the bands' radii: 1.4 px of ground between
-STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0),
-                 'status_down': ('arrow-down-bold', 8, 0)}
-STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W),
-              'status_headphones': ('headphones-bold', STATUS_PX), 'status_car': ('car-profile-bold', STATUS_CAR_W),
+# the dot and the bands' radii: 2 px bands with 2 px of ground between, on whole pixels up the centre so the gaps are
+# wholly dark and do not blur (the owner's, chosen by eye on a Q2 among three, 2026-11-27)
+STATUS_FAN = ((0, 3), (5, 7), (9, 11))
+STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0)}
+STATUS_FIT = {'status_headphones': ('headphones-bold', STATUS_PX), 'status_car': ('car-profile-bold', STATUS_CAR_W),
               # the volume pill's speaker, and muted at 0 (vol_pill.c)
               'status_vol': ('speaker-simple-high-fill', STATUS_PX), 'status_mute': ('speaker-simple-x-fill', STATUS_PX)}
-STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
-# The Bluetooth rune, wired headphones and the deaf ear shown with no output connected (status_row.c SR_RUNE_W,
-# SR_GLYPH, SR_EAR_W) stand as tall as the battery's body, STATUS_TALL px from the box's top row, so rows 16 to 27,
-# their ink centred on row 21.5 with the battery's and the fan's (the user's mockups, 2026-11-25); each box as wide as
-# its ink, so each stands about 6.5 px of ground from the fan's ink (ear-slash's 9.4 px in 10, headphones' 13.6 in 14).
+STATUS_UNLIT = 0.3  # the fan's unlit bands: its ink's opacity there (ui/status.c fan's UNLIT)
+# The Bluetooth rune and wired headphones (status_row.c SR_RUNE_W, SR_GLYPH) stand as tall as the battery's body,
+# STATUS_TALL px from the box's top row, so rows 16 to 27, their ink centred on row 21.5 with the battery's and the
+# fan's (the user's mockups, 2026-11-25); each box as wide as its ink (headphones' 13.6 px in 14).
 STATUS_TALL = 12.0
 STATUS_TALL_FIT = {'status_bt': ('bluetooth-bold', 9), 'status_wired': ('headphones', STATUS_PX)}
-STATUS_EAR_W = 10  # the deaf ear's box (status_row.c SR_EAR_W), in Negative in both halves (the user's, 2026-11-26)
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 30  # status_row.c SR_SPIN: a half turn a second at 30 fps
+# A download: its arrow's frames (status_drop), STATUS_SPIN a second as the arrows', over a 12 x 2 tray on the box's
+# rows 11 and 12 (ui/status.c DROP_*, patch/status_row.c SR_TRAY_*) that fills in Status Blue to the share downloaded
+STATUS_DROP_FALL = 4.0
+STATUS_DROP_FADE = 0.3
 KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
 # Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
@@ -462,6 +492,7 @@ MODE_GLYPHS = {'phone': 'device-mobile-fill', 'check': 'arrows-clockwise-fill', 
 USB_ROW_PX = 19
 USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-hifi', 'debug': 'terminal-window'}
 USB_TOAST_PX = 15
+CARD_TRASH_PX = 18  # feedback.c CARD_TRASH
 PAIR_GLYPH_PX = 28  # the pairing card's phone, over its title (pair_prompt.c, feedback.c CARD_GLYPH)
 # adb's Allow this computer? (usb_ui.c auth_open): Phosphor laptop, regular, Text Primary per half, beside the card's
 # title (feedback.c AC_GLYPH) and in the status pill after Allow (vol_pill.c VP_MSG_GLYPH)
@@ -742,22 +773,20 @@ def status_images(prefix):
     """The status row's glyphs (STATUS_GLYPHS and the rest of its role), {name: PNG bytes}, per half."""
     out = {f'{prefix}_{n}_{k}': phosphor(g, px, c, ink) for n, (g, px, ink) in STATUS_GLYPHS.items() for k, c in STATE_INKS.items()}
     out |= {f'{prefix}_{n}_{k}': status_glyph(g, w, c) for n, (g, w) in STATUS_FIT.items() for k, c in STATE_INKS.items()}
-    out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, c, STATUS_UNLIT[k])
+    out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, c)
             for n in (1, 2, 3) for k, c in STATE_INKS.items()}
+    out |= {f'{prefix}_status_wifi_x_{k}': status_wifi_none(c) for k, c in STATE_INKS.items()}
     # the Bluetooth slot while a device connects: the rune in Text Tertiary per half (status_row.c headset_paint)
     out |= {f'{prefix}_{n}_{k}': status_glyph(g, w, c, STATUS_TALL, 0) for n, (g, w) in STATUS_TALL_FIT.items()
             for k, c in STATE_INKS.items()}
     out |= {f'{prefix}_status_btdim_{k}': status_glyph('bluetooth-bold', STATUS_TALL_FIT['status_bt'][1], c, STATUS_TALL, 0)
             for k, c in BT_SPIN_INKS.items()}
-    # no output connected (status_row.c wired_paint): the deaf ear, ear-slash at STATUS_TALL in Negative, the same in
-    # both halves
-    out |= {f'{prefix}_status_noaudio_{k}': status_glyph('ear-slash', STATUS_EAR_W, token('negative'), STATUS_TALL, 0)
-            for k in STATE_INKS}
     # a card app's server out of reach (status_row.c SLOT_OFFLINE): cloud-slash in Warning, the same in both halves;
     # its ink 13.6 px wide at 11 tall, so a STATUS_PX box
     out |= {f'{prefix}_status_offline_{k}': status_glyph('cloud-slash-bold', STATUS_PX, token('warning')) for k in STATE_INKS}
     out |= {f'{prefix}_status_sync_{f}_{k}': status_turn('arrows-clockwise-bold', STATUS_PX, STATUS_INK, c, f / STATUS_SPIN / 2)
             for f in range(STATUS_SPIN) for k, c in STATE_INKS.items()}
+    out |= {f'{prefix}_status_drop_{f}_{k}': status_drop(c, f / STATUS_SPIN) for f in range(STATUS_SPIN) for k, c in STATE_INKS.items()}
     return out
 
 
@@ -777,7 +806,9 @@ def images(t):
     out, prefix = {}, t['art_id'].replace('-', '_')
     # Songs' Sort bars, unprefixed: not the theme's final art, so Light Mode flips them as stock's glyphs
     out['sort_bars'] = png(*SORT_BOX[2:], compose(SORT_BOX, [(path(SORT), lambda x, y: (0xffffff, 1))]))
-    on = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]  # the theme's own accent's top tone
+    # the default accent's top tone. ponytail: the art is drawn once, in it, so demo's accent-inked glyphs stay
+    # Arterial when Blue is chosen; a set of them per offered scheme (ringnav_image_add picking by accent()) lifts it
+    on = t['schemes'][accent_default(t)]['tones'][0]
     # every drill row's caret (list_marks.c chevron_icon), the spinner in its place while Cover Flow opens, and the
     # status row's play state
     out |= {f'{prefix}_chevron_{k}': phosphor('caret-right-bold', CARET_PX, c) for k, c in (CHEVRON_INKS | CHEVRON_MUTED_INKS).items()}
@@ -880,13 +911,16 @@ def images(t):
             for k, c in BT_SPIN_INKS.items() for f in range(SPIN_SPOKES)}
     out |= {f'{prefix}_bttoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in BT_TOASTS.items()}
     out |= {f'{prefix}_bttoast_{n}_off': phosphor(g, USB_TOAST_PX, 0xababab) for n, (g, _) in BT_TOASTS.items() if n != 'low'}
-    # Guest Play (guest_ui.c, status_row.c): the guest's phone in the accent, beside "Playing from" and in the status row,
+    # Guest Play (guest_ui.c, status_row.c): the guest's phone in the accent beside "Playing from", Status Blue in the status row,
     # and the status row's relay mark (phone › car) in Text Secondary per half
     out[f'{prefix}_guestphone_a'] = phosphor('device-mobile-fill', USB_TOAST_PX, on)
     out[f'{prefix}_pairing_phone'] = phosphor('device-mobile', PAIR_GLYPH_PX, on)  # pair_prompt.c's card
+    # a destructive answer's trash before its verb on the confirmation card (feedback.c confirm_rows_paint), Negative per half
+    # whether the row is lit (on the gray platter) or not
+    out |= {f'{prefix}_cardtrash_{k}': phosphor('trash', CARD_TRASH_PX, c) for k, c in inks('negative', 'd', 'l').items()}
     out |= {f'{prefix}_adb{n}_{k}': phosphor('laptop', px, c) for n, px in (('card', ADB_CARD_PX), ('pill', ADB_PILL_PX))
             for k, c in inks('primary', 'd', 'l').items()}
-    out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, on, STATUS_INK)
+    out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, token('status_blue'), STATUS_INK)  # the blue, whatever the accent
     out |= {f'{prefix}_status_relay_{k}': phosphor('caret-right-bold', 8, c) for k, c in STATUS_SECONDARY.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}

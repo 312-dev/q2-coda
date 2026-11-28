@@ -99,6 +99,20 @@ def test_unknown_file_runs_everything(tmp_path):
     assert p['unit'] == p['fw'] == p['patch'] == ALL
 
 
+def test_all_plans_every_declared_suite_and_names_each_it_leaves_out():
+    """--all is everything: every suite gate.SCRIPTS declares runnable is in the plan (test/ui.py among them, which
+    the merge tier alone left out all night on 2026-11-28), and each one SCRIPTS gives a reason for is named in the
+    plan's why as "not run: <reason>"."""
+    plan = affected.Plan()
+    plan.everything('--all')
+    d = plan.as_dict()
+    runnable = {n for n, v in gate.SCRIPTS.items() if isinstance(v, list)} - {'test/patch.py'}  # the patch suite
+    assert 'test/ui.py' in runnable and not runnable - set(d['other']), sorted(runnable - set(d['other']))
+    for n, v in gate.SCRIPTS.items():
+        if isinstance(v, str):
+            assert n not in d['other'] and f'not run: {n}: {v}' in d['why'], n
+
+
 def test_tool_maps_to_its_unit_test_and_a_build_input_to_the_payload(tmp_path):
     root = tree(tmp_path, {'test/unit/test_shelf.py': '', 'test/unit/test_theme.py': ''})
     p = affected.plan_for({'tools/shelf.py': {1}}, root).as_dict()
@@ -619,7 +633,7 @@ def test_gate_skips_what_needs_a_failed_build(tmp_path, monkeypatch):
 def test_gate_plan_that_runs_everything_is_the_merge_tier(tmp_path):
     every = {'unit': 'all', 'fw': 'all', 'patch': 'all', 'other': ['test/build.py'], 'why': []}
     assert set(gate.suites_for(every, [], 'py', tmp_path)) == set(gate.MERGE)
-    assert set(gate.suites_for(None, [], 'py', tmp_path)) == set(gate.FULL)  # no plan: a release's gate
+    assert set(gate.suites_for(None, [], 'py', tmp_path)) == set(gate.FULL) | gate.declared()  # no plan: a release's gate
     assert set(gate.suites_for(None, [], 'py', tmp_path, 'post')) == {'fw-asan', 'unit-cov', 'smoke', 'leak-hunt'}
     assert gate.suites_for(every, [], 'py', tmp_path)['patch'].argv == ['py', 'test/patch.py', '{build}']
     docs = {'unit': ['test_docs.py'], 'fw': [], 'patch': [], 'other': [], 'why': []}
@@ -867,7 +881,10 @@ def test_each_lease_starts_with_the_settings_and_per_run_state_of_the_data_fixtu
     data = emu_pool.copy_dir(1)/'state/data'
     card_tree(data, {'config.ini': '[SYSSET]\nBLUETOOTH=1\nLIGHTMODE=1\n[IPOD]\nKEEPLIT=0\nSONGLENGTH=1\n',
                      'memoryfile': 'old', 'q2-state': 'x', 'ringnav-plays': 'x', 'ringnav-queue': 'x', 'ringnav-ratings': 'x',
-                     'wpa_supplicant.conf': 'wifi', 'q2-defaults': '1\n', 'coda-rc/x': 'pool'})
+                     'wpa_supplicant.conf': 'wifi', 'q2-defaults': '1\n', 'coda-rc/x': 'pool',
+                     # a lease that tried q2ui (docs/ui-rewrite.md#cutover): left there, the next lease's demo hands
+                     # its screen to q2ui and whatever drives demo finds no Home (the smoke test did, 2026-11-27)
+                     'ui-target': 'q2ui\n', 'q2ui.args': '--input /mnt/data/q2ui-input\n', 'q2ui-stats.json': '{}'})
     assert emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,)) == 1
     assert (data/'config.ini').read_text() == clean                     # settings back to the fixture's
     assert os.access(data/'config.ini', os.W_OK) and (data/'config.ini').stat().st_ino != (fx/'config.ini').stat().st_ino
@@ -1241,7 +1258,7 @@ def test_affected_run_hands_the_whole_plan_to_the_parallel_runner(monkeypatch, t
     assert len(calls) == 1
     suites, build, kw = calls[0]
     assert build == '/b' and kw['retry'] and kw['flakes'] == gate.FLAKES
-    assert set(suites) == {*gate.MERGE, *gate.PLANNED}  # smoke only with --smoke
+    assert set(suites) == {*gate.MERGE, *gate.PLANNED, *gate.declared()}  # smoke only with --smoke
     assert set(suites) == set(gate.suites_for(json.loads(every.to_json()), [], 'py', tmp_path))
     assert suites['patch'].argv == ['py', 'test/patch.py', '{build}'] and suites['patch'].heavy
     assert not any('patch_shards' in a for s in suites.values() for a in s.argv)

@@ -174,7 +174,7 @@ def oled_scrub(**kw):  # Now Playing past the first system_bar load, as on a uni
     m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)
     return scrub_page(m=m,**kw)
-OLED_FILL=signed(color_t(next(s for s in theme_builtins()[0]['schemes'] if s.get('name')=='oled-blue')['tones'][2]))  # the accent's light tone (TONE_LIGHT)
+OLED_FILL=signed(color_t(next(s for s in theme_builtins()[0]['schemes'] if s.get('name')=='oled-arterial')['tones'][2]))  # the default accent's light tone (TONE_LIGHT)
 def np_press(m,gap=1000):  # one Centre press, kept as step keeps it
     assert step(m,O['KEY_CENTER'],gap=gap)==11 and not m.screens
 def ended(m,seeks,label=''):  # the scrub is over, the cycle's stage too: fill, stock timer and the wheel's volume are back

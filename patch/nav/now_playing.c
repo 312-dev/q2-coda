@@ -387,6 +387,9 @@ static void np_single(void) {
     if (g_backlight_status) on_wm_keyup_fun((void *)0, (void *)release);
 }
 
+/* The same for q2ui's Now Playing, which has the screen and reads Centre itself (q2ui_gate.c "screenoff") */
+void np_screen_off(void) { np_single(); }
+
 /* The top window if it is stock's volume dialog (vol_paint), else 0. */
 static void *vol_top(void) {
     void *top = window_manager_get_top_window(window_manager());

@@ -286,7 +286,7 @@ static int stopped(void *cancel, long long total, long long now, long long up, l
 }
 
 /* url's reply, NUL-terminated, under max bytes, to free; 0 if the transfer failed or *cancel (when
- * given) stopped it. */
+ * given) stopped it. Its outcome is the online services' reach (cloud_reach.c REACH_ONLINE). */
 static char *get(const char *url, unsigned max, volatile int *cancel) {
     body_t b = { calloc(1, max), 0, max };
     void *c = b.buf ? easy(url) : 0;
@@ -299,7 +299,11 @@ static char *get(const char *url, unsigned max, volatile int *cancel) {
             curl_easy_setopt(c, 10057, (void *)cancel); /* XFERINFODATA */
             curl_easy_setopt(c, 43, 0L);               /* NOPROGRESS off, for it */
         }
-        bad = curl_easy_perform(c) != 0; /* an error reply parses to nothing we use */
+        long code = 0;
+        int rc = curl_easy_perform(c);
+        bad = rc != 0; /* an error reply parses to nothing we use */
+        if (!rc) curl_easy_getinfo(c, 0x200002, &code); /* RESPONSE_CODE */
+        reach_note(REACH_ONLINE, rc, code);
         curl_easy_cleanup(c);
     }
     if (bad) free(b.buf), b.buf = 0;
@@ -631,8 +635,10 @@ static int caa(const char *id, char *out) {
     if (!(c = easy(url))) return 0;
     curl_easy_setopt(c, 44, 1L); /* NOBODY: the redirect alone; stock's download follows it */
     curl_easy_setopt(c, 13, 5L); /* TIMEOUT: four of these at most, so a slow search stays short */
-    if (!curl_easy_perform(c) && !curl_easy_getinfo(c, 0x200002, &code) && code / 100 == 3 && /* RESPONSE_CODE */
-        !curl_easy_getinfo(c, 0x10001f, &to) && to && strlen(to) < 0x200)            /* REDIRECT_URL */
+    int rc = curl_easy_perform(c);
+    if (!rc) curl_easy_getinfo(c, 0x200002, &code); /* RESPONSE_CODE */
+    reach_note(REACH_ONLINE, rc, code);
+    if (!rc && code / 100 == 3 && !curl_easy_getinfo(c, 0x10001f, &to) && to && strlen(to) < 0x200) /* REDIRECT_URL */
         memcpy(out, to, strlen(to) + 1), ok = 1;
     curl_easy_cleanup(c);
     return ok;

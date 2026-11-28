@@ -796,8 +796,8 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
  * of padding, the title (Inter Medium 20), the body (15 px Text Secondary, wrapped to the column on
  * 19 px lines, 4 px under the title), the code (Inter Medium 30), then 14 px down the switch row
  * and the answers, 32 px each, evenly spaced whatever the kind (as Shut Down's), and 8 px of
- * padding. The answers' bar is 8 px in from the card's sides; a destructive one is red (Negative),
- * its bar too when lit. */
+ * padding. The answers' bar is 8 px in from the card's sides; a destructive one (danger_row) has the trash before
+ * its verb in Negative, and lit, a gray bar under the verb in Text Primary. */
 #define CARD_X 42
 #define CARD_W 291
 #define CARD_R 16
@@ -1403,12 +1403,41 @@ static void card_across_row(void *canvas, void *item, int k, int left, int lit) 
             top + AC_BTN_H / 2, b.w - 16, 1);
 }
 
-/* Over the answers' list after the selection's bar: each row's words centred (a destructive one
- * red, its lit bar red), the switch row's label and switch, the timeout's seconds. */
+/* A destructive answer (docs/oled-design.md#confirmation-card, the owner's ruling 2026-11-28): the
+ * trash in Negative and the verb after it, centred together; lit, over a gray platter (Off,
+ * CARD_DANGER_SEL_L in Light; not the accent) with the verb in Text Primary, else the verb in
+ * Negative. The trash shows either way, so the verb never moves as the selection does. Cancel lit on
+ * the same card takes the same gray in Text Primary (confirm_rows_paint): red marks only the verb. */
+#define CARD_TRASH 18              /* tools/art.py CARD_TRASH_PX */
+#define CARD_TRASH_GAP 8           /* the trash's right to the verb */
+#define CARD_DANGER_SEL_L 0xe5e5ea /* the lit platter in Light (Dark's is Off, RGB_OFF) */
+static void danger_row(void *w, void *canvas, void *item, const char *verb, int lit, int x, int y,
+                       int cx, unsigned red, unsigned primary) {
+    if (lit) {
+        rect_t bar = { x + theme()->sel_inset, I(item, W_Y), I(item, W_W) - 2 * theme()->sel_inset,
+                       CARD_ROW };
+        fill_box(canvas, &bar, RGBA(ipod_light() ? CARD_DANGER_SEL_L : RGB_OFF),
+                 (unsigned)theme()->sel_radius);
+    }
+    unsigned wide[64];
+    int px = TYPE(20), n = (int)ui_wide(verb, wide, 64);
+    const char *face = theme_face(wide, n, &px);
+    int room = CARD_W - 2 * CARD_IN - CARD_TRASH - CARD_TRASH_GAP;
+    int tw = n ? ui_measure_w(canvas, face ? face : "inter", px, wide, (unsigned)n) : 0;
+    tw = tw > room ? room : tw;
+    int left = cx - (CARD_TRASH + CARD_TRASH_GAP + tw) / 2;
+    paint_art(w, canvas, theme_art(ipod_light() ? "cardtrash_l" : "cardtrash_d"), left,
+              y - CARD_TRASH / 2);
+    ui_text(canvas, verb, 0, TYPE(20), lit ? primary : red, 1, left + CARD_TRASH + CARD_TRASH_GAP,
+            y, room, 2);
+}
+
+/* Over the answers' list after the selection's bar: each row's words centred (a destructive one as
+ * danger_row paints it), the switch row's label and switch, the timeout's seconds. */
 void confirm_rows_paint(void *w, void *canvas) {
     void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
     if (!cf.dialog || w != (cf.stock ? cf.dialog : cf.view) || !lcd) return;
-    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1), red = RGB_NEGATIVE,
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1), red = tok(TOK_NEGATIVE),
              primary = tok(TOK_PRIMARY);
     void *slot[8];
     int n = 0, k = cf.c.toggle ? -1 : 0;
@@ -1436,21 +1465,21 @@ void confirm_rows_paint(void *w, void *canvas) {
             switch_mark(canvas, x + out + CARD_W - CARD_IN, y, card_toggle_on(), lit);
             continue;
         }
-        if (lit && card_destructive(k)) {
-            rect_t bar = { x + theme()->sel_inset, I(item, W_Y),
-                           I(item, W_W) - 2 * theme()->sel_inset, CARD_ROW };
-            fill_box(canvas, &bar, RGBA(red), (unsigned)theme()->sel_radius);
+        if (card_destructive(k)) {
+            danger_row(w, canvas, item, cf.c.rows[k], lit, x, y, cx, red, primary);
+            continue;
         }
-        ui_text(canvas, cf.c.rows[k], 0, TYPE(20),
-                lit                   ? 0xffffff
-                : card_destructive(k) ? red
-                                      : primary,
-                1, cx, y, CARD_W - 2 * CARD_IN, 1);
+        if (lit && cf.c.kind == CONFIRM_DESTRUCTIVE) { /* Cancel lit: the verb's gray, so red marks only the verb */
+            rect_t bar = { x + theme()->sel_inset, I(item, W_Y), I(item, W_W) - 2 * theme()->sel_inset, CARD_ROW };
+            fill_box(canvas, &bar, RGBA(ipod_light() ? CARD_DANGER_SEL_L : RGB_OFF), (unsigned)theme()->sel_radius);
+        }
+        ui_text(canvas, cf.c.rows[k], 0, TYPE(20), lit && cf.c.kind != CONFIRM_DESTRUCTIVE ? 0xffffff : primary, 1, cx, y,
+                CARD_W - 2 * CARD_IN, 1);
         if (cf.c.timeout_ms > 0 && k == cf.c.timeout_row) {
             char t[16];
             int left = (int)(cf.until - (unsigned)time_now_ms());
             tk_snprintf(t, sizeof t, "%d s", left > 0 ? (left + 999) / 1000 : 0);
-            ui_text(canvas, t, 0, CARD_COUNT_PX, lit ? 0xffffff : tok(TOK_TERTIARY), 1,
+            ui_text(canvas, t, 0, CARD_COUNT_PX, lit && cf.c.kind != CONFIRM_DESTRUCTIVE ? 0xffffff : tok(TOK_TERTIARY), 1,
                     x + out + CARD_W - CARD_IN, y, 60, 3);
         }
     }

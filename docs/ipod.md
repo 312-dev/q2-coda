@@ -303,7 +303,7 @@ so parents and order are free to change. Every tick it re-shows the volume,
 EQ, Bluetooth, SyncLink and Wi-Fi widgets and sets their images and text, but
 never their geometry. `system_bar.bin` is therefore OLED's status row (`tools/ipod.py` `status_row`): the clock on the
 left, the payload's glyph slots and the battery on the right ([Theme](#theme), [Status row
-slots](internals.md#status-row-slots)), every other widget stock updates kept off-screen at `x = -200`. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state, or a status row slot that changed (`status_row_sync`: Wi-Fi's level, a headset, wired headphones or the deaf ear shown with no output, the lock), repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the clock. The payload paints the bar and writes the time into
+slots](internals.md#status-row-slots)), every other widget stock updates kept off-screen at `x = -200`. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state, or a status row slot that changed (`status_row_sync`: Wi-Fi's level, a headset, wired headphones, the lock), repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the clock. The payload paints the bar and writes the time into
 `label_clock` (see [internals.md](internals.md#status-bar-ipod)).
 
 **Time in Title.** There is no such setting: the status row shows the clock at its left and names no page (its `label_title` is hidden, kept for the page's name the Search bar, the letter strip and Up Next read). An `IPOD TIMETITLE` key an older build wrote is never read.
@@ -963,8 +963,8 @@ pixels high). The build destroys stock's Lock Screen and Show Navigation Bar row
 Display page again (`display_open`, `display_sub` naming the sub-page while its init runs), which
 drops the stock rows, takes the sub-page's title and builds only its own rows:
 
-- Appearance: the theme's options in its theme.xml's order (`setting_row`), under OLED "Light Mode: Off"
-  ([Light Mode](#light-mode)), "Accent: Blue", "Home: Split" and "Battery: Icon" (Icon or
+- Appearance: the theme's options in its theme.xml's order (`setting_row`), under OLED "Light Mode: Auto"
+  ([Light Mode](#light-mode)), "Accent: Arterial", "Home: Split" and "Battery: Icon" (Icon or
   Percent; see [Status bar and clock](#status-bar-and-clock)), then its own options, "Song Artist: Inline",
   "Song Length: Albums" and "Track Time: Remaining" ([Theme](#theme)). Under OLED (`set_text`) a row shows its
   value on the right column, apart from its label.
@@ -1018,10 +1018,12 @@ a valid one (up to three digits, below the key's count), is Split and Icon; a th
 values reads as its default, the key untouched (`settings_read`). A `THEME` other than 3, or none, is a unit
 from a build with more themes: it takes OLED's preset once ([Theme](#theme)).
 
-OLED offers one accent, its own Blue (`OLED_ACCENT` 9, after the nine `ACCENTS` rows): `#2160D8` in all
-five tones (`<colorScheme name="oled-blue" base="cobalt">`), the selection bar, the progress fill and
-every red stock draws ([Theme](#theme)). The engine keeps the `ACCENTS` rows (`patch/offsets.inc`:
-Graphite, Crimson, Tidal, Champagne, Cobalt, Tangerine, Plum, Ivory, Green) for a theme to offer;
+OLED offers two accents of its own, after the ten `ACCENTS` rows: Blue (`OLED_ACCENT` 10, `#2160D8` in all five
+tones, `<colorScheme name="oled-blue" base="cobalt">`) and Arterial, the default (11, `#B8141C`,
+`<colorScheme name="oled-arterial" base="arterial">`): the selection bar, the progress fill and every red stock draws
+([Theme](#theme)). A value it does not offer, 9 too (the `ACCENTS` row Arterial, which a Q2 stored while Blue was
+OLED's one accent), reads as Arterial. The engine keeps the `ACCENTS` rows (`patch/offsets.inc`: Graphite, Crimson,
+Tidal, Champagne, Cobalt, Tangerine, Plum, Ivory, Green, Arterial) for a theme to offer;
 Crimson returns every color unchanged. Grays and artwork remain unchanged by the live accent
 mapper. See [internals.md](internals.md#accent) for the mapping.
 
@@ -1030,7 +1032,7 @@ Now Playing uses 24 px monochrome control glyphs on 28 px canvases inside the ex
 ### Theme
 
 OLED is the one theme, built to [oled-design.md](oled-design.md): black, white sentence-case Inter, one
-blue, on its own layout. `assets/themes/oled/theme.xml` stands alone (it extends no other theme), states its
+accent, on its own layout. `assets/themes/oled/theme.xml` stands alone (it extends no other theme), states its
 own grid (its `<geometry>`) and is row 0 of the theme table, so Appearance has no Theme row and
 there is no picker ([internals.md](internals.md#themes)).
 
@@ -1053,7 +1055,7 @@ painted it white, which drew the box at rest.
   slim battery ending 62 px from the right edge (`STATUS_ROW_INSET`), three level bars while something plays (a pause
   in their place while paused, in the same white; a tap on either opens Now Playing), Wi-Fi's signal while connected
   (iOS's fan; a crossed glyph with no link past the access point), a card app's sync (turning arrows while it checks, a filling ring while it
-  downloads), wired headphones while a jack or a USB DAC takes the sound, Bluetooth (a headset's battery) while it does, a 13 px
+  downloads), wired headphones while a jack or a USB DAC takes the sound, Bluetooth (its rune, or a car) while it does, a 13 px
   padlock while Buttons Lock is on, and an orange crossed-out cloud while a card
   app's server can't be reached, each the clock's digits' height (11 px) on their
   rows (the headphones and the Bluetooth rune the battery's 12), 6 px apart, up in the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock
@@ -1070,8 +1072,8 @@ painted it white, which drew the box at rest.
   opens a page and shows a value (Resume Songs, Volume) has the value just left of its chevron. The status row
   names the Library and Songs by those words, where stock calls both "Local Songs".
 - **Color.** Black (white in Light Mode), white text, second lines in Text Tertiary (`#858585`), a settings row's
-  value in Text Secondary (`#ABABAB`, `#5C5C5C` on paper), and one blue, `#2160D8`, for the selection bar, the
-  progress fill and every mark stock draws red. **Accent** offers that Blue alone (`OLED_ACCENT`).
+  value in Text Secondary (`#ABABAB`, `#5C5C5C` on paper), and one accent, Arterial `#B8141C`, for the selection bar,
+  the progress fill and every mark stock draws red. **Accent** offers Arterial and Blue `#2160D8` (`OLED_ACCENT`).
 - **Type.** Inter Regular for rows (20 px) and second lines (15 px), Inter Medium for the status row (15 px) and
   Now Playing's title (22 px), with tabular digits ([Its font](#oled-type) below).
 - **The selection.** The accent's flat bar, 16 px in from each side with 8 px ends on every row.
@@ -1219,7 +1221,7 @@ painted it white, which drew the box at rest.
 
 ### Light Mode
 
-**Light Mode: Auto** (`LIGHT=2`) is light from 07:00 to 18:59 by the device clock and dark the rest of the day. The row cycles Off, On, Auto on each click. It switches at 07:00 and 19:00 while the device is on, and the cached images are dropped and an open screen repaints then (`clock_show`, at each minute with the status bar's clock). The boot logo picks its mode by the same hours, in the saved time zone ([boot](boot.md#light-mode)).
+**Light Mode: Auto** (`LIGHT=2`, and with no `LIGHT` key, as after a reset: the owner's default from 2026-11-27) is light from 07:00 to 18:59 by the device clock and dark the rest of the day. The row cycles Off, On, Auto on each click. It switches at 07:00 and 19:00 while the device is on, and the cached images are dropped and an open screen repaints then (`clock_show`, at each minute with the status bar's clock). The boot logo picks its mode by the same hours, in the saved time zone ([boot](boot.md#light-mode)).
 
 **Light Mode: On** (`LIGHT=1`) turns the theme light at runtime, over the same assets. Every
 neutral color (channels within `LIGHT_SPREAD`) flips per channel, black to `LIGHT_PAPER` (`#F4F4F4`)

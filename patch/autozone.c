@@ -72,7 +72,9 @@ static void *az_worker(void *unused) {
         curl_easy_setopt(c, 10065, AZ_CA);     /* CAINFO */
         curl_easy_setopt(c, 64, 1L);           /* SSL_VERIFYPEER */
         curl_easy_setopt(c, 81, 2L);           /* SSL_VERIFYHOST */
-        if (!curl_easy_perform(c)) curl_easy_getinfo(c, 0x200002, &code); /* RESPONSE_CODE */
+        int rc = curl_easy_perform(c);
+        if (!rc) curl_easy_getinfo(c, 0x200002, &code); /* RESPONSE_CODE */
+        reach_note(REACH_ZONE, rc, code);                 /* cloud_reach.c: the last service asked */
         curl_easy_cleanup(c);
         if (code == 200 && zone_name(az.body)) memcpy(az.zone, az.body, AZ_NAME);
     }
@@ -134,6 +136,9 @@ static void az_apply(int i) {
     write_int_config(i, "SYSSET", "TIMEZONE");
     az.quiet = 0;
 }
+
+/* The saved zone's TZ (g_time_zone's in TIMEZONES), "" for an index no row has: q2ui's clock's (status_row.c) */
+const char *autozone_tz(void) { return g_time_zone < TZ_COUNT ? tz_names[g_time_zone] : ""; }
 
 /* The switch turned on: a lookup at the next poll with the link up, whenever the last was. */
 void autozone_due(void) { az.due = 1; }

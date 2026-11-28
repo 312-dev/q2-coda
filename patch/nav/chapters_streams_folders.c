@@ -395,6 +395,15 @@ static void about_label(void *button, int x, int w, const char *style, const cha
     theme_font(label, x < 100 ? ROLE_TITLE : ROLE_META, FONT_ROW);
 }
 
+/* This build's version as About shows it beside PRODUCT_NAME: "1.8.2" then its " dev ..." or
+ * " beta 2", the version's " Muse" left out (the row's name is the product's); q2ui's About is told it
+ * (q2ui_gate.c tell). */
+void vamp_version(char *v, unsigned size) {
+    const char *pod = strstr(Q2POD_VERSION, " Muse");
+    tk_snprintf(v, size, "%s", Q2POD_VERSION);
+    if (pod && (unsigned)(pod - Q2POD_VERSION) < size)
+        tk_snprintf(v + (pod - Q2POD_VERSION), size - (pod - Q2POD_VERSION), "%s", pod + sizeof " Muse" - 1);
+}
 int ringnav_about(void *win, void *ctx) {
     int result = stock_about_trampoline(win, ctx);
     void *view = win ? widget_lookup(win, "scroll_view_about", 1) : (void *)0;
@@ -404,10 +413,7 @@ int ringnav_about(void *win, void *ctx) {
                              STOCK_VERSION);
         void *button = list_button(view);
         char v[sizeof Q2POD_VERSION];
-        const char *pod = strstr(Q2POD_VERSION, " Muse");
-        tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
-        if (pod) /* "1.8.2" then its " dev ..." or " beta 2": the row's name is the product's */
-            tk_snprintf(v + (pod - Q2POD_VERSION), sizeof v - (pod - Q2POD_VERSION), "%s", pod + sizeof " Muse" - 1);
+        vamp_version(v, sizeof v);
         about_label(button, 10, 166, "s_scrlabel_white24l", PRODUCT_NAME);
         about_label(button, 176, 149, "s_scrlabel_white20r", v);
         widget_restack(P(button, W_PARENT), 2);

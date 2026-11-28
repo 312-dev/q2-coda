@@ -137,6 +137,7 @@ class WatchdogMachine(StandbyMachine):
         if name=='p:open@GLIBC_2.0' and self.text(a)=='/dev/gpiochip3':  # usb_event.c's cable line: none here
             self.returns(0xffffffff); return
         if name=='p:open@GLIBC_2.0' and self.text(a)=='/tmp/q2guard.state': self.returns(0xffffffff); return  # no q2guard here
+        if name=='p:open@GLIBC_2.0' and self.text(a)=='/mnt/data/ui-target': self.returns(0xffffffff); return  # demo is the UI here (q2ui_gate.c)
         if name=='p:open@GLIBC_2.0':
             assert self.text(a)=='/dev/jz_watchdog' and b==0x80002; self.wdt_opens+=1; self.returns(self.fd&0xffffffff); return
         if name=='d:ioctl':

@@ -11,7 +11,9 @@ key in the card's adb_keys authenticates, that its copy on /mnt/data serves whil
 the card's file does; shell:, exec: (byte for byte), sync: push and pull, and that the services the patch removes
 are refused. A key `adb keygen` makes is checked too when adb and openssl are installed. q2adb-gadget
 (patch/adb_gadget.sh) runs under the host's sh against a directory tree, with mount, umount, mountpoint and
-usleep stubbed: the gadget it makes, park, unpark, and that a parked gadget is never bound. adb over Wi-Fi: the
+usleep stubbed: the gadget it makes, park, unpark, and that a parked gadget is never bound. tools/uac_tone.sh, the
+USB audio desk test, against a stand-in /proc, dmesg and aplay: that it plays only while the computer streams, with
+the kernel's ring buffer full. adb over Wi-Fi: the
 same adbd with --tcp on a loopback port, driven by tools/vamp.py's client (authorization, no UI socket, the
 Smart Wi-Fi use file, exec:, q2remote's commands through vamp, push and pull, the 8-connection cap), and
 q2adb-wifi (patch/adb_wifi.sh) under the host's sh with stand-ins for adbd and q2adb-mdns; with BUILD, its
@@ -403,8 +405,20 @@ GADGET_STUBS = {
     'rmdir': 'for a; do bad=; for c in "$a"/* "$a"/*/*; do [ -L "$c" ] && bad=1; if [ -d "$c" ] && [ ! -L "$c" ]; then '
              'case "${c#$a/}" in strings|os_desc|configs|functions) ;; *) bad=1;; esac; fi; done; '
              '[ -n "$bad" ] && { echo "rmdir: $a: Directory not empty" >&2; exit 1; }; rm -rf "$a"; done',
-    'killall': 'echo "killall $1" >> "$Q2ADB_RUN/log"',
+    'reboot': 'echo reboot >> "$Q2ADB_RUN/log"',
 }
+
+
+def fake_adbds(proc, *cmdlines):
+    """A process for each command line (a sleep), listed in a stand-in /proc under its pid with that command line,
+    as q2adb-gadget looks for the USB adbd."""
+    procs = []
+    for line in cmdlines:
+        p = subprocess.Popen(['sleep', '1000'])
+        (proc/str(p.pid)).mkdir(parents=True)
+        (proc/str(p.pid)/'cmdline').write_bytes(line.replace(' ', '\0').encode() + b'\0')
+        procs.append(p)
+    return procs
 
 
 def gadget_checks():
@@ -419,8 +433,12 @@ def gadget_checks():
         for name, body in GADGET_STUBS.items():
             (bin/name).write_text('#!/bin/sh\n' + body + '\n')
             (bin/name).chmod(0o755)
+        proc = d/'proc'
+        proc.mkdir()
         env = dict(os.environ, PATH=f'{bin}:{os.environ["PATH"]}', Q2ADB_CONFIGFS=str(cfs), Q2ADB_UDC=str(udc),
-                   Q2ADB_FFS=str(ffs), Q2ADB_RUN=str(run))
+                   Q2ADB_FFS=str(ffs), Q2ADB_RUN=str(run), Q2ADB_PROC=str(proc), Q2ADB_LOG=str(d/'audio.log'),
+                   Q2ADB_REBOOT='reboot', Q2ADB_DATA=str(d/'data'))
+        (d/'data').mkdir()
         def gadget(*args):
             return subprocess.run(['sh', str(script), *args], env=env, capture_output=True, text=True, timeout=30)
         g = cfs/'usb_gadget/q2adb'
@@ -450,11 +468,14 @@ def gadget_checks():
         stock = cfs/'usb_gadget/storage_demo'
         r = subprocess.run(['sh', '-c', f'mkdir {stock}'], env=env, capture_output=True, text=True)
         expect('the stand-in refuses a second gadget directory, as the kernel does (EEXIST)', r.returncode != 0 and not stock.exists())
+        usb, tcp = fake_adbds(proc, '/usr/bin/adbd', '/usr/bin/adbd --tcp 5555')
         r = gadget('park')
         mounts = (run/'mounts').read_text().split()
-        expect('park: adbd stopped, FunctionFS and configfs unmounted, the gadget\'s directory gone, parked',
+        expect('park: the USB adbd stopped, FunctionFS and configfs unmounted, the gadget\'s directory gone, parked',
                r.returncode == 0 and not g.exists() and str(cfs) not in mounts and str(ffs) not in mounts
-               and 'killall adbd' in (run/'log').read_text() and (run/'q2adb.parked').exists(), r.stderr)
+               and usb.poll() is not None and (run/'q2adb.parked').exists(), r.stderr)
+        expect('park leaves adb over Wi-Fi (adbd --tcp) running', tcp.poll() is None)
+        tcp.kill(); tcp.wait()
         r = subprocess.run(['sh', '-c', f'mkdir {stock} && rmdir {stock}'], env=env, capture_output=True, text=True)
         expect('parked, stock\'s storage gadget can be made, and taken down again at its stop', r.returncode == 0, r.stderr)
         r = gadget('bind')
@@ -471,6 +492,204 @@ def gadget_checks():
                and not (run/'q2adb.parked').exists(), r.stderr)
         expect('a bound q2adb is left as it is', gadget('bind').returncode == 0 and read('UDC') == '13500000.otg')
         expect('an unknown command is refused', gadget('frob').returncode == 2)
+
+        # USB audio beside adb (docs/usb-audio.md#usb-audio)
+        data, log = d/'data', d/'audio.log'
+        def rd(p):  # the gadget is made again in the background: a file not there yet reads as nothing
+            try: return (g/p).read_text().strip()
+            except OSError: return ''
+        def bound(want=True):
+            end = time.monotonic() + 10  # bound in the background
+            while (g.is_dir() and rd('UDC') == '13500000.otg') != want and time.monotonic() < end:
+                time.sleep(.05)
+            return g.is_dir() and rd('UDC') == '13500000.otg'
+        def audio_on():
+            f = g/'functions/uac2.q2'
+            return g.is_dir() and rd('idProduct') == '0x0104' and rd('bcdDevice') == '0x0225' and \
+                rd('bDeviceClass') == '0xef' and rd('bDeviceSubClass') == '0x02' and rd('bDeviceProtocol') == '0x01' and \
+                os.path.islink(g/'configs/c.1/uac2.q2') and os.readlink(g/'configs/c.1/uac2.q2') == 'functions/uac2.q2' and \
+                os.readlink(g/'configs/c.1/ffs.adb') == 'functions/ffs.adb' and \
+                [rd(f'functions/uac2.q2/{a}') for a in ('p_chmask', 'c_chmask', 'p_srate', 'p_ssize', 'req_number', 'p_volume_present')] == \
+                ['3', '0', '44100,48000,88200,96000,176400,192000', '4', '8', '0'] and \
+                rd('functions/uac2.q2/c_terminal_type') == '1539' and \
+                rd('functions/uac2.q2/function_name') == 'Q2 Output' and (run/'q2adb.audio').exists()
+        def audio_off():
+            return g.is_dir() and rd('idProduct') == '0x0105' and rd('bDeviceClass') == '0x00' and \
+                not (g/'functions/uac2.q2').exists() and not (run/'q2adb.audio').exists()
+        def until(f, s=10):
+            end = time.monotonic() + s
+            while not f() and time.monotonic() < end:
+                time.sleep(.05)
+            return f()
+        def said(text): return text in (log.read_text() if log.exists() else '')
+        r = gadget('audio', 'on')
+        expect('audio on: returns once its work has detached', r.returncode == 0, r.stderr)
+        expect('audio on: the composite gadget (0x0104, class ef/02/01), adb and the UAC2 source as a line input (1539), remembered, bound',
+               until(audio_on) and (data/'q2adb.audio').exists() and bound(), log.read_text() if log.exists() else '')
+        expect('audio on: each step in the log on the card', until(lambda: said('bind returned 0')) and said('gadget removed'))
+        r = gadget('setup')
+        expect('setup with audio remembered keeps the gadget as it is', r.returncode == 0 and audio_on(), r.stderr)
+        r = gadget('park')
+        expect('park with audio: the UAC2 function and its link gone with the rest', r.returncode == 0 and not g.exists()
+               and not (run/'q2adb.audio').exists(), r.stderr)
+        r = gadget('unpark')
+        expect('unpark with audio remembered: the composite gadget again', r.returncode == 0 and bound() and audio_on(), r.stderr)
+        usb, tcp = fake_adbds(proc, '/usr/bin/adbd', '/usr/bin/adbd --tcp 5555')
+        (proc/'99999').mkdir()  # a process gone between the scan's glob and its read: its cmdline found, then not there
+        os.symlink(d/'gone', proc/'99999/cmdline')
+        r = gadget('audio', 'off')
+        expect('audio off: adb alone again, forgotten, bound', r.returncode == 0 and until(audio_off) and bound()
+               and not (data/'q2adb.audio').exists(), r.stderr)
+        expect('audio off: the USB adbd stopped and waited for, adb over Wi-Fi left running',
+               usb.poll() is not None and tcp.poll() is None and said('stopped'))
+        expect('a process gone mid-scan says nothing in the log', 'No such file' not in log.read_text(), log.read_text()[-500:])
+        tcp.kill(); tcp.wait()
+        # the shell that ran it gets SIGHUP as it ends (adb's pty): the work goes on
+        log.write_text('')
+        r = subprocess.run(['sh', '-c', f'sh {script} audio try 1; kill -HUP 0'], env=env, capture_output=True, text=True,
+                           timeout=30, start_new_session=True)
+        on = until(audio_on) and bound() and not (data/'q2adb.audio').exists()
+        expect('audio try 1: on, not remembered, through the SIGHUP of the shell that ran it', on, r.stderr + log.read_text())
+        expect('audio try 1: no keep, so off by its watchdog and USB adb back', until(lambda: said('USB adb back'))
+               and audio_off() and bound(), log.read_text())
+        r = gadget('audio', 'try', '1')
+        k = gadget('audio', 'keep')
+        expect('audio try then keep: still on after the try\'s second, kept and remembered',
+               r.returncode == 0 and k.returncode == 0 and until(lambda: said('kept')) and audio_on() and (data/'q2adb.audio').exists())
+        gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
+        # a desk test's other device: the terminal type the computer records from, another product and release
+        knobs = dict(env, Q2ADB_UAC_CTERM='513', Q2ADB_UAC_PID='0x0106', Q2ADB_UAC_BCD='0x0226')
+        # on, not try: a try's watchdog would outlive this check and go back to adb alone inside a later one
+        r = subprocess.run(['sh', str(script), 'audio', 'on'], env=knobs, capture_output=True, text=True, timeout=30)
+        def knobbed():
+            return g.is_dir() and rd('idProduct') == '0x0106' and rd('bcdDevice') == '0x0226' and \
+                rd('functions/uac2.q2/c_terminal_type') == '513' and rd('functions/uac2.q2/function_name') == 'Q2 Output'
+        expect('audio with Q2ADB_UAC_CTERM, _PID and _BCD: that terminal type, product and release',
+               r.returncode == 0 and until(knobbed) and bound(), r.stderr + log.read_text()[-800:])
+        expect('the log names the terminal type set', until(lambda: said('c_terminal_type 513')), log.read_text()[-800:])
+        gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
+        r = gadget('audio', 'on')
+        expect('audio on without the knobs: 0x0104, 0x0225, a line input', until(audio_on), log.read_text()[-800:])
+        gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
+        # a try's watchdog stands down for a command after it once USB adb is back: an on after a try stays on
+        log.write_text('')
+        gadget('audio', 'try', '3'); until(lambda: said('bind returned'))
+        r = gadget('audio', 'on')
+        expect('audio on after a try: that try\'s watchdog told to stand down once USB adb is back',
+               r.returncode == 0 and until(lambda: said('told to stand down')), log.read_text()[-1500:])
+        expect('the try\'s watchdog then stands down at its time, and the on stays on and remembered',
+               until(lambda: said('stands down: an audio command'), 10) and audio_on() and (data/'q2adb.audio').exists()
+               and not said('no keep in 3 s'), log.read_text()[-1500:])
+        gadget('audio', 'off'); until(audio_off); until(lambda: said('bind returned'))
+        # a later try: the earlier try's watchdog leaves the gadget to the later one's
+        log.write_text('')
+        gadget('audio', 'try', '2')
+        gadget('audio', 'try', '6')
+        expect('two tries: the first one\'s watchdog stands down, the second try stays on',
+               until(lambda: said('stands down'), 10) and not said('no keep in 2 s') and audio_on(), log.read_text()[-1500:])
+        expect('two tries: the second one\'s watchdog goes back to adb alone at its time',
+               until(lambda: said('no keep in 6 s'), 15) and until(audio_off) and until(lambda: said('USB adb back')),
+               log.read_text()[-1500:])
+        log.write_text('')
+        r = gadget('audio', 'rehearse', '1')
+        expect('audio rehearse: the gadget made again as it was, no audio, and back', r.returncode == 0
+               and until(lambda: said('USB adb back')) and audio_off() and bound(), log.read_text())
+        r = gadget('audio', 'rehearse', '1')
+        k = gadget('audio', 'keep')
+        expect('audio rehearse then keep: the watchdog stands down and audio stays off, not remembered', k.returncode == 0
+               and until(lambda: said('kept')) and until(audio_off) and not (data/'q2adb.audio').exists())
+        # adbd never writing its descriptors again: no USB adb after the try, so the watchdog restarts the Q2
+        (ffs/'ep1').unlink()
+        (run/'log').write_text('')
+        env['Q2ADB_BACK_S'] = '1'
+        r = gadget('audio', 'try', '1')
+        expect('audio try with USB adb never back: the watchdog restarts the Q2', r.returncode == 0
+               and until(lambda: 'reboot' in (run/'log').read_text(), 20) and said('RESTARTING THE Q2')
+               and said('ep1 no'), log.read_text()[-2000:])
+        # the boot after it: /tmp and configfs empty, setup from S90play: adb alone, so no second restart
+        shutil.rmtree(g)
+        for f in run.iterdir():
+            if f.name not in ('mounts', 'log'): f.unlink()
+        (run/'log').write_text('')
+        r = gadget('setup')
+        expect('the boot after the watchdog\'s restart: adb alone, nothing of the try left', r.returncode == 0 and audio_off()
+               and not (data/'q2adb.audio').exists())
+        # parked (stock's storage has the controller) when the try's time is up: no restart
+        log.write_text('')
+        (run/'q2adb.parked').write_text('')
+        r = gadget('audio', 'try', '1')
+        expect('audio try while parked: only remembered for the unpark, and the watchdog restarts nothing', r.returncode == 0
+               and until(lambda: said('no restart'), 20) and 'reboot' not in (run/'log').read_text()
+               and said('parked: only remembered'), log.read_text()[-1500:])
+        (run/'q2adb.parked').unlink()
+        (ffs/'ep1').write_text('')
+        expect('audio with no word, or try with no number, is refused', gadget('audio').returncode == 2
+               and gadget('audio', 'try', 'x').returncode == 2)
+
+
+def uac_tone_checks():
+    """tools/uac_tone.sh, the USB audio desk test (docs/usb-audio.md#the-desk-test), under the host's sh: a stand-in
+    /proc (the gadget's card and PCM, a fixed uptime of 100 s), a dmesg that prints a file, an aplay that notes its
+    calls. On a Q2 up a while the kernel's ring buffer is full, so a new line pushes the oldest out and the count
+    of lines stays the same; device run 5 missed the computer's stream START so, and took a STOP line's rate for
+    a recording. $UAC_TONE runs another copy of the script (a broken one must fail these)."""
+    script = os.environ.get('UAC_TONE', str(ROOT/'tools/uac_tone.sh'))
+    old = [f'[ {i:10.6f}] hyn: touch {i}' for i in range(40)]
+    def line(t, text):
+        return f'[ {t:10.6f}] {text}'
+    start = line(101, 'UAC2: playback stream START, srate=48000')
+    stop = line(105, 'UAC2: playback stream STOP, srate=48000')
+    def run(wait, lines=(), after=0.0, stop_on_play=False, grow=False):
+        with tempfile.TemporaryDirectory(prefix='q2-uac-tone-') as d:
+            d = pathlib.Path(d)
+            proc, tmp, bin = d/'proc', d/'tmp', d/'bin'
+            sub = proc/'asound/card1/pcm0p/sub0'
+            for p in (sub, tmp, bin):
+                p.mkdir(parents=True)
+            (proc/'uptime').write_text('100.00 50.00\n')
+            (proc/'asound/cards').write_text(' 0 [ecodecsoundcard]: x\n 1 [UAC2Gadget     ]: UAC2_Gadget - UAC2_Gadget\n')
+            (sub/'status').write_text('state: RUNNING\nhw_ptr : 0\nappl_ptr : 0\navail : 0\n')
+            (sub/'hw_params').write_text('rate: 48000 (48000/1)\n')
+            (tmp/'tone-48000.wav').write_bytes(b'RIFF')
+            ring, calls = d/'dmesg.txt', d/'aplay.calls'
+            ring.write_text('\n'.join(old) + '\n')
+            def push(new):  # each new line pushes the oldest out, unless the ring is still filling (grow)
+                cur = ring.read_text().splitlines()
+                (d/'ring.n').write_text('\n'.join(cur[0 if grow else len(new):] + list(new)) + '\n')
+                os.replace(d/'ring.n', ring)
+            stubs = {'dmesg': f'cat "{ring}"', 'usleep': 'sleep 0.1',
+                     'aplay': f'echo "$*" >> "{calls}"\n' + (f'tail -n +2 "{ring}" > "{d}/r.n"; echo "{stop}" >> "{d}/r.n"; '
+                                                             f'mv "{d}/r.n" "{ring}"\n' if stop_on_play else '') +
+                              'sleep 1.2'}  # past the script's 500 ms check of the stream
+            for name, body in stubs.items():
+                (bin/name).write_text('#!/bin/sh\n' + body + '\n')
+                (bin/name).chmod(0o755)
+            timer = threading.Timer(after, push, (lines,))
+            if lines:
+                timer.start()
+            env = dict(os.environ, PATH=f'{bin}:{os.environ["PATH"]}', UAC_PROC=str(proc), UAC_TMP=str(tmp),
+                       UAC_LOG=str(d/'log.txt'))
+            r = subprocess.run(['sh', script, str(wait), 'tone'], env=env, capture_output=True, text=True, timeout=60)
+            timer.cancel()
+            return r, calls.read_text().splitlines() if calls.exists() else []
+    r, played = run(5, (line(101, 'UAC2: u_audio_set_playback_srate: host set srate 48000'), start), after=1.5)
+    expect('uac_tone: a START in a full ring buffer starts the plays, at its rate',
+           'the computer records at 48000 Hz' in r.stdout and len(played) == 2
+           and all(c.endswith('tone-48000.wav') for c in played), r.stdout + str(played))
+    expect('uac_tone: the count of kernel lines is logged', f'kernel lines {len(old)}' in r.stdout, r.stdout)
+    r, played = run(3, (line(101, 'UAC2: playback stream STOP, srate=48000'),), after=1.0)
+    expect('uac_tone: a STOP alone is not a recording', r.returncode == 1 and not played
+           and 'did not start recording within 3 s (last stream line: STOP 48000)' in r.stdout, r.stdout + str(played))
+    r, played = run(3, (line(101, 'UAC2: playback stream STOP, srate=48000'),), after=1.0, grow=True)
+    expect('uac_tone: a STOP alone is not a recording while the ring buffer fills', r.returncode == 1 and not played,
+           r.stdout + str(played))
+    r, played = run(2, (line(99, 'UAC2: playback stream START, srate=48000'),), after=0.2)
+    expect('uac_tone: a START stamped before it began does not count', r.returncode == 1 and not played,
+           r.stdout + str(played))
+    r, played = run(2, (start,), after=0.5, stop_on_play=True)
+    expect('uac_tone: a STOP while playing is logged and no play follows it', len(played) == 1
+           and 'stream stopped by 100.00: STOP 48000' in r.stdout
+           and 'play 2: the stream is not running (last stream line: STOP 48000)' in r.stdout, r.stdout + str(played))
 
 
 def wrapper_checks():
@@ -721,6 +940,7 @@ def main(argv):
     if '--qemu' in args:
         i = args.index('--qemu'); qemu = args[i + 1]; del args[i:i + 2]
     gadget_checks()
+    uac_tone_checks()
     wrapper_checks()
     wifi_checks()
     if args:  # BUILD's adbd, with BUILD's libraries

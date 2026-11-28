@@ -536,6 +536,16 @@ STOCK_BLUEZ_DIR, STOCK_BLUEALSA_DIR = 'usr/lib/bluez-stock', 'usr/lib/bluealsa-s
 BLUEALSA_APLAY = 'usr/bin/bluealsa-aplay'
 # ... and which ALSA plugins `bluealsa` loads: the links in /tmp the launcher points at stock's pair or ours
 BT_PLUGINS_CONF = 'usr/share/alsa/alsa.conf.d/25-vamp-bluealsa.conf'
+
+
+def stock_program(path, manifest):
+    """Where the build that wrote manifest keeps stock's program at path (bluetoothd, bluealsa, bluealsa-aplay,
+    patched or not): moved aside where the launcher stands at path, else at path."""
+    if path == BLUETOOTHD and 'own_bluez' in manifest:
+        return f'{STOCK_BLUEZ_DIR}/bluetoothd'
+    if path in (BLUEALSA, BLUEALSA_APLAY) and 'own_bluealsa' in manifest:
+        return f'{STOCK_BLUEALSA_DIR}/{path.rsplit("/", 1)[1]}'
+    return path
 # --dev only (docs/adb.md#installing-an-update-over-adb, patch/q2update.sh): Software Update's card path from a
 # computer, through demo's q2update_poll (patch/sw_update.c)
 Q2UPDATE = 'usr/bin/q2update'
@@ -575,6 +585,11 @@ LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.er
             b'        while :; do\n            /release/bin/demo 2>>/tmp/q2-demo.err\n',
             b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.log); [ "${n:-0}" -gt 2000000 ] && cp /tmp/q2-demo.log /tmp/q2-demo.log.1 && : >/tmp/q2-demo.log; done) &\n'
             b'        while :; do\n            /release/bin/demo >>/tmp/q2-demo.log 2>&1\n')
+# --ui-spike only (docs/ui-rewrite.md#cutover): q2ui, the menu UI of Vamp's own (ui/, tools/ui.py), in the root
+# filesystem. Nothing in the boot scripts starts it: demo does, as its child, while /mnt/data/ui-target says q2ui
+# (patch/q2ui_gate.c, which finds no /usr/bin/q2ui in any other build and so does nothing there), and has the screen
+# back whenever q2ui ends. So the choice is one file and demo is always the fallback.
+UI = 'usr/bin/q2ui'
 # --dev only (docs/boot.md#vampos-card-boot, patch/q2vampos.sh): a VampOS image on the card, mounted (a loop device,
 # or squashfuse_ll over FUSE on a kernel with none: VAMPOS_FUSE) and run in a chroot before demo when the card's
 # .vamp/os asks for it (boot-once, removed first, or boot-always) and the image's SHA-256 matches; any other case, or
@@ -1638,7 +1653,7 @@ def source_sha256():
                         *ROOT.glob('tools/*.py'), *ROOT.glob('tools/*.c'), *ROOT.glob('tools/*.patch'), ROOT/'tools/stock_map.tsv',
                         *(p for p in ROOT.glob('tools/uac1_module/**/*') if p.is_file() and '__pycache__' not in p.parts),
                         *ROOT.glob('tools/*.h'), *ROOT.glob('tools/*.S'), *ROOT.glob('player/*.[ch]'),
-                        *ROOT.glob('player/Makefile'), *manual]):
+                        *ROOT.glob('player/Makefile'), *ROOT.glob('ui/*.[ch]'), *ROOT.glob('ui/Makefile'), *manual]):
         h.update(str(path.relative_to(ROOT)).encode() + b'\0')
         h.update(path.read_bytes())
     return h.hexdigest()
@@ -2060,6 +2075,8 @@ FUNCTIONS = {
  'taglib_file_audioproperties': ('void *', 'void *'),
  'taglib_file_free': ('void', 'void *'),
  'deleteMusicFromFav': ('int', 'void *'),
+ 'manage_myfav': ('int', 'void'),  # Now Playing's heart click's: My Fav flipped for the playing song, 1 added (ratings.c rate_now_like)
+ 'notifyFavor': ('int', 'void'),  # ... and what it calls after
  'batch_init_selectrecord': ('int', 'int'),
  'batch_set_selectitem': ('int', 'int'),
  'batch_get_selectitem': ('int', 'int'),
@@ -2182,6 +2199,9 @@ FUNCTIONS = {
  'autoLinkBluetooth': ('int', 'void'),
  'btStartSearch': ('int', 'void'),  # Settings > Bluetooth's scan (bt_ui.c), as stock's Scan now row started it
  'btStopSearch': ('int', 'void'),  # its stop, as stock's row click calls it before a connect (bt_ui.c page_poll)
+ # q2ui's Bluetooth page (bt_ui.c): the paired devices' count (the first in pdeq_btshowlist), and stock's row click's
+ # connect or disconnect of a device by its index there (1: disconnected, the output to go back to a jack)
+ 'getBtPairSize': ('int', 'void'), 'handleBluetoothLink': ('int', 'int'),
  # stock's Bluetooth switch: (1, 0) off, the stack stopped and the radio powered down; (0, 0) on, started again
  # (heatguard.c hg_bt: the controller watchdog's relaunch)
  'switchBluetooth': ('int', 'int, int'),
@@ -2273,6 +2293,10 @@ FUNCTIONS = {
  'networkClearSsid': ('int', 'void'), 'networkGetSsidList': ('int', 'const char *'),
  # a password fit for a scan record's flags (wifi_action_connect's check): not 0 when it is
  'networkCheckSsidPassword': ('int', 'const char *, const char *'),
+ # q2ui's Wi-Fi page (wifi_flows.c): Search Again's search, its results read into a deque (wifi_showlist's), and a
+ # network row's next step by its record's index and a tap's x against the Forget's range (2 joined, 3 join, 4 password)
+ 'wifi_scan': ('int', 'void'), 'networkGetWifiResult': ('int', 'void *'),
+ 'check_wifinextaction': ('int', 'int, int, int, int'),
 }
 # Local stock routines in the SHA-256-pinned V1.36 executable.
 PRIVATE_FUNCTIONS = {
@@ -2506,6 +2530,12 @@ def compile_helper(out, cat, src, name, rels, sections=None):
         '--image-base=0x400000', '-z', 'noexecstack', '--gc-sections', '-s', '--hash-style=sysv', '--build-id=none',
         *objs, f'-L{out}', *(f'-l:{lib.name}' for lib in libs), '-o', out/name)  # by name: a rebuilt library may have no SONAME
     return (out/name).read_bytes()
+
+def ui_binary():
+    """--ui-spike builds' q2ui (docs/ui-rewrite.md), built by tools/ui.py for the Q2."""
+    import ui
+    return ui.build('mips').read_bytes()
+
 
 def adbd_binary(out):
     """--dev builds' adbd (docs/adb.md), built by tools/thirdparty.py, stripped into out."""
@@ -2820,7 +2850,7 @@ def signing_key(path, dev):
     check(path.is_file(), f'{path}: no release public key (docs/releasing.md#signing-a-release)')
     return public_key(path.read_bytes())
 
-def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, signing_pub=None, apps_dir=APPS_DIR, build_iroh=False, own_bluez=False, own_bluealsa=False):  # pragma: no mutate block
+def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, signing_pub=None, apps_dir=APPS_DIR, build_iroh=False, ui_spike=False, own_bluez=False, own_bluealsa=False):  # pragma: no mutate block
     # Kernel-module experiments: no measured saving (docs/clock-gating.md, pwm-clock-gating.md,
     # audio-notifier.md), none handles suspend/resume, and stock Standby suspends by default; dev only.
     check(not aic_idle_wait or dev, '--aic-idle-wait requires --dev')
@@ -3375,6 +3405,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                Q2IAP: (HELPER_LIKE, compile_helper(out, cat, Q2IAP_SOURCES, 'q2-iap', CODA_RC_LIBS,
                                                                  sections=False)),  # libc and SQLite (q2_iap_lib.c)
                                UAC1_KO: ('module_driver/soc_aic.ko', uac1.module()),
+                               **({UI: (HELPER_LIKE, ui_binary())} if ui_spike else {}),
                                Q2SEND: (HELPER_LIKE, compile_helper(out, cat, Q2SEND_SOURCES, 'q2send', Q2SEND_LIBS)),
                                RADIOFETCH: (HELPER_LIKE, compile_helper(out, cat, RADIOFETCH_SOURCES, 'q2radiofetch',
                                                                         RADIOFETCH_LIBS)),
@@ -3477,6 +3508,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         demo_sha256=sha(patched), patch_sha256=sha(payload), update_sha256=sha((out/'update.tar').read_bytes()),
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         **({'aic_notifier': aic_notifier} if aic_notifier else {}),
+        **({'q2ui_sha256': sha(ui_binary()), 'q2ui_bytes': len(ui_binary())} if ui_spike else {}),
         patch_bytes=len(payload), scratch_free_bytes=scratch_free, ring_step_pixels=RING_STEP,
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_iroh_sha256=sha((out/'q2-iroh').read_bytes()), q2_iroh_bytes=len((out/'q2-iroh').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), q2_iap_sha256=sha((out/'q2-iap').read_bytes()), q2_iap_bytes=len((out/'q2-iap').read_bytes()), usb_f_uac1_sha256=sha((out/'usb_f_uac1.ko').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes()), 'q2_usbtrace_sha256': sha((out/'q2-usbtrace').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
@@ -3516,6 +3548,8 @@ if __name__ == '__main__':
                     help=f'where the pinned zips of the card apps the firmware carries are (default {APPS_DIR})')
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
+    ap.add_argument('--ui-spike', action='store_true',
+                    help='add q2ui, the menu UI of our own, which demo hands the screen to while /mnt/data/ui-target says q2ui (docs/ui-rewrite.md)')
     ap.add_argument('--own-bluez', action='store_true',
                     help='also install Vamp\'s own bluetoothd (upstream BlueZ, tools/thirdparty.py) beside stock\'s, and the launcher that starts it for [Q2POD] BLUEZ=1 (docs/bluez.md)')
     ap.add_argument('--build-iroh', action='store_true',
@@ -3524,6 +3558,6 @@ if __name__ == '__main__':
                     help="experimental: carry Vamp's own bluealsa beside stock's, and the launcher that starts it for [Q2POD] BLUEALSA=1 (requires --dev; docs/bluealsa.md)")
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.signing_key,a.apps,a.build_iroh,a.own_bluez,a.own_bluealsa)
+        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.signing_key,a.apps,a.build_iroh,a.ui_spike,a.own_bluez,a.own_bluealsa)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))

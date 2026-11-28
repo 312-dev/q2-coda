@@ -19,7 +19,8 @@ it), `get` copies that over the copy's state/data/database.db too, so Library > 
 other; a new fixture without one drops the old library, and the copy's database.db is then left as it was.
 A fresh lease also starts with the settings of state/data (/mnt/data) the data fixture holds, ~/.cache/q2-emu-pool/data
 (Q2_EMU_DATA; `fixture --data DDIR`, a clean default config.ini with BLUETOOTH=0): `get` copies its files over the
-copy's and removes the per-run files (DATA_PER_RUN: the queue, play counts, ratings, Memory Playback, the state record)
+copy's and removes the per-run files (DATA_PER_RUN: the queue, play counts, ratings, Memory Playback, the state record,
+the choice of q2ui as the UI and q2ui's options)
 the last lease left; Wi-Fi, the pool's own files and the rest are kept. With no data fixture state/data is left alone.
 A lease that is reused (same NAME and build, emulator running) and a lease already reserved keep their card, library and data.
 A reserved lease (`get --reserve`, or `reserve SLOT` on a held one: the user's own rig) is never
@@ -257,7 +258,9 @@ def make_fixture(src, library=None):
 # state/data's files that are one run's own state, not settings or something the copy needs: removed at each fresh
 # lease. Everything else there stays: wpa_supplicant.conf and q2-defaults (boot and Wi-Fi), q2-battery, coda-rc (the
 # pool's stand-in), userequalizer and the logs; database.db is the library fixture's (reset_card).
-DATA_PER_RUN = ('memoryfile', 'q2-state', 'q2-stall', 'q2-cf-trace', 'q2-library-scope', 'peq-active', 'ringnav-*')
+# ui-target and q2ui's files: a lease that chose q2ui as the UI (docs/ui-rewrite.md#cutover) must not choose it for the next
+DATA_PER_RUN = ('memoryfile', 'q2-state', 'q2-stall', 'q2-cf-trace', 'q2-library-scope', 'peq-active', 'ringnav-*',
+                'ui-target', 'q2ui.args', 'q2ui-stats.json')
 
 
 def data_fixture_dir():

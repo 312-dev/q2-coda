@@ -39,6 +39,7 @@ extern int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb
                    int y, int w, int align);
 extern void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
 extern void coda_rc_toggle(void);                                              /* coda_rc_shim.c */
+extern void xfade_set(int on);                                                  /* crossfade.c */
 extern unsigned now_cover_written(const char *file);                           /* coverflow.c */
 
 /* The layout, in the window's (the screen's) pixels, as mock_cc4_tight.py draws it at 1x: one
@@ -787,4 +788,98 @@ int cc_key(void *win, unsigned key) {
     cc_marq(win);
     widget_invalidate_force(win, (void *)0);
     return 1;
+}
+
+/* ---- q2ui's Control Center (docs/ui-rewrite.md#cutover): what it shows, and its switches ----
+ * q2ui draws a Control Center of its own while it has the screen. The states it shows are added to
+ * the status row's in its file (q2ui_gate.c tell): wifi and bton (the switches stock's own pages
+ * show), airplay (AirPlay's receiver, which lights its circle), car (Car Remote), smart (Smart
+ * Wi-Fi), eq (on in any mode), usb (the USB setting's value), cable (1 while a cable is in: the USB row),
+ * bright (the backlight, 0 to 100), vol and volmax (the volume and how high it may go: vol_cap).
+ * Its switches come back as "set NAME 0|1" down the pipe the gate gives q2ui alone (q2ui_gate.c
+ * ctl, q2ui_cc_set), each flipped as this page's circle flips it; q2ui's Display page sets
+ * Light Mode ("set light 0|1|2"), Reduce Motion ("set motion 0|1"), Home's layout ("set home 0|1"), Song Artist
+ * ("set songartist 0..3") and Song Length ("set songlength 0..2") the same way, its Playback
+ * page Gapless ("set gapless 0|1") and Smart Crossfade ("set xfade 0|1"), and its Control
+ * Center's Brightness slider the backlight ("set bright 0..100"), its Wi-Fi page Wi-Fi ("set
+ * wifi 0|1") and its Bluetooth page Bluetooth ("set bt 0|1", as stock's own switch row does it);
+ * Display reads its settings back from config.ini itself (ui/config.c). */
+/* q2ui's Bluetooth flip that came while the stack was starting (bt_initstatus 1, about 3 s after it is
+ * turned on, when stock's switch does nothing): 1 off, 2 on, 0 none; the last one sent stands, and
+ * q2ui_cc_poll does it once the stack is up. */
+static unsigned char bt_queued __attribute__((section(".scratch")));
+#define BT_STARTING (I(bt_initstatus, 0) > 0) /* below 0 is stock's "abnormal" (BT_ABNORMAL): no start to wait for */
+
+unsigned q2ui_cc_state(char *b, unsigned room) {
+    eq_state s;
+    eq_load(&s);
+    /* btbusy: Bluetooth's stack is starting or a flip waits for it, so q2ui keeps showing its own flip */
+    int n = tk_snprintf(b, room,
+                        "wifi=%d\nbton=%d\nbtbusy=%d\nairplay=%d\ncar=%d\nsmart=%d\neq=%d\nusb=%s\ncable=%d\nbright=%d\nvol=%d\nvolmax=%d\n",
+                        !!g_wififlag, !!g_bluetoothflag, BT_STARTING || bt_queued, !!g_airplayflag, !!coda_rc_enabled(),
+                        !!st.smart_wifi, s.mode != EQ_OFF, usb_ui_value(), usb_ui_cable(), (int)g_lightness, (int)g_volume,
+                        vol_cap());
+    return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
+}
+/* q2ui_poll's, every pass while the pipe is open: a Bluetooth flip kept while the stack started, done
+ * once it is up (as q2ui_cc_set would), or dropped when Bluetooth already stands so. */
+void q2ui_cc_poll(void) {
+    if (!bt_queued || BT_STARTING) return;
+    int on = bt_queued == 2;
+    bt_queued = 0;
+    if (!g_bluetoothflag != !on && !I(bt_initstatus, 0)) switchBluetooth(g_bluetoothflag, 1);
+}
+/* A switch of q2ui's set to on (1) or off: 0 when done, already so or (Bluetooth while its stack
+ * starts) kept to be done, -1 for a name it has not or one it cannot set now. */
+int q2ui_cc_set(const char *name, int on) {
+    eq_state s;
+    if (!tk_strcmp(name, "wifi")) {
+        wifi_flows_cancel_join(); /* as the circle: stock's switch ignores a join that is trying */
+        if (!g_wififlag != !on) wifi_switch(1);
+    } else if (!tk_strcmp(name, "bt")) { /* q2ui's Bluetooth page: as stock's switch row (0x4c4298, row 0) */
+        if (BT_STARTING) { /* stock's row only says it is busy: kept for q2ui_cc_poll */
+            bt_queued = (unsigned char)(on ? 2 : 1);
+            return 0;
+        }
+        bt_queued = 0;
+        if (!g_bluetoothflag == !on) return 0;
+        if (I(bt_initstatus, 0)) return -1; /* abnormal: stock's row does nothing either */
+        switchBluetooth(g_bluetoothflag, 1); /* the other way, and saved */
+    } else if (!tk_strcmp(name, "car")) {
+        if (!coda_rc_enabled() != !on) coda_rc_toggle();
+    } else if (!tk_strcmp(name, "eq")) {
+        eq_load(&s);
+        if ((s.mode != EQ_OFF) != !!on) eq_toggle();
+    } else if (!tk_strcmp(name, "smart")) {
+        st.smart_wifi = !!on;
+        write_int_config(st.smart_wifi, "Q2POD", "SMARTWIFI");
+    } else if (!tk_strcmp(name, "light") && on >= 0 && on <= 2) { /* q2ui's Display: Off, On, Auto */
+        int buf[11];
+        st.light = on;
+        write_int_config(on, "IPOD", "LIGHT");
+        st.light_day = light_day(clock_now(buf)); /* Auto applies from this choice, as Display's row */
+    } else if (!tk_strcmp(name, "bright") && on >= 0 && on <= 100) { /* q2ui's Control Center's slider */
+        config_lightness(on); /* the backlight set and saved, as Display's Brightness row sets a step */
+    } else if (!tk_strcmp(name, "motion")) { /* q2ui's Display: Reduce Motion */
+        st.reduce_motion = !!on;
+        write_int_config(st.reduce_motion, "IPOD", "REDUCEMOTION");
+    } else if (!tk_strcmp(name, "gapless")) { /* q2ui's Playback: as stock's own row (0x4bcfa4) */
+        write_int_config(!!on, "PLAYSET", "GAPLESS");
+        mclSetGaplessMode(!!on);
+    } else if (!tk_strcmp(name, "xfade")) { /* q2ui's Playback: Smart Crossfade */
+        xfade_set(on);
+    } else if (!tk_strcmp(name, "night") && on >= 0 && on <= 2) { /* q2ui's Display: Night Shift Off, On, Auto */
+        night_set(on, night_kelvin()); /* as its page's row, saved as its page saves (nightshift.c) */
+        night_save();
+    } else if (!tk_strcmp(name, "home") && on >= 0 && on <= 1) { /* q2ui's Display: Home's Split or Full */
+        write_int_config(st.home = on, "IPOD", "HOME");
+        coverflow_home_layout(); /* as Display's own row: demo's Home takes it at once */
+    } else if (!tk_strcmp(name, "songartist") || !tk_strcmp(name, "songlength")) { /* q2ui's Display: the song rows */
+        return song_option_set(!tk_strcmp(name, "songlength"), on);
+    } else if (!tk_strcmp(name, "nightk") && on >= NS_WARM && on <= NS_COOL && !(on % NS_STEP)) { /* its Warmth */
+        night_set(night_on(), on);
+        night_save();
+    } else
+        return -1;
+    return 0;
 }

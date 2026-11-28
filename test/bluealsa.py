@@ -4,10 +4,11 @@ and the A2DP write MTU clamp through each codec's encoder thread.
 
 Usage: python test/bluealsa.py BUILD_DIRECTORY (requires the existing Unicorn).
 """
-import pathlib, platform, struct, subprocess, sys
+import json, pathlib, platform, struct, subprocess, sys
 from unicorn import UC_HOOK_CODE
 from unicorn.mips_const import *
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
+from build import stock_program  # noqa: E402
 from build import (BLUEALSA, BT_AAC_RATE, BT_DROP, BT_DROP_HANDLER, BT_MTU_MAX, BT_PCM_CALLERS, BT_SBC_POOL,
                    BT_SILENCE_SAMPLES, bt_silence, load_elf, machine, read, word)
 
@@ -494,9 +495,10 @@ def check_mtu(stock, raw, aptx, ldac):
 
 def check(directory):
     directory = pathlib.Path(directory)
-    def extract(name):
-        return subprocess.check_output(['unsquashfs', '-cat', str(directory / name), BLUEALSA])
-    stock, patched = extract('stock.squashfs'), extract('rootfs.squashfs')
+    manifest = json.loads((directory / 'manifest.json').read_text())
+    def extract(name, path=BLUEALSA):
+        return subprocess.check_output(['unsquashfs', '-cat', str(directory / name), path])
+    stock, patched = extract('stock.squashfs'), extract('rootfs.squashfs', stock_program(BLUEALSA, manifest))
     # Execute stock argument construction independently of the reset patch's
     # metadata: it must identify the actual caller's PCM tail, not nearby memory.
     layouts = ((0x406474, 0x220, 0x294), (0x4150a8, 0x118, 0x14c),

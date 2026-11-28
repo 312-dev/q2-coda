@@ -27,9 +27,9 @@ OLED_XML = (host.ROOT/'assets/themes/oled/theme.xml').read_text()
 # OLED's light half's paper and ink (theme.xml's colorScheme light.paper, light.ink)
 OLED_PAPER, OLED_INK = (int(host.tools_build.need(re.search(rf'<colorScheme sel[^>]*light\.{k}="#([0-9a-f]{{6}})"', OLED_XML),
                                                   f'No light.{k}')[1], 16) for k in ('paper', 'ink'))
-# OLED's one accent (theme.xml's colorScheme oled-blue): its five tones
-OLED_BLUE = [int(v, 16) for v in host.tools_build.need(re.search(r'name="oled-blue"[^>]*tones="([^"]*)"', OLED_XML),
-                                                       'No oled-blue')[1].replace('#', '').split()]
+# OLED's accents (theme.xml's colorSchemes oled-arterial, the default, and oled-blue): each one's five tones
+OLED_TONES = {n: [int(v, 16) for v in host.tools_build.need(re.search(rf'name="{n}"[^>]*tones="([^"]*)"', OLED_XML),
+                                                            f'No {n}')[1].replace('#', '').split()] for n in ('oled-arterial', 'oled-blue')}
 
 
 LOWER = bytes.maketrans(bytes(range(65, 91)), bytes(range(97, 123)))
@@ -333,11 +333,13 @@ def test_accent_map_in_light_mode_flips_neutrals_and_keeps_clear(fw, clock):
 
 
 @pytest.mark.parametrize('light', [b'0', b'1'])
-def test_the_accent_keeps_its_tones(fw, clock, light):
-    """OLED's one accent, oled-blue (theme.xml): a colored accent keeps its five tones in either half."""
-    Config(fw, LIGHT=light)
+@pytest.mark.parametrize('stored, scheme', [(None, 'oled-arterial'), (b'10', 'oled-blue'), (b'11', 'oled-arterial'), (b'9', 'oled-arterial')])
+def test_the_accent_keeps_its_tones(fw, clock, light, stored, scheme):
+    """OLED's accent, oled-arterial unless OLED_ACCENT names oled-blue (theme.xml): it keeps its five tones in either
+    half; 9, the ACCENTS row Arterial OLED does not offer, reads as the default."""
+    Config(fw, LIGHT=light, **({'OLED_ACCENT': stored} if stored else {}))
     tone = fw.fn('accent_tone', C.c_uint, C.c_int)
-    assert [tone(i) for i in range(5)] == OLED_BLUE
+    assert [tone(i) for i in range(5)] == OLED_TONES[scheme]
 
 
 def test_mix_runs_from_one_to_the_other(fw):
@@ -407,7 +409,9 @@ def test_artists_default_to_album_artist(fw):
 
 
 @pytest.mark.parametrize('values, home, light', [
-    ({}, 0, 0), (dict(HOME=b'1', LIGHT=b'1'), 1, 1), (dict(HOME=b'2', LIGHT=b'1'), 0, 1), (dict(HOME=b'3', LIGHT=b'3'), 0, 0),
+    # nothing stored, or a LIGHT out of range: Auto (the owner's default, 2026-11-27), light by the clock fixture's day
+    ({}, 0, 1), (dict(HOME=b'1', LIGHT=b'1'), 1, 1), (dict(HOME=b'2', LIGHT=b'1'), 0, 1), (dict(HOME=b'3', LIGHT=b'3'), 0, 1),
+    (dict(LIGHT=b'0'), 0, 0),
 ])
 def test_display_settings(fw, clock, values, home, light):
     Config(fw, **values)

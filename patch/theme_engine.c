@@ -82,7 +82,8 @@ static const unsigned accents[][5] = { ACCENTS };
 _Static_assert(sizeof accents / sizeof *accents == ACCENT_N, "one accent per ACCENTS row");
 const char *const accent_names[] = { "Accent: Graphite",  "Accent: Crimson", "Accent: Tidal",
                                      "Accent: Champagne", "Accent: Cobalt",  "Accent: Tangerine",
-                                     "Accent: Plum",      "Accent: Ivory",   "Accent: Green" };
+                                     "Accent: Plum",      "Accent: Ivory",   "Accent: Green",
+                                     "Accent: Arterial" };
 _Static_assert(sizeof accent_names / sizeof *accent_names == ACCENT_N, "one name per ACCENTS row");
 _Static_assert(sizeof st.setting_label / sizeof *st.setting_label == SETTING_OWN + THEME_KEYS,
                "one label per Display row");
@@ -175,7 +176,7 @@ void light_apply(const int *tm) {
 __attribute__((noinline)) static void settings_read(void) {
     for (int i = 0; i < 3; ++i)
         *setting_values[i] = config_value("IPOD", setting_keys[i], setting_counts[i], 0);
-    st.light = config_value("IPOD", "LIGHT", 3, 0); /* dark unless chosen; 2 Auto */
+    st.light = config_value("IPOD", "LIGHT", 3, 2); /* Auto unless chosen (the owner's, 2026-11-27); 0 dark, 1 light */
     /* Smart Awake on unless chosen (tools/build.py DEFAULT_IPOD writes it so after a reset) */
     st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 1);
     st.clicker = config_value("IPOD", "CLICKER", 3, 0);      /* Both unless chosen (clicker.c) */
@@ -232,6 +233,15 @@ static int theme_own(int k) { return option_of(theme(), SETTING_OWN + k) ? st.ow
  * SONG_LENGTH_* (navigation.h) in theme.xml's order */
 int song_artist(void) { return theme_own(OWN_SONGARTIST); }
 int song_length(void) { return theme_own(OWN_SONGLENGTH); }
+/* q2ui's Display page's choice of either ("set songartist N", "set songlength N": control_center.c q2ui_cc_set),
+ * stored as Display's own row stores it: 0, or -1 for a value outside the option's or a theme without it */
+int song_option_set(int length, int v) {
+    int k = length ? OWN_SONGLENGTH : OWN_SONGARTIST;
+    if (!option_of(theme(), SETTING_OWN + k) || v < 0 || v >= theme_keys[k].n) return -1;
+    st.own[k] = v;
+    write_int_config(v, "IPOD", theme_keys[k].key);
+    return 0;
+}
 /* OLED's Track Time (np_bar.c np_sync): 1 when Now Playing's right-hand time is the track's length,
  * 0 for what is left of it */
 int np_time_total(void) { return theme_own(OWN_NPTIME); }

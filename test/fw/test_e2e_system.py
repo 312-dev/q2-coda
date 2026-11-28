@@ -484,7 +484,15 @@ def grey(color):
     return color & 255 == color >> 8 & 255 == color >> 16 & 255
 
 
-def test_light_mode_turned_on_redraws_the_screen_light_and_stays_on_after_a_restart(q2):
+def test_light_mode_turned_on_redraws_the_screen_light_and_stays_on_after_a_restart(fw, library, tmp_path):
+    q2 = Q2(fw, library, tmp_path, Flash(IPOD_LIGHT='0'))  # chosen Off: with no key it is Auto
+    try:
+        light_mode_on(q2)
+    finally:
+        q2.close()
+
+
+def light_mode_on(q2):
     appearance(q2)
     assert q2.screen.row('Light Mode') == 'Light Mode: Off' and ink(q2) == 0xff000000
     q2.screen.click('Light Mode')
@@ -501,7 +509,15 @@ def test_light_mode_turned_on_redraws_the_screen_light_and_stays_on_after_a_rest
 
 
 @pytest.mark.parametrize('wall, light', [(NOON, True), (NIGHT, False)])
-def test_light_mode_auto_follows_the_clock_after_a_restart(q2, wall, light):
+def test_light_mode_auto_follows_the_clock_after_a_restart(fw, library, tmp_path, wall, light):
+    q2 = Q2(fw, library, tmp_path, Flash(IPOD_LIGHT='0'))  # chosen Off, two clicks from Auto
+    try:
+        auto_after_restart(q2, wall, light)
+    finally:
+        q2.close()
+
+
+def auto_after_restart(q2, wall, light):
     q2.wall = NOON
     appearance(q2)
     q2.screen.click('Light Mode')

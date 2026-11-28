@@ -1,0 +1,94 @@
+"""tools/ui.py: where q2ui's build finds its inputs, and its command line. The build itself (build) needs a
+compiler and the caches; test/ui.py runs it."""
+import pathlib
+
+import pytest
+
+import player
+import thirdparty
+import ui
+
+
+def test_stb_is_fetched_by_its_pin(monkeypatch, tmp_path):
+    asked = []
+
+    def fetch(url, digest, name):
+        asked.append((url, digest, name))
+        return tmp_path/name
+
+    monkeypatch.setattr(thirdparty, 'fetch', fetch)
+    assert ui.stb() == tmp_path/'stb_truetype-1.26'
+    version, url, digest = ui.STB
+    assert asked == [(url, digest, f'stb_truetype-{version}/stb_truetype.h')]
+    # a commit, not a branch: the bytes the SHA-256 names cannot move
+    assert url.startswith('https://raw.githubusercontent.com/nothings/stb/') and len(url.split('/')[5]) == 40
+    assert len(digest) == 64 and url.endswith('/stb_truetype.h')
+
+
+def test_stb_image_is_fetched_by_its_pin(monkeypatch, tmp_path):
+    asked = []
+
+    def fetch(url, digest, name):
+        asked.append((url, digest, name))
+        return tmp_path/name
+
+    monkeypatch.setattr(thirdparty, 'fetch', fetch)
+    assert ui.stb_image() == tmp_path/'stb_image-2.30'
+    version, url, digest = ui.STB_IMAGE
+    assert asked == [(url, digest, f'stb_image-{version}/stb_image.h')]
+    # the same commit as stb_truetype's: one upstream state, two headers
+    assert url.split('/')[5] == ui.STB[1].split('/')[5] and len(digest) == 64 and url.endswith('/stb_image.h')
+
+
+def test_sqlite_include_is_the_newest_built(monkeypatch, tmp_path):
+    monkeypatch.setattr(player, 'THIRDPARTY', tmp_path)
+    with pytest.raises(SystemExit) as e:
+        ui.sqlite_include()
+    assert 'no SQLite' in str(e.value) and 'thirdparty.py' in str(e.value)
+    for name in ('sqlite-3.50.0-aa', 'sqlite-3.54.1-bb'):
+        (tmp_path/'out'/name/'usr/include').mkdir(parents=True)
+        (tmp_path/'out'/name/'usr/include/sqlite3.h').write_text('')
+    (tmp_path/'out/sqlite-3.99.0-cc/usr/include').mkdir(parents=True)  # no header in it: not a finished build
+    assert ui.sqlite_include() == tmp_path/'out/sqlite-3.54.1-bb/usr/include'
+
+
+def test_main(monkeypatch, capsys, tmp_path):
+    binary = tmp_path/'q2ui'
+    binary.write_bytes(b'x' * 7)
+    built = []
+    monkeypatch.setattr(ui, 'build', lambda target, goal: built.append((target, goal)) or binary)
+    monkeypatch.setattr(ui.sys, 'argv', ['ui.py', 'build', 'mips'])
+    ui.main()
+    assert capsys.readouterr().out == f'{binary}\n'
+    monkeypatch.setattr(ui.sys, 'argv', ['ui.py', 'size', 'host'])
+    ui.main()
+    assert capsys.readouterr().out == f'{binary}: 7 bytes\n' and built == [('mips', 'q2ui'), ('host', 'q2ui')]
+    # the toolkit's own checks are another goal of the same build
+    monkeypatch.setattr(ui.sys, 'argv', ['ui.py', 'test', 'host'])
+    ui.main()
+    assert capsys.readouterr().out == f'{binary}\n' and built.pop() == ('host', 'q2ui-test')
+    for argv in (['ui.py'], ['ui.py', 'build'], ['ui.py', 'run', 'host'], ['ui.py', 'build', 'arm'], ['ui.py', 'build', 'host', 'x']):
+        monkeypatch.setattr(ui.sys, 'argv', argv)
+        with pytest.raises(SystemExit) as e:
+            ui.main()
+        assert e.value.code == ui.__doc__
+    assert built == [('mips', 'q2ui'), ('host', 'q2ui')]
+
+
+def test_the_host_library_is_a_file_path():
+    assert isinstance(ui.HOST_SQLITE, pathlib.Path) and ui.HOST_SQLITE.name.startswith('libsqlite3.so')
+
+
+def test_the_build_takes_the_q2s_binary(monkeypatch, tmp_path):
+    """tools/build.py ui_binary: a --ui-spike build's q2ui is tools/ui.py's mips build, never this machine's."""
+    import build
+    binary = tmp_path/'q2ui'
+    binary.write_bytes(b'\x7fELF q2ui')
+    asked = []
+    monkeypatch.setattr(ui, 'build', lambda target, goal='q2ui': asked.append(target) or binary)
+    assert build.ui_binary() == b'\x7fELF q2ui' and asked == ['mips']
+    assert build.UI == 'usr/bin/q2ui'
+    # demo starts it (patch/q2ui_gate.c): the gate's path is the image's, and no boot hook names it
+    gate = (pathlib.Path(build.__file__).resolve().parent.parent/'patch/q2ui_gate.c').read_text()
+    assert f'#define Q2UI_BIN "/{build.UI}"' in gate and '#define Q2UI_TARGET "/mnt/data/ui-target"' in gate
+    assert not hasattr(build, 'UI_SPIKE_HOOK')

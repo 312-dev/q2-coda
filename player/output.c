@@ -1138,8 +1138,10 @@ static void car_slow(struct output *o, int frames, int64_t us) {
     plog('W', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
 }
 
-/* Every write to the device. On way 3 it is timed and tapped for the car's trace (docs/iphone-mode.md#car-trace). */
+/* Every write to the device, copied to the output tap (tap.c) on every way. On way 3 it is also timed and tapped for
+ * the car's trace (docs/iphone-mode.md#car-trace). */
 static int sink(struct output *o, const uint8_t *data, int frames) {
+    pcm_tap_put(&o->f, data, frames);
     if (o->way != 3) return sink_to(o, data, frames);
     car_tap(data, (int64_t)frames * frame_bytes(o));
     int64_t t = car_trace_now();
@@ -1363,7 +1365,7 @@ static int car_check(struct output *o) {
 #ifdef HAVE_ALSA
     if (o->pcm) {
         snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
-        if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can);
+        if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can), pcm_tap_back(can);
     }
 #endif
     if (car_reopen(o, r) < 0 || resampler(o) < 0) return -1;
@@ -1391,6 +1393,7 @@ static int rewind_by(struct output *o, int want) {
         snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
         if (can < want) want = can > 0 ? (int)can : 0;
         snd_pcm_sframes_t got = want ? snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)want) : 0;
+        pcm_tap_back(got);
         return got > 0 ? (int)got : 0;
     }
 #endif
@@ -1400,6 +1403,7 @@ static int rewind_by(struct output *o, int want) {
      * song's frames (output_hold) taken back are gone from it until written again */
     if (ftruncate(fileno(o->file), ftello(o->file))) return 0;
     o->written -= want;
+    pcm_tap_back(want);
     return want;
 }
 
@@ -1442,6 +1446,7 @@ static void hold(struct output *o, int64_t d) {
     o->hist_n = 0, o->clk_at = o->clk_len, o->holding = 1, o->paused = 0;
 #ifdef HAVE_ALSA
     if (o->pcm) {
+        pcm_tap_back(d);              /* the frames not yet heard, written again at the resume */
         snd_pcm_drop(o->pcm); /* out of its pause too */
         snd_pcm_prepare(o->pcm);
         return;
@@ -1493,6 +1498,7 @@ void output_idle_end(struct output *o) {
     o->idle = 0, o->clk_at = o->clk_len, o->hist_n = 0;
 #ifdef HAVE_ALSA
     if (o->pcm) {
+        pcm_tap_back(dev_delay(o)); /* the silence not yet heard */
         snd_pcm_drop(o->pcm);
         snd_pcm_prepare(o->pcm);
         o->paused = o->holding;
@@ -1560,11 +1566,12 @@ void output_drop(struct output *o) {
          * iPhone's runs on: no stop and start for the car. A stop is silent too: the gadget's STOP zeroes its packet
          * buffers, which its completion then sends again and again (u_audio.c uac_pcm_trigger, read 2026-11-22) */
         snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
-        if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can);
+        if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can), pcm_tap_back(can);
         o->paused = 0;
         return;
     }
     if (o->pcm) {
+        pcm_tap_back(dev_delay(o)); /* what the device held, never heard */
         snd_pcm_drop(o->pcm);
         snd_pcm_prepare(o->pcm);
         o->paused = 0;
@@ -1595,10 +1602,11 @@ void output_close(struct output *o) {
     if (o->pcm && o->way == 3) {
         /* the last packets silence, played out before the close (the gadget's STOP then zeroes its packets) */
         snd_pcm_sframes_t can = snd_pcm_rewindable(o->pcm);
-        if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can);
+        if (can > 0 && snd_pcm_rewind(o->pcm, (snd_pcm_uframes_t)can) > 0) car_trace_back(can), pcm_tap_back(can);
         size_t bytes = (size_t)o->period * 2 * o->f.channels * o->f.bytes;
         void *z = bytes ? calloc(1, bytes) : NULL;
-        if (z && snd_pcm_wait(o->pcm, CAR_WAIT_MS) > 0) snd_pcm_writei(o->pcm, z, o->period * 2);
+        if (z && snd_pcm_wait(o->pcm, CAR_WAIT_MS) > 0 && snd_pcm_writei(o->pcm, z, o->period * 2) > 0)
+            pcm_tap_put(&o->f, z, (int)o->period * 2);
         free(z);
         /* played out with a bound, not a drain: a car that stops reading meanwhile would hold a drain for ever */
         snd_pcm_sframes_t d = 0;

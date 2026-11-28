@@ -1,0 +1,403 @@
+/* The toolkit's own checks, on this machine with no panel: built from ui/ less main.c by
+ * `python3 tools/ui.py test` and run by test/ui.py. Each prints ok or FAIL and what it saw; the
+ * exit code is the number that failed. */
+#include <math.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include "../patch/night_scale.h"
+#include "px.h"
+#include "q2ui.h"
+
+static int failed;
+static void check(const char *what, int ok, const char *fmt, ...) {
+    printf("%s %s", ok ? "ok  " : "FAIL", what);
+    if (!ok) {
+        va_list ap;
+        printf(": ");
+        va_start(ap, fmt);
+        vprintf(fmt, ap);
+        va_end(ap);
+        ++failed;
+    }
+    printf("\n");
+}
+static uint32_t at(int x, int y) { return canvas[y * SCREEN_W + x] & 0xffffff; }
+static void all(void) { clip_set((rect_t){ 0, 0, SCREEN_W, SCREEN_H }); }
+
+/* a spring stepped once over a time lands where many small steps over it do, and a new target
+ * mid-way keeps its speed */
+static void springs(void) {
+    for (int under = 0; under < 2; ++under) {
+        float damp = under ? 0.7f : 1.0f;
+        spring_t a = { 0, 0, 32 }, b = a;
+        spring_step(&a, 0.1f, 0.2f, damp);
+        for (int i = 0; i < 100; ++i) spring_step(&b, 0.001f, 0.2f, damp);
+        check(under ? "an underdamped spring is the same in one step or a hundred"
+                    : "a spring is the same in one step or a hundred",
+              fabs(a.x - b.x) < 0.02 && fabs(a.v - b.v) < 1.0, "%f %f against %f %f", a.x, a.v, b.x, b.v);
+    }
+    spring_t s = { 0, 0, 32 };
+    double last = 0;
+    int mono = 1, frames = 0;
+    while (spring_step(&s, 1 / 60.0f, 0.2f, 1) && frames < 200) mono &= s.x > last && s.x <= 32, last = s.x, ++frames;
+    check("a critically damped spring neither turns back nor passes its target", mono && s.x == 32, "x %f", s.x);
+    check("it is at rest in 8 to 24 frames of a 0.2 s response", frames >= 8 && frames <= 24, "%d frames", frames);
+    spring_t r = { 0, 0, 32 };
+    spring_step(&r, 0.05f, 0.2f, 1);
+    double v = r.v, x = r.x;
+    r.to = 64;
+    spring_step(&r, 0.001f, 0.2f, 1);
+    check("a new target keeps the place and the speed", fabs(r.x - x) < 0.5 && r.v > v * 0.9, "x %f to %f, v %f to %f", x, r.x, v, r.v);
+    /* a long list: 9,000 rows down, a spring still comes to rest on its row */
+    spring_t far = { 288000.0 - 20, 0, 288000.0 };
+    int steps = 0;
+    while (spring_step(&far, 1 / 60.0f, 0.2f, 1) && steps < 600) ++steps;
+    check("a spring 288,000 px down a list comes to rest", steps < 60 && far.x == 288000.0, "%d frames, at %f", steps, far.x);
+    spring_t u = { 0, 0, 10 };
+    double peak = 0;
+    for (int i = 0; i < 120; ++i) spring_step(&u, 1 / 60.0f, 0.28f, 0.55f), peak = u.x > peak ? u.x : peak;
+    check("an underdamped spring passes its target once and comes to rest on it", peak > 10.2 && u.x == 10, "peak %f, end %f", peak, u.x);
+}
+
+/* an edge between pixels is half of each, on any background, and nothing darker or of another
+ * hue appears along it */
+static void edges(void) {
+    all();
+    fill((rect_t){ 0, 0, SCREEN_W, SCREEN_H }, 0x804020);
+    fill_round((rectf_t){ 10.5f, 10.5f, 40, 20 }, 0, 0, 0xffffff, 1, 0);
+    uint32_t e = at(10, 20), in = at(30, 20), out = at(8, 20);
+    int half = abs((int)(e >> 16) - (0x80 + 0xff) / 2) <= 2 && abs((int)(e >> 8 & 0xff) - (0x40 + 0xff) / 2) <= 2 &&
+               abs((int)(e & 0xff) - (0x20 + 0xff) / 2) <= 2;
+    check("a box edge half over a pixel is half the box and half what was there", half && in == 0xffffff && out == 0x804020,
+          "edge %06x inside %06x outside %06x", e, in, out);
+    fill((rect_t){ 0, 0, SCREEN_W, SCREEN_H }, 0xd02020);
+    fill_round((rectf_t){ 100.3f, 100.6f, 60, 30 }, 8, 0, 0x2160d8, 1, 0);
+    int fringe = 0, partial = 0;
+    for (int y = 98; y < 134; ++y)
+        for (int x = 98; x < 164; ++x) {
+            uint32_t p = at(x, y);
+            int r = (int)(p >> 16), g = (int)(p >> 8 & 0xff), b = (int)(p & 0xff);
+            /* every channel between the background's and the box's */
+            fringe += r < 0x21 - 1 || r > 0xd0 + 1 || g < 0x20 - 1 || g > 0x60 + 1 || b < 0x20 - 1 || b > 0xd8 + 1;
+            partial += p != 0xd02020 && p != 0x2160d8;
+        }
+    check("a rounded box on red has smoothed pixels and none outside the two colours' range", !fringe && partial > 60,
+          "%d out of range, %d smoothed", fringe, partial);
+    /* its area is its geometry's: 60 x 30 less the corners' squares plus their quarter discs */
+    fill((rect_t){ 0, 0, SCREEN_W, SCREEN_H }, 0);
+    fill_round((rectf_t){ 100.3f, 100.6f, 60, 30 }, 8, 0, 0xffffff, 1, 0);
+    double sum = 0, want = 60 * 30 - (4 - 3.14159265) * 8 * 8;
+    for (int y = 90; y < 140; ++y)
+        for (int x = 90; x < 170; ++x) sum += (at(x, y) & 0xff) / 255.0;
+    check("a rounded box at a sub-pixel place covers its own area", fabs(sum - want) < want * 0.01, "%.1f px for %.1f", sum, want);
+    /* leaning, the edge away from the eye is the shorter */
+    fill((rect_t){ 0, 0, SCREEN_W, SCREEN_H }, 0);
+    fill_round((rectf_t){ 20, 200, 300, 40 }, 0, 0.2f, 0xffffff, 1, 0);
+    double top = 0, bottom = 0;
+    for (int x = 0; x < SCREEN_W; ++x) top += (at(x, 204) & 0xff) / 255.0, bottom += (at(x, 236) & 0xff) / 255.0;
+    check("a box leaning back is narrower at its top than at its foot", bottom - top > 1.0 && bottom - top < 12, "%.2f and %.2f px", top, bottom);
+}
+
+/* coverage moved a fraction of a pixel is the same ink, spread over the neighbours */
+static void glyphs(void) {
+    static const uint8_t dot[9] = { 0, 255, 0, 255, 255, 255, 0, 255, 0 };
+    double sums[3];
+    static const float shift[3][2] = { { 0, 0 }, { 0.5f, 0 }, { 0.25f, 0.75f } };
+    all();
+    for (int k = 0; k < 3; ++k) {
+        fill((rect_t){ 0, 0, 40, 40 }, 0);
+        blit_a8(dot, 3, 3, 10 + shift[k][0], 10 + shift[k][1], 0xffffff, 256);
+        sums[k] = 0;
+        for (int y = 0; y < 40; ++y)
+            for (int x = 0; x < 40; ++x) sums[k] += (at(x, y) & 0xff) / 255.0;
+    }
+    check("a glyph between pixels keeps its ink", fabs(sums[1] - sums[0]) < 0.1 && fabs(sums[2] - sums[0]) < 0.1,
+          "%.3f, %.3f, %.3f", sums[0], sums[1], sums[2]);
+    fill((rect_t){ 0, 0, 40, 40 }, 0);
+    blit_a8(dot, 3, 3, 10.5f, 10, 0xffffff, 256);
+    check("half a pixel right, the middle row's ends are half lit", abs((int)(at(10, 11) & 0xff) - 128) <= 3 && (at(11, 11) & 0xff) == 0xff && abs((int)(at(13, 11) & 0xff) - 128) <= 3,
+          "%02x %02x %02x", at(10, 11) & 0xff, at(11, 11) & 0xff, at(13, 11) & 0xff);
+    fill((rect_t){ 0, 0, 40, 40 }, 0);
+    fade_set(0, 13, 0, 2);
+    blit_a8(dot, 3, 3, 10, 10, 0xffffff, 256);
+    fade_clear();
+    check("a fade window dims a blit toward its end", (at(10, 11) & 0xff) == 0xff && (at(12, 11) & 0xff) < 0x20, "%02x %02x", at(10, 11) & 0xff, at(12, 11) & 0xff);
+}
+
+/* a slow ramp: 50 rows from a dim grey to nothing has more rows than levels, so cut off it shows
+ * bands; dithered, a row's mean still follows the ramp and no two neighbours in a row are alike
+ * for long */
+static void ramps(void) {
+    all();
+    fb_depth(8); /* the canvas's own levels: a panel's fewer are flats()' and narrow()'s */
+    fill((rect_t){ 0, 0, SCREEN_W, SCREEN_H }, 0x202020);
+    shade_rows(100, 200, 255, 0);
+    double worst = 0;
+    int mixed = 0;
+    for (int y = 100; y < 200; ++y) {
+        double mean = 0, want = 0x20 * (double)(199 - y) / 99;
+        int lo = 255, hi = 0;
+        for (int x = 0; x < SCREEN_W; ++x) {
+            int v = (int)(at(x, y) & 0xff);
+            mean += v, lo = v < lo ? v : lo, hi = v > hi ? v : hi;
+        }
+        mean /= SCREEN_W;
+        if (fabs(mean - want) > worst) worst = fabs(mean - want);
+        mixed += hi > lo;
+    }
+    check("a dithered fade's rows keep the ramp's mean to a third of a level", worst < 0.34, "worst %.3f", worst);
+    check("most of its rows mix two levels", mixed > 60, "%d of 100", mixed);
+    int count[256] = { 0 }, uniform = 1;
+    for (int i = 0; i < 4096; ++i) ++count[dither64[i]];
+    for (int i = 0; i < 256; ++i) uniform &= count[i] == 16;
+    check("the noise table holds every value 16 times", uniform, "");
+    fb_depth(6);
+}
+
+static void draw_marks(void *st, rect_t r) {
+    (void)st;
+    ui_mark(r);
+}
+static void draw_none(void *st, rect_t r) {
+    (void)st, (void)r;
+}
+/* a page whose draw marks is stopped, not shown */
+static void paint_guard(void) {
+    fflush(stdout);
+    pid_t pid = fork();
+    if (!pid) {
+        static const ui_page bad = { .name = "bad", .draw = draw_marks };
+        /* the abort is the check passing: no core file from it in the caller's directory */
+        setrlimit(RLIMIT_CORE, &(struct rlimit){ 0, 0 });
+        fclose(stderr);
+        ui_push(&bad, 0);
+        ui_clock_fake(1000000);
+        ui_frame(0, 0);
+        _exit(0);
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    check("a draw that marks is aborted", WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT, "status %x", status);
+    static const ui_page good = { .name = "good", .draw = draw_none };
+    ui_push(&good, 0);
+    ui_clock_fake(1000000);
+    check("a draw that only draws is shown", ui_frame(0, 0) == 1 && !ui_painting, "");
+    ui_clock_fake(1016667);
+    check("with nothing marked no frame goes out", ui_frame(0, 0) == 0, "");
+}
+
+/* the turn to a 6-bit panel: the bits the panel drops are clear, black stays black, a flat colour
+ * is the nearest level, and a ramp, dithered where it was drawn, keeps its mean */
+static void narrow(const char *fb) {
+    all();
+    for (int y = 0; y < SCREEN_H; ++y)
+        for (int x = 0; x < SCREEN_W; ++x) canvas[y * SCREEN_W + x] = 0xff000000 | (y < 64 ? 0 : 0x535353);
+    dmg_all();
+    fb_present();
+    FILE *f = fopen(fb, "rb");
+    static uint32_t page[320 * 375];
+    fseek(f, (long)(fb_page() * 320 * 375 * 4), SEEK_SET);
+    size_t got = fread(page, 4, 320 * 375, f);
+    fclose(f);
+    int low = 0, lit = 0;
+    double mean = 0;
+    unsigned n = 0;
+    for (int y = 0; y < SCREEN_H; ++y)
+        for (int x = 0; x < SCREEN_W; ++x) {
+            uint32_t p = page[x * 320 + (319 - y)];
+            low += (p & 0x030303) != 0;
+            if (y < 64)
+                lit += (p & 0xffffff) != 0;
+            else
+                mean += p & 0xff, ++n;
+        }
+    check("a 6-bit panel is sent no low bits", got == 320 * 375 && !low, "%d pixels with some", low);
+    check("black stays black under the dither", !lit, "%d lit", lit);
+    check("flat 0x53 at 6 bits is 0x54 everywhere, the nearest level", mean / n == 0x54, "%.3f", mean / n);
+    /* a ramp slower than the canvas's own levels (8 of them down the screen), which the canvas holds as
+     * dither between two levels: brought to 6 bits, its rows must still average what the ramp is there,
+     * wherever between two levels that falls. Rows are gathered by which of a 6-bit step's four levels
+     * the ramp is at and how far past it, since a fault of the two dithers working against each other
+     * shows as a lean that comes and goes with those. */
+    all();
+    fill_ramp((rect_t){ 0, 0, SCREEN_W, SCREEN_H }, 0x404040, 0x484848);
+    dmg_all();
+    fb_present();
+    f = fopen(fb, "rb");
+    fseek(f, (long)(fb_page() * 320 * 375 * 4), SEEK_SET);
+    got = fread(page, 4, 320 * 375, f);
+    fclose(f);
+    double lean[16] = { 0 }, worst = 0;
+    unsigned rows[16] = { 0 };
+    for (int y = 0; y < SCREEN_H; ++y) {
+        double want = 0x40 + 8.0 * y / (SCREEN_H - 1), sum = 0, part = want - floor(want);
+        for (int x = 0; x < SCREEN_W; ++x) sum += page[x * 320 + (319 - y)] & 0xff;
+        int bin = ((int)floor(want) & 3) * 4 + ((int)(part * 4) & 3); /* which of a 6-bit step's four levels, and how far past it */
+        lean[bin] += sum / SCREEN_W - want, ++rows[bin];
+    }
+    int at = 0;
+    for (int k = 0; k < 16; ++k)
+        if (rows[k] && fabs(lean[k] / rows[k]) > worst) worst = fabs(lean[k] / rows[k]), at = k;
+    /* a 565 link: five bits of red and blue, six of green, each keeping its own mean */
+    fb_depth(565);
+    for (int i = 0; i < SCREEN_W * SCREEN_H; ++i) canvas[i] = 0xff535353;
+    dmg_all();
+    fb_present();
+    f = fopen(fb, "rb");
+    fseek(f, (long)(fb_page() * 320 * 375 * 4), SEEK_SET);
+    got = fread(page, 4, 320 * 375, f);
+    fclose(f);
+    double sums[3] = { 0 };
+    int stray = 0;
+    for (int i = 0; i < 320 * 375; ++i) {
+        stray += (page[i] & 0x070307) != 0;
+        for (int ch = 0; ch < 3; ++ch) sums[ch] += page[i] >> (ch * 8) & 0xff;
+    }
+    fb_depth(6);
+    check("a 565 panel is sent five bits of red and blue and six of green, each the nearest level to the colour",
+          !stray && sums[0] / (320 * 375) == 0x50 && sums[1] / (320 * 375) == 0x54 && sums[2] / (320 * 375) == 0x50,
+          "%d stray, means %.2f %.2f %.2f", stray, sums[2] / (320 * 375), sums[1] / (320 * 375), sums[0] / (320 * 375));
+    check("a ramp between the canvas's levels keeps its mean at 6 bits, wherever between two it is", got == 320 * 375 && worst < 0.12,
+          "leans %.3f of a level at level %d of four, quarter %d", lean[at] / rows[at], at / 4, at % 4);
+}
+
+/* The turn brings every pixel the frame changed, and only those, to the page exactly as one pixel
+ * worked out alone would be: each channel half a panel step up, held at white, the dropped bits
+ * cleared, after Night Shift's scale when it is on. Noise on the canvas and rects of odd sizes and
+ * places (heights that are not whole bands, one pixel wide, at the screen's edges) catch a turn
+ * that takes rows together getting a band's last rows or a rect's edges wrong. */
+static uint32_t one_pixel(uint32_t c, int bits, int kelvin) {
+    static const unsigned char green[] = NS_GREEN, blue[] = NS_BLUE;
+    unsigned v[3] = { c >> 16 & 255, c >> 8 & 255, c & 255 }, out = 0xff000000;
+    if (kelvin) {
+        unsigned i = (unsigned)(kelvin - NS_WARM) / NS_STEP;
+        v[1] = (v[1] * green[i] + 127) / 255, v[2] = (v[2] * blue[i] + 127) / 255;
+    }
+    for (int ch = 0; ch < 3; ++ch) {
+        unsigned b = bits == 565 ? (ch == 1 ? 6 : 5) : (unsigned)bits, w = v[ch] + (0x80u >> b);
+        out |= ((w > 255 ? 255 : w) & (0xffu << (8 - b)) & 0xff) << (16 - 8 * ch);
+    }
+    return out;
+}
+static void turned_exactly(const char *fb) {
+    static const struct {
+        int bits, kelvin;
+    } as[] = { { 6, 0 }, { 5, 0 }, { 565, 0 }, { 8, 0 }, { 6, 3400 }, { 8, 2000 } };
+    static const rect_t odd[] = { { 0, 0, 1, 1 }, { 3, 5, 101, 13 }, { 200, 77, 1, 243 }, { 300, 0, 75, 7 }, { 17, 311, 358, 9 } };
+    static uint32_t page[320 * 375], before[SCREEN_W * SCREEN_H];
+    uint32_t seed = 12345;
+    for (unsigned k = 0; k < sizeof as / sizeof *as; ++k) {
+        fb_depth(as[k].bits);
+        fb_warm(as[k].kelvin);
+        /* two whole frames, so both pages hold the first canvas; a third of one pixel, so the fourth turns
+         * only the odd rects (and that pixel) onto the page the second filled */
+        for (int i = 0; i < SCREEN_W * SCREEN_H; ++i) before[i] = canvas[i] = (seed = seed * 1103515245u + 12345u) >> 4 | 0xff000000;
+        dmg_all(), fb_present(), dmg_all(), fb_present();
+        dmg_add(odd[0]), fb_present();
+        for (int i = 0; i < SCREEN_W * SCREEN_H; ++i) canvas[i] = (seed = seed * 1103515245u + 12345u) >> 4 | 0xff000000;
+        for (unsigned j = 1; j < sizeof odd / sizeof *odd; ++j) dmg_add(odd[j]);
+        fb_present();
+        FILE *f = fopen(fb, "rb");
+        fseek(f, (long)(fb_page() * 320 * 375 * 4), SEEK_SET);
+        size_t got = fread(page, 4, 320 * 375, f);
+        fclose(f);
+        int wrong = 0, wx = -1, wy = -1;
+        for (int y = 0; y < SCREEN_H; ++y)
+            for (int x = 0; x < SCREEN_W; ++x) {
+                int in = 0;
+                for (unsigned j = 0; j < sizeof odd / sizeof *odd; ++j)
+                    in |= x >= odd[j].x && x < odd[j].x + odd[j].w && y >= odd[j].y && y < odd[j].y + odd[j].h;
+                uint32_t want = one_pixel(in ? canvas[y * SCREEN_W + x] : before[y * SCREEN_W + x], as[k].bits, as[k].kelvin);
+                if (page[x * 320 + (319 - y)] != want && !wrong++) wx = x, wy = y;
+            }
+        char what[160];
+        snprintf(what, sizeof what, "the turn at %d bits%s sends each changed pixel as it is alone, and leaves the rest", as[k].bits,
+                 as[k].kelvin ? " under Night Shift" : "");
+        check(what, got == 320 * 375 && !wrong, "%d pixels differ, the first at (%d, %d)", wrong, wx, wy);
+    }
+    fb_warm(0);
+    fb_depth(6);
+}
+
+/* The page on screen, read back from the panel file. */
+static uint32_t shown[320 * 375];
+static void read_back(const char *fb) {
+    dmg_all();
+    fb_present();
+    FILE *f = fopen(fb, "rb");
+    fseek(f, (long)(fb_page() * 320 * 375 * 4), SEEK_SET);
+    if (fread(shown, 4, 320 * 375, f) != 320 * 375) memset(shown, 0, sizeof shown);
+    fclose(f);
+}
+static uint32_t shown_at(int x, int y) { return shown[x * 320 + (319 - y)] & 0xffffff; }
+
+/* On a 6-bit panel a flat colour is one colour, the nearest the panel has, and only what is a ramp
+ * is dithered, once (docs/ui-rewrite.md#gradients). */
+static void flats(const char *fb) {
+    all();
+    /* Home's pane and a blank cover are greys off the 6-bit grid: the owner saw their grain */
+    fill((rect_t){ 0, 0, SCREEN_W, 160 }, 0x2a2a2c);
+    fill_round((rectf_t){ 20.5f, 180.5f, 300, 100 }, 8, 0, 0x1c1c1e, 1, 0);
+    read_back(fb);
+    int others = 0, inside = 0;
+    for (int y = 0; y < 160; ++y)
+        for (int x = 0; x < SCREEN_W; ++x) others += shown_at(x, y) != shown_at(0, 0);
+    for (int y = 195; y < 265; ++y)
+        for (int x = 40; x < 300; ++x) inside += shown_at(x, y) != shown_at(40, 195);
+    check("a flat fill off the panel's levels comes out one colour, the nearest it has",
+          !others && shown_at(0, 0) == 0x2c2c2c, "%d pixels of another colour; the first is %06x", others, shown_at(0, 0));
+    check("and so does the inside of a rounded box", !inside && shown_at(40, 195) == 0x1c1c20, "%d of another; %06x", inside, shown_at(40, 195));
+    /* a ramp is still dithered, and its grain is fine: the means of 8 x 8 blocks stay near the ramp. Two
+     * dithers one after the other, whatever their noise, leave coarser grain than one */
+    fill_ramp((rect_t){ 0, 0, SCREEN_W, SCREEN_H }, 0x404040, 0x484848);
+    read_back(fb);
+    int mixed = 0;
+    double grain = 0;
+    unsigned blocks = 0;
+    for (int y = 0; y < SCREEN_H; ++y) {
+        int lo = 255, hi = 0;
+        for (int x = 0; x < SCREEN_W; ++x) {
+            int v = (int)(shown_at(x, y) & 0xff);
+            lo = v < lo ? v : lo, hi = v > hi ? v : hi;
+        }
+        mixed += hi > lo;
+    }
+    for (int by = 0; by + 8 <= SCREEN_H; by += 8)
+        for (int bx = 0; bx + 8 <= SCREEN_W; bx += 8, ++blocks) {
+            double sum = 0, want = 0x40 + 8.0 * (by + 3.5) / (SCREEN_H - 1);
+            for (int y = by; y < by + 8; ++y)
+                for (int x = bx; x < bx + 8; ++x) sum += shown_at(x, y) & 0xff;
+            grain += (sum / 64 - want) * (sum / 64 - want);
+        }
+    grain = sqrt(grain / blocks);
+    check("a ramp is still dithered at 6 bits", mixed > 250, "%d of 320 rows mix levels", mixed);
+    /* measured: 0.072 dithered once from 16 bits to the panel's 6; 0.115 dithered to 8 and then to 6 */
+    check("and finely: the means of 8 x 8 blocks are within 0.09 of a level of the ramp, root mean square", grain < 0.09, "%.3f", grain);
+}
+
+int main(int argc, char **argv) {
+    char regular[300], medium[300];
+    if (argc < 3) return fprintf(stderr, "usage: q2ui-test PANEL_FILE FONTS_DIR\n"), 2;
+    if (fb_open(argv[1], 6)) return fprintf(stderr, "cannot use %s\n", argv[1]), 2;
+    snprintf(regular, sizeof regular, "%s/inter.ttf", argv[2]);
+    snprintf(medium, sizeof medium, "%s/inter-medium.ttf", argv[2]);
+    if (text_open(regular, medium, 0)) return fprintf(stderr, "no font in %s\n", argv[2]), 2;
+    fb_vsync = 0;
+    springs();
+    edges();
+    glyphs();
+    ramps();
+    narrow(argv[1]);
+    turned_exactly(argv[1]);
+    flats(argv[1]);
+    paint_guard();
+    printf("q2ui-test: %s\n", failed ? "FAILED" : "all checks passed");
+    return failed;
+}

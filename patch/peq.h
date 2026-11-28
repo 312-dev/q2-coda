@@ -370,10 +370,7 @@ extern int peq_chained; /* peq_ui.c: peq_stock_eq ran this boot */
 void peq_chain(void);   /* crossfade.c: peq_attach once a connect (ringnav_mode), while playing */
 int swap_on(void);
 int mono_on(void);   /* crossfade.c: Mono Audio's setting */
-#define NS_WARM 2000 /* nightshift.c: Night Shift's temperatures, K */
-#define NS_COOL 5000
-#define NS_STEP 100
-#define NS_DEFAULT 3400
+#include "night_scale.h" /* Night Shift's temperatures, K (nightshift.c) */
 int night_on(void), night_kelvin(void); /* night_on: 0 Off, 1 On, 2 Auto */
 void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ circle */
 void night_set(int on, int kelvin), night_save(void), night_paint(void *canvas), night_clock(int dark);
@@ -478,7 +475,13 @@ int addon_wake(const char *id), addon_ready(const char *id);
  * docs/internals.md#card-app-sync): 0 nothing, 1 checking, 2 downloading with *permille (unless 0)
  * how far */
 int addon_sync(int *permille);
-int addon_offline(void); /* a running app's server out of reach (status_row.c) */
+int addon_offline(void); /* a running app's server out of reach (cloud_reach.c) */
+/* cloud_reach.c (docs/internals.md#cloud-reach): the services whose transfers note their outcome,
+ * the note (curl_easy_perform's result and, when 0, the HTTP status), and the OR the status row's
+ * offline glyph shows */
+enum { REACH_SCROBBLE, REACH_ONLINE, REACH_UPDATES, REACH_ZONE, REACH_RADIO, REACH_TIDAL, REACH_N };
+void reach_note(int service, int rc, long http);
+int reach_is_down(int service), cloud_offline(void);
 int addon_offline_ok(const char *id), addon_offline_ask(const char *id, int add, const char *key);
 /* addon.c's card games (q2app game=1), Games' rows after its own: how many (a scan), one's name,
  * its start over the screen (1 when it runs), whether one runs, and ringnav_input's events for it
@@ -496,6 +499,9 @@ int addon_game_input(void *e), addon_is_game(const char *id);
 void ringnav_wdt_long(void);   /* system.c: the watchdog's long count for a long pass */
 int ringnav_smart_awake(void); /* navigation.c: Smart Awake (IPOD KEEPLIT) is on */
 void library_poll(void); /* addon_library.c: an app's library update request, once per addon_poll */
+/* q2ui_gate.c: q2ui has the screen (its pid, or -1 about to start); its pass; an event that is not demo's */
+int q2ui_on(void), q2ui_input(unsigned type, unsigned key);
+void q2ui_poll(void);
 /* spotify.c's Q2SPOT/1 framing (docs/librespot.md), which the card apps speak too */
 int spot_escape(const char *s, char *out, unsigned size);
 int spot_reply(char *buf, unsigned len, char **f, int max);

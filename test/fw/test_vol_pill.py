@@ -131,8 +131,10 @@ def test_reduce_motion_puts_the_clock_back_at_once(fw, st, pill):
 
 @pytest.mark.parametrize('slots, box', [
     ('lock', BOX),  # bars, Wi-Fi and the padlock, 57 px: room for all of it
-    ('sync', (50, 8, 185, 30)),  # and a download's ring, 79 px: narrower, ending VP_CLEAR short of the leftmost
-    ('crowd', (35, 8, 141, 30)),  # every slot, 138 px: VP_MIN_W, ending there, so it leaves the clock's place
+    ('sync', (50, 8, 187, 30)),  # and a download, 77 px: narrower, ending VP_CLEAR short of the leftmost
+    ('crowd', (50, 8, 152, 30)),  # and the cloud and a headset's rune, 112 px: narrower still
+    ('guest', (30, 8, 141, 30)),  # a guest relayed to headphones for the rune, 143 px: VP_MIN_W, ending there, so it
+    # leaves the clock's place
 ])
 def test_it_narrows_from_its_right_end_as_the_slots_reach_left(fw, pill, slots, box):
     """The pill keeps the clock's place and ends VP_CLEAR short of the leftmost slot, VP_W at most; at VP_MIN_W (141)
@@ -141,10 +143,16 @@ def test_it_narrows_from_its_right_end_as_the_slots_reach_left(fw, pill, slots, 
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
     if slots != 'lock':
         pill.app(2, 500)
-    if slots == 'crowd':
+    if slots in ('crowd', 'guest'):
         pill.ap.a[0].reach = 1
+    if slots == 'crowd':
         from test_status_row import bt_link
         bt_link(fw, status=3, level=70)
+    elif slots == 'guest':
+        from test_guest import Rig
+        rig = Rig(fw)
+        rig.state(state='playing', out='BMW 6R81')
+        rig.poll()
     pill.dirty.clear()
     pill.volume(40)  # up already: its box alone repaints
     assert pill.dirty == [box]

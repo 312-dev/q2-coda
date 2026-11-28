@@ -387,7 +387,7 @@ static int play(struct source *s, const struct song *song) {
  * first, the one before it next, so the song runs backward without a break and stretch.c's search keeps its pitch.
  * While scanning only SCAN_LEAD_MS is written ahead, not the PCM's half second, so a change of speed and the
  * release are heard that soon. */
-enum { SCAN_LEAD_MS = 150 };
+enum { SCAN_LEAD_MS = 150, SCAN_WAIT_MS = 100 };
 struct rewind {
     int on, at;     /* backward; the whole second the next block ends at */
     int64_t origin; /* the song's frame the backward run began at */
@@ -669,7 +669,12 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
                 fprintf(stderr, "q2player: output way %d now (the car's audio %s)\n", way, way == 3 ? "asked for" : "gone");
             }
         }
-        if (scan && output_delay(out) > (int64_t)f->rate * SCAN_LEAD_MS / 1000) usleep(5000);
+        /* A scan's write is tens of ms of PCM: the wait is until the PCM has played down to SCAN_LEAD_MS, so it never
+         * holds more than that and one write; SCAN_WAIT_MS at most, so a device that has stopped taking frames still
+         * lets a command in. */
+        for (int64_t t0 = now_ms(); scan && output_delay(out) > (int64_t)f->rate * SCAN_LEAD_MS / 1000 &&
+                                    now_ms() - t0 < SCAN_WAIT_MS;)
+            usleep(5000);
 
         /* What is still in the PCM is this song's newest frames, and under a gapless change the tail of the song
          * before as well: the position stays at the start, and the status "ready", until that tail has played. */

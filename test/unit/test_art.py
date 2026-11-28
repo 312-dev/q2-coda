@@ -101,29 +101,29 @@ def test_a_theme_drawing_anothers_art_shares_its_images(monkeypatch):
     assert set(art.images({**other, 'art_id': 'other'})) == {n.replace('oled_', 'other_') for n in mine}
     assert art.theme_images([oled, other]) == mine  # its art_id, OLED's: the same names and bytes
     with pytest.raises(ValueError, match="other: oled_mode_shuffle_on differs from oled's, whose art it draws by name"):
-        art.theme_images([oled, {**other, 'schemes': [*oled['schemes'][:9], {**oled['schemes'][9], 'tones': (0x123456,) * 5}]}])
+        art.theme_images([oled, {**other, 'schemes': [*oled['schemes'][:11], {**oled['schemes'][11], 'tones': (0x123456,) * 5}]}])
 
 
 def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     """OLED's own images: the caret in Chevron grey (each half's) and white for the selection, the play state in each
-    half's ink, Now Playing's shuffle and repeat in Text Secondary (each half's) and Accent Blue when on, the Shuffle row's
-    glyph (regular) in Accent Blue and white for the selection, Folder view's folder (regular) in Text Secondary (each
+    half's ink, Now Playing's shuffle and repeat in Text Secondary (each half's) and the accent when on, the Shuffle row's
+    glyph (regular) in the accent and white for the selection, Folder view's folder (regular) in Text Secondary (each
     half's) and white for the selection, a disabled row's caret in Text Tertiary (each half's), the pickers' check
-    (bold) in Accent Blue and white for the selection, the Wi-Fi page's signal and lock (regular) in Text Primary
-    (each half's) and its failed join's warning-circle in Negative (each half's) and white, the shuffle confirmation's glyph (bold) in Accent Blue, Now Playing's heart and More (regular) in
+    (bold) in the accent and white for the selection, the Wi-Fi page's signal and lock (regular) in Text Primary
+    (each half's) and its failed join's warning-circle in Negative (each half's) and white, the shuffle confirmation's glyph (bold) in the accent, Now Playing's heart and More (regular) in
     Text Primary (each half's), the heart 34 px and its full one (fill) in Text Primary too, More pressed in Text Secondary, and the
     Ratings rows' filled and outlined stars (14 px, and white on the bar), Now Playing's rating page's stars (filled and outlined, 44 px and the
     wheel's 52 px target) in Text Primary (each half's), and Streaming's service marks in the folder's inks, all from the vendored
     Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the menu sheet's symbols
-    (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in Accent Blue,
+    (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in the accent,
     Unfavorite's heart (fill, 19 px) in Favorite pink-red (both halves) and white for the selection,
     the volume's two speakers (fill, 16 px) in Text Secondary (each half's), an artist page's Shuffle and Radio
-    (regular, 16 px) in Accent Blue and white for the lit one, About's quality badge's waveform (bold, 12 px) in Text
+    (regular, 16 px) in the accent and white for the lit one, About's quality badge's waveform (bold, 12 px) in Text
     Primary (each half's), Buttons Lock's padlock and its card's padlock in each half's ink, the playlist pages' tiles
-    (fill, 20 px) in Text Tertiary (each half's) and white, their action glyphs (regular, 18 px) in Accent Blue and
+    (fill, 20 px) in Text Tertiary (each half's) and white, their action glyphs (regular, 18 px) in the accent and
     white, Add Songs' marks (fill, 20 px) in Text Secondary, green and red (each half's) and white, the song rows' cloud
     and arrow (regular, 18 px) in Text Tertiary (each half's) and white for the selection, and Downloads' picked arrow
-    in Accent Blue and white and its kept-by-the-app arrows in Text Secondary (each half's) and white, and a card app's
+    in the accent and white and its kept-by-the-app arrows in Text Secondary (each half's) and white, and a card app's
     sign-in steps (fill, the done check bold, 44 px) in white for their solid circles, Control Center's glyphs (fill,
     white, its sliders' in the block's grey), the USB pages' rows, mode glyphs and toasts, and Up Next's bump arrow and
     Now Playing's queue and radio glyphs, charging's toasts and a card app's server error's (fill, 15 px, each in its
@@ -167,9 +167,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
               'srvtoast': 0xff9f0a}  # addon.c's server error: cloud-slash in Warning
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
-    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'wired', 'noaudio', 'car', 'down',
-                                          'vol', 'mute', 'offline',
-                                          *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
+    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'wired', 'car',
+                                          'vol', 'mute', 'offline', *(f'sync_{f}' for f in range(art.STATUS_SPIN)),
+                                          *(f'drop_{f}' for f in range(art.STATUS_SPIN)))
               for k in ('d', 'l')]  # status_row.c's other glyphs: their own test
     # bt_ui.c's device kinds, its scan spinner and the connection toasts (a drop's in Text Secondary)
     btdev = {f'btdev_{n}_{k}': c for n in art.BT_ROW_GLYPHS for k, c in (('d', 0xababab), ('l', 0x5c5c5c), ('w', 0xffffff))}
@@ -188,6 +188,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     circles = {'circle_check_a': (art.CIRCLE_CHECK_PX, blue), 'circle_check_w': (art.CIRCLE_CHECK_PX, 0xffffff),
                'circle_lock_d': (art.CIRCLE_LOCK_PX, 0xababab), 'circle_lock_l': (art.CIRCLE_LOCK_PX, 0x5c5c5c)}  # list_marks.c
     card = [f'keylock_card_{k}' for k in ('d', 'l')]
+    trash = [f'cardtrash_{k}' for k in ('d', 'l')]  # feedback.c danger_row's, Negative per half
     tiles = {f'pltile_{n}_{k}': c for n in ('playlist', 'otg') for k, c in (('d', 0x858585), ('l', 0x6e6e6e), ('w', 0xffffff))}
     acts = {f'plact_{n}_{k}': c for n in ('shuffle', 'add', 'save', 'clear', 'search') for k, c in (('a', blue), ('w', 0xffffff))}
     pmarks = {f'plmark_{n}_{k}': c for n, d, l in (('in', 0xababab, 0x5c5c5c), ('add', 0x34c759, 0x34c759), ('out', 0xff6b5e, 0xff6b5e))
@@ -197,7 +198,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               'crphone_d', 'crphone_l', 'crphone_w',
                                               *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *warn, *glyphs, *hearts, *menufav, *rates, *stars, *marks, *menus, *speakers, *pair, *quality,
-                                              *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt', 'radio_tower',
+                                              *keylock, *status, *card, *trash, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt', 'radio_tower',
                                               'search_pop', 'search_pop_letters', *(f'search_return_{m}_{k}' for m in ('search', 'go', 'save') for k in 'wa'), 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
                                               *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
@@ -230,6 +231,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.QUALITY_PX, 0xffffff if n.endswith('_d') else 0) for n in quality),
                           *((n, art.STATE_PX, 0 if n.endswith('_l') else 0xffffff) for n in keylock),
                           *((n, art.KEYLOCK_CARD_PX, 0 if n.endswith('_l') else 0xffffff) for n in card),
+                          *((n, art.CARD_TRASH_PX, 0xd70015 if n.endswith('_l') else 0xff453a) for n in trash),
                           *((n, px, c) for n, (px, c) in circles.items()),
                           *((n, art.TILE_PX, c) for n, c in tiles.items()), *((n, art.PL_ACTION_PX, c) for n, c in acts.items()),
                           *((n, art.PL_MARK_PX, c) for n, c in pmarks.items()),
@@ -248,11 +250,12 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
         assert max(at(x, y)[3] for y in range(h) for x in range(w)) > 200
 
 
-@pytest.mark.parametrize('half, primary, secondary, unlit', [('d', 0xffffff, 0xababab, 0x3a3a3c), ('l', 0, 0x5c5c5c, 0xc7c7cc)])
-def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(half, primary, secondary, unlit):
+@pytest.mark.parametrize('half, primary, secondary', [('d', 0xffffff, 0xababab), ('l', 0, 0x5c5c5c)])
+def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(half, primary, secondary):
     """status_row.c's slots, every one 11 px tall (STATUS_INK, the clock's digits') with its ink's top on STATUS_TOP,
     so on the row it covers rows 17 to 27 with the digits: Wi-Fi iOS's fan, 15.6 x 11 in a 16 px box, its levels
-    lighting the dot and bands over the rest in STATUS_UNLIT, the shape one box in every level; wifi-x, a headset's
+    lighting the dot and bands over the rest in the same ink at STATUS_UNLIT (30%, iOS's rule: the owner's,
+    2026-11-27), the shape one box in every level; wifi-x, a headset's
     headphones, the car and the volume pill's speakers (vol_pill.c) sized by their height (wifi-x and the car are wider
     than tall: by the longer side Wi-Fi came out 8 px tall) in Text Primary; the offline cloud in Warning in both halves; the sync arrows' STATUS_SPIN frames in Text Primary (the user's, 2026-11-20: 30 fps, white), 30 to the half turn, each turned from the last."""
     got = art.images(theme.builtins()[0])
@@ -267,35 +270,56 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
     for level in (1, 2, 3):
         size, lit, colours = ink(f'wifi_{level}', 8)
         boxes.add(box(lit))
-        near = lambda c: any(max(abs(a - b) for a, b in zip(rgb(c), k)) <= 16 for k in colours)  # noqa: E731 (blended edges)
-        assert size == (art.STATUS_WIFI_W, art.STATUS_PX) and near(primary) and near(unlit) == (level < 3)
+        w, h, at = pixels(got[f'oled_status_wifi_{level}_{half}'])
+        faint = {at(x, y)[3] for y in range(h) for x in range(w) if at(x, y)[3] and at(x, y)[3] < 250}
+        hues = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}
+        assert size == (art.STATUS_WIFI_W, art.STATUS_PX) and colours == {rgb(primary)} and hues == {rgb(primary)}
+        assert (76 in faint or 77 in faint) == (level < 3)  # the unlit bands' insides: the ink at 30%
     assert boxes == {(0, 15, 1, 11)}  # 16 columns (15.6 of ink), rows 1 to 11: 11 tall
-    for name, w in (('wifi_x', art.STATUS_WIFI_W), ('headphones', art.STATUS_PX), ('car', art.STATUS_CAR_W),
+    for name, w in (('headphones', art.STATUS_PX), ('car', art.STATUS_CAR_W),
                     ('vol', art.STATUS_PX), ('mute', art.STATUS_PX)):
         size, lit, colours = ink(name, 8)
         assert size == (w, art.STATUS_PX) and (name == 'btdim' or colours == {rgb(primary)})
         x0, x1, y0, y1 = box(lit)
         assert (y0, y1) == (1, 11) and x1 - x0 + 1 <= w
-    x0, x1, _, _ = box(ink('wifi_x', 8)[1])
-    assert x1 - x0 + 1 == 14  # wider than its 11 rows
+    # no internet (No net option A): the fan whole and faint, a small x at full ink where its right edge meets the
+    # baseline, the fan cut away round it
+    w, h, at = pixels(got[f'oled_status_wifi_x_{half}'])
+    solid = {(x, y) for y in range(h) for x in range(w) if at(x, y)[3] >= 250}
+    faint = {at(x, y)[3] for y in range(h) for x in range(w) if 0 < at(x, y)[3] < 250}
+    assert (w, h) == (art.STATUS_WIFI_W, art.STATUS_PX) and {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]} == {rgb(primary)}
+    assert solid and all(x >= 10 and y >= 9 for x, y in solid)  # only the x is solid, at the bottom right
+    assert (76 in faint or 77 in faint) and at(7, 2)[3] in (76, 77)  # the fan's outer band, faint at its top
+    assert not any(at(x, y)[3] in (76, 77) for y in range(8, 14) for x in range(9, 16))  # the cut: no fan round the x
     size, lit, colours = ink('offline', 8)  # a card app's server out of reach: cloud-slash in Warning, both halves
     assert size == (art.STATUS_PX, art.STATUS_PX) and colours == {rgb(0xff9f0a)} and box(lit)[2:] == (1, 11)
     frames = [got[f'oled_status_sync_{f}_{half}'] for f in range(art.STATUS_SPIN)]
     assert art.STATUS_SPIN == 30
     assert len(set(frames)) == art.STATUS_SPIN and all(ink(f'sync_{f}')[2] == {rgb(primary)} for f in range(art.STATUS_SPIN))
+    # a download (Download option A): its arrow falls 4 px a second onto the tray drawn under it on rows 11 and 12,
+    # eased in, whole until the last 30% of the second and fading out over it; no arrow-in-a-ring art is left
+    assert f'oled_status_down_{half}' not in got
+    drops = [pixels(got[f'oled_status_drop_{f}_{half}']) for f in range(art.STATUS_SPIN)]
+    top = lambda w, h, at: min(y for y in range(h) for x in range(w) if at(x, y)[3] > 128)  # noqa: E731
+    most = lambda w, h, at: max(at(x, y)[3] for y in range(h) for x in range(w))  # noqa: E731
+    assert all((w, h) == (art.STATUS_PX, art.STATUS_PX) for w, h, _ in drops)
+    assert {at(x, y)[:3] for w, h, at in drops[:21] for y in range(h) for x in range(w) if at(x, y)[3]} == {rgb(primary)}
+    tops = [top(*d) for d in drops[:21]]
+    assert tops[0] == 0 and tops == sorted(tops) and tops[20] >= 2  # it falls, faster as it goes
+    assert all(most(*d) >= 250 for d in drops[:21]) and most(*drops[29]) < 40  # whole, then fading out
+    assert all(at(x, y)[3] < 128 for w, h, at in drops[:15] for y in range(11, h) for x in range(w))  # clear of the tray
 
 
 @pytest.mark.parametrize('half, primary, dim', [('d', 0xffffff, 0x858585), ('l', 0, 0x6e6e6e)])
 def test_the_bluetooth_rune_and_wired_headphones_stand_as_tall_as_the_battery(half, primary, dim):
-    """The Bluetooth rune (dim while connecting), wired headphones (Phosphor's regular headphones) and the deaf ear
-    shown with no output (its regular ear-slash, in Negative in both halves; the user's, 2026-11-25 and 2026-11-26)
-    are 12 px tall,
+    """The Bluetooth rune (dim while connecting) and wired headphones (Phosphor's regular headphones) are 12 px tall,
     the battery's body's height, from their box's top row: status_row.c puts the box on row 16, so their ink is on rows
     16 to 27 and centres on row 21.5 with the battery's and Wi-Fi's (the user's mockup, 2026-11-25). Each box is as
-    wide as its ink: the rune 9 (8.4 of ink), the headphones 14 (13.6), the ear 10 (9.4)."""
+    wide as its ink: the rune 9 (8.4 of ink), the headphones 14 (13.6). No deaf ear (ear-slash) with no output: the
+    owner's, 2026-11-27, "do away with the deaf icon"."""
     got = art.images(theme.builtins()[0])
-    for name, w, ink in (('bt', 9, primary), ('btdim', 9, dim), ('wired', art.STATUS_PX, primary),
-                         ('noaudio', 10, art.token('negative'))):
+    assert not [n for n in got if 'noaudio' in n]
+    for name, w, ink in (('bt', 9, primary), ('btdim', 9, dim), ('wired', art.STATUS_PX, primary)):
         width, h, at = pixels(got[f'oled_status_{name}_{half}'])
         lit = [(x, y) for y in range(h) for x in range(width) if at(x, y)[3] > 128]  # over half covered
         rows = sorted({y for _, y in lit})
@@ -306,9 +330,10 @@ def test_the_bluetooth_rune_and_wired_headphones_stand_as_tall_as_the_battery(ha
 
 
 def test_the_status_rows_wifi_is_a_fan_of_a_dot_and_two_bands_with_gaps():
-    """iOS's fan up its centre line from the apex on the ink's bottom (the clock's baseline): the dot, a 1.4 px gap,
-    a band, a gap, a band, each as STATUS_FAN cuts them (rows more than half covered)."""
-    w, h, at = pixels(art.status_wifi(3, 0xffffff, 0x3a3a3c))
+    """iOS's fan up its centre line from the apex on the ink's bottom (the clock's baseline): the dot, a 2 px gap with
+    no ink in it, a 2 px band, the same gap, a 2 px band, each as STATUS_FAN cuts them (rows more than half covered;
+    the owner's choice by eye on a Q2, 2026-11-27: gaps that do not blur)."""
+    w, h, at = pixels(art.status_wifi(3, 0xffffff))
     column = [at(7, y)[3] + at(8, y)[3] for y in range(h)]  # the two columns either side of the centre line
     on = [y for y in range(h) if column[y] > 255]
     runs, start = [], on[0]
@@ -316,7 +341,9 @@ def test_the_status_rows_wifi_is_a_fan_of_a_dot_and_two_bands_with_gaps():
         if b != a + 1:
             runs.append((start, a))
             start = b
-    assert runs == [(1, 2), (5, 6), (8, 11)]  # outer band, middle band, the dot down to row 11, the ink's bottom
+    assert runs == [(1, 2), (5, 6), (9, 11)]  # outer band, middle band, the dot down to row 11, the ink's bottom
+    # the gaps dark: under 3% in either column (the bands' antialiased edges reach a hair into a gap off the centre line)
+    assert max(column[y] for y in (3, 4, 7, 8)) <= 16
 
 
 @pytest.mark.parametrize('half, ink, gap', [('d', (255, 255, 255), (0, 0, 0)), ('l', (0, 0, 0), (255, 255, 255))])
@@ -407,7 +434,7 @@ def test_phosphor_fills_nonzero_so_an_inner_contour_is_a_hole():
 
 
 def test_oleds_search_pop_is_one_bubble_and_a_strip_of_every_character():
-    """Search's key pop (search_strip.c): the bubble, 30 px wide to the key's foot 66 px down, in Accent Blue, a
+    """Search's key pop (search_strip.c): the bubble, 30 px wide to the key's foot 66 px down, in the accent, a
     rounded head over a neck narrowing to the 18 px key, clear beside the key; the characters' strip, a head's cell per
     character of the strip's sets, white; each glyph's ink centred on its cell's middle within a tenth of a pixel, read
     from the edge columns' coverage (H: two upright stems)."""

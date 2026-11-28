@@ -40,7 +40,20 @@ class DSP(C.Structure):
     _fields_ = [('current', Engine), ('next', Engine), ('pending', Engine),
                 *[(k, C.c_int) for k in ('rate', 'channels', 'ramp', 'ramp_length', 'waiting')]]
 
+REACHING = ('scrobble.c', 'radio.c', 'tidal.c', 'netupdate.c', 'onlinematch.c')  # each notes its transfers' reach
+
+
+def reach_stub(tmp):
+    """cloud_reach.c's reach_note for a host build of a file that notes its transfers' reach (patch/cloud_reach.c;
+    test/fw/test_cloud_reach.py holds the notes themselves): a no-op, as the checks here are of other things."""
+    path = tmp/'reach_stub.c'
+    path.write_text('void reach_note(int service, int rc, long http) { (void)service, (void)rc, (void)http; }\n')
+    return path
+
+
 def compile_host(tmp, name, *sources):
+    if any(str(s).endswith(REACHING) for s in sources):
+        sources = (*sources, reach_stub(tmp))
     path = tmp/name
     subprocess.run(['cc', '-DPEQ_HOST', f'-DPEQ_ROOT="{tmp}/root"', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                     '-Wno-unused-result', '-shared', '-fPIC', *map(str, sources), '-lm', '-o', str(path)], check=True)  # glibc's fortified system()
@@ -1674,7 +1687,7 @@ def scrobble_check(tmp):
     binary = tmp/'scrobble_test'
     subprocess.run(['cc', '-pthread', '-DPEQ_HOST', f'-DPEQ_ROOT="{root}"', f'-DROOT="{root}"', '-D_GNU_SOURCE',
                     '-O1', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-I', str(ROOT/'patch'), '-include', str(tmp/'scrobble_shim.h'),
-                    str(ROOT/'patch/scrobble.c'), str(tmp/'scrobble_test.c'), '-lcrypto', '-o', str(binary)], check=True)
+                    str(ROOT/'patch/scrobble.c'), str(tmp/'scrobble_test.c'), str(reach_stub(tmp)), '-lcrypto', '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
     requests = [line.split('\t', 3) for line in (root/'requests').read_text().splitlines()]
     artist = lambda i: f'Art "{i}" \\ &=+%é'
@@ -2659,6 +2672,8 @@ int main(void) {
     # The download worker on a real pthread, curl scripted: perform runs the progress callback while
     # gate is open, then hands over a body (unless cancelled) and the worker renames or unlinks.
     body = re.sub(r'^(#include|#ifndef PEQ_HOST|#endif|__asm__).*$', '', (ROOT/'patch/tidal.c').read_text(), flags=re.M)
+    # its includes are gone with peq.h: cloud_reach.c's note is a no-op here, as in reach_stub
+    body = 'enum { REACH_TIDAL = 5 };\nstatic void reach_note(int s, int rc, long h) { (void)s, (void)rc, (void)h; }\n' + body
     (tmp/'tidal_dl.c').write_text(TIDAL_DL.replace('TIDAL_SOURCE', body))
     binary = tmp/'tidal_dl'
     subprocess.run(['cc', '-pthread', '-D_GNU_SOURCE', f'-DTIDAL_DIR="{tmp}/tidal"', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',

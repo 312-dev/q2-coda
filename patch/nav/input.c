@@ -27,7 +27,7 @@ static int remote_match(void *e, int spend);
  * Return's press only wakes, its long press and release dropped with it (wake_return), so a hold
  * from dark does not open Home. The wheel never gets here dark: wheel_lock_gate (keylock.c), before
  * this gate, drops its ticks, so a turn neither wakes nor acts. Center is left to stock's release,
- * which lights it as it always has. A key the Buttons Lock holds is left to keylock.c, whose card
+ * which lights it as it always has, but while q2ui has the screen (ringnav_input wakes at its press then). A key the Buttons Lock holds is left to keylock.c, whose card
  * lights the screen. */
 static int wake_key(void *e, unsigned type, unsigned key, unsigned now) {
     if (key == KEY_RETURN && st.wake_return) { /* the waking press's long press and release */
@@ -242,6 +242,15 @@ int ringnav_input(void *wm, void *e) {
         if (e && I(e, EVENT_TYPE) == EVT_KEY_UP) video_key((unsigned)I(e, EVENT_KEY));
         return 0;
     }
+    /* q2ui reads Centre, so stock's Centre release, which lights a dark screen, never sees it: the press wakes it here,
+     * as Return's does (wake_key), and goes no further; q2ui drops what reaches it dark, the release with it (ui/ui.c) */
+    if (e && type == EVT_KEY_DOWN && key == KEY_CENTER && !g_backlight_status && q2ui_on()) {
+        awake_screen();
+        reset_poweroptions_timer(1, 1, 1);
+        woke((unsigned)time_now_ms());
+        return 0;
+    }
+    if (e && q2ui_input(type, key)) return 0; /* q2ui has the screen and reads this itself (q2ui_gate.c) */
     if (addon_game_input(e)) return 0;
     /* the selection bar's press (tilt.c): past the gates that drop a press with its release, and
      * the video and the card game that own every key */
@@ -303,13 +312,13 @@ static unsigned long long now_ms64(void) {
     return ((unsigned long long (*)(void))(void *)time_now_ms)();
 }
 /* window_manager_paint, a leaf (tools/build.py WM_PAINT_LEAF): the window manager's own paint
- * (vtable +0xc), except while q2video or a card game has the framebuffer (each poll repaints after
- * it) and while the screen is off, unless a window animates (AWTK steps it from the paint); the
+ * (vtable +0xc), except while q2video, a card game or q2ui has the framebuffer (each poll repaints
+ * after it) and while the screen is off, unless a window animates (AWTK steps it from the paint); the
  * first lit pass repaints the whole screen (ringnav_sleep; docs/internals.md Battery). While it
  * paints, glyphs are stamped with the frame's time (ringnav_glyph_stamp). */
 int ringnav_wm_paint(void *wm) {
     if (wm && !g_backlight_status && !window_manager_is_animating(wm)) return 0; /* RET_OK */
-    int away = video_on() || addon_game_on();
+    int away = video_on() || addon_game_on() || q2ui_on();
     void *vt = wm && !away ? P(wm, 0x94) : (void *)0;
     int (*paint)(void *) = vt ? (int (*)(void *))P(vt, 0xc) : (int (*)(void *))0;
     if (!paint) return away ? 0 : 0x10; /* RET_BAD_PARAMS, as stock */

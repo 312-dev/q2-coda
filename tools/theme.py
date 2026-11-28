@@ -429,17 +429,72 @@ FINAL = [k for k in SCHEMA.values() if k.final]
 # the dark's flip by OLED's light paper and ink (TOKEN_PAPER, assets/themes/oled/theme.xml), the colour flip_if gives. patch/tokens.h holds them for C as TOK_<NAME>
 # (ui_kit.c tok's index), RGB_<NAME> and RGB_<NAME>_L (write_tokens writes it, test/unit/test_theme.py checks it is
 # current); tools/art.py inks its glyphs from them.
+def panel_level(c):
+    """c at the nearest level a 6-bit panel shows, per channel, as q2ui's turn rounds (ui/fb.c narrow): half a
+    step added, held at white, the two low bits cleared."""
+    return sum((min((c >> s & 0xff) + 2, 0xff) & 0xfc) << s for s in (16, 8, 0))
+
+
+def mix_rgb(a, b, t):
+    """t of the way from a to b, per channel, rounded."""
+    return sum(round((a >> s & 0xff) * (1 - t) + (b >> s & 0xff) * t) << s for s in (16, 8, 0))
+
+
+def luminance(c):
+    """WCAG relative luminance of 0xRRGGBB."""
+    def lin(v):
+        v /= 255
+        return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * lin(c >> 16 & 0xff) + 0.7152 * lin(c >> 8 & 0xff) + 0.0722 * lin(c & 0xff)
+
+
+def contrast(a, b):
+    """WCAG contrast ratio of two 0xRRGGBB colours."""
+    x, y = sorted((luminance(a), luminance(b)))
+    return (y + 0.05) / (x + 0.05)
+
+
+# What an accent brings with it besides its own tone, derived from that tone by one rule for every accent so a
+# new one needs no hand-picked companions (accent_set): its pressed step, PRESS_LIGHT of the way to white as the
+# ACCENTS light tone is; text in the accent (an action row's words, a link under a button), lifted toward white in
+# 1% steps until it reads 4.5:1 on black, and on white paper the tone itself when it reads 4.5:1 there, else
+# darkened in 1% steps; and a caption on the selection, CAPTION_TINT of the tone over white, less in 1% steps until it
+# reads 4.5:1 on the tone (white when nothing tinted does). Each is at the 6-bit
+# panel's level (panel_level), as the tones are.
+PRESS_LIGHT = 0.12  # patch/tilt.c PRESS_LIGHT_STEP, the same for demo's bar
+CAPTION_TINT = 0.18
+
+
+def accent_set(top):
+    """(pressed, text on black, text on white, caption on the tone) for an accent whose selection is top."""
+    def reach(towards, ground):
+        return next(c for c in (panel_level(mix_rgb(top, towards, k / 100)) for k in range(101)) if contrast(c, ground) >= 4.5)
+    return (panel_level(mix_rgb(top, 0xffffff, PRESS_LIGHT)), reach(0xffffff, 0x000000), reach(0x000000, 0xffffff),
+            next((c for c in (panel_level(mix_rgb(0xffffff, top, k / 100)) for k in range(round(CAPTION_TINT * 100), 0, -1))
+                  if contrast(c, top) >= 4.5), 0xffffff))
+
+
+# The default accent (theme.xml's OLED_ACCENT default, oled-arterial: the ACCENTS row Arterial's top) and the
+# status row's glyphs that keep the blue whatever the accent (a download's tray, Guest Play's phone)
+DEFAULT_ACCENT = ACCENT_TONES[ACCENT_NAMES.index('arterial')][0]
+STATUS_BLUE = 0x2160d8
+
 TOKENS = {'canvas': (0x000000, 0xffffff), 'primary': (0xffffff, 0x000000), 'secondary': (0xababab, 0x5c5c5c),
           'tertiary': (0x858585, 0x6e6e6e), 'chevron': (0x999999, 0x8a8a8a), 'track': (0x333333, 0xd9d9d9),
-          'on_accent': (0xffffff, 0xffffff), 'caption_on_accent': (0xd6e2fa, 0xd6e2fa),
+          'on_accent': (0xffffff, 0xffffff), 'caption_on_accent': (accent_set(DEFAULT_ACCENT)[3],) * 2,
           'raised': (0x1c1c1e, None), 'raised_2': (0x2c2c2e, None), 'off': (0x3a3a3c, None),
-          'positive': (0x34c759, 0x34c759), 'warning': (0xff9f0a, 0xff9f0a), 'negative': (0xff453a, 0xff453a),
+          'positive': (0x34c759, 0x34c759), 'warning': (0xff9f0a, 0xff9f0a), 'negative': (0xff453a, 0xd70015),
+          # Negative's light half is iOS's high-contrast light red, 5.38:1 on white: #FF453A was 3.6:1 there (the owner's
+          # danger-card ruling, 2026-11-28)
           # a song liked: Now Playing's heart filled (tools/art.py np_heart), iOS's dark systemPink, not Negative's red,
           # which means a failure; Light Mode keeps the hue (the user's, 2026-11-19)
           'favorite': (0xff375f, 0xff375f),
-          # text in the accent (an action row's words, a link under a button): the accent lifted for 4.5:1 on black
-          # (design/mockups/action-row-blue.png), and the accent itself on white (5.6:1)
-          'accent_text': (0x4a8bff, 0x2160d8)}
+          # text in the accent (an action row's words, a link under a button), the default accent's (accent_set); q2ui
+          # takes the chosen accent's (UI_ACCENTS) for this and caption_on_accent
+          'accent_text': accent_set(DEFAULT_ACCENT)[1:3],
+          # a download's tray and Guest Play's phone in the status row: the blue they had before the accent
+          # turned Arterial, kept whatever the accent (the owner's, 2026-11-27)
+          'status_blue': (STATUS_BLUE, STATUS_BLUE)}
 
 
 TOKEN_PAPER = (0xffffff, 0x000000)
@@ -458,7 +513,24 @@ def token_header():
                       'enum { ' + ', '.join(f'TOK_{n}' for n in names) + ', TOK_N };',
                       *(f'#define RGB_{n} {token(k):#08x}' for n, k in zip(names, TOKENS)),
                       *(f'#define RGB_{n}_L {token(k, True):#08x}' for n, k in zip(names, TOKENS)),
-                      '#define UI_TOKENS {' + ', '.join(f'{{RGB_{n}, RGB_{n}_L}}' for n in names) + '}', ''])
+                      '#define UI_TOKENS {' + ', '.join(f'{{RGB_{n}, RGB_{n}_L}}' for n in names) + '}',
+                      *ui_accents(), ''])
+
+
+def ui_accents():
+    """tokens.h's accents for q2ui (ui/theme.c): the one built-in theme's accent key, its default, and per value
+    the accent offers its { selection, pressed, text on black, text on white, caption } (accent_set); a value it
+    does not offer is a zero row, which q2ui reads as the default."""
+    t = builtins()[0]
+    rows = []
+    for v, sc in enumerate(t['schemes']):
+        if not t['accents'] >> v & 1:
+            rows.append('{0}')
+            continue
+        top = (sc.get('tones') or ACCENT_TONES[sc.get('base', v)])[0]
+        rows.append('{' + ', '.join(f'{c:#08x}' for c in (top, *accent_set(top))) + '}')
+    return [f'#define UI_ACCENT_KEY {json.dumps(t["accent_key"])}', f'#define UI_ACCENT_N {len(rows)}',
+            f'#define UI_ACCENT_DEFAULT {accent_default(t)}', '#define UI_ACCENTS {' + ', '.join(rows) + '}']
 
 
 def write_tokens(path=ROOT/'patch/tokens.h'):
@@ -815,10 +887,10 @@ def validate(t, name):
         err(f"{t['accent_key']} declared twice")
     if not t['accents']:
         err('colorSchemes is empty')
-    # Ten is this format's own bound, not a reader's: config_value reads up to three digits and write_int_config
+    # Twelve is this format's own bound, not a reader's: config_value reads up to three digits and write_int_config
     # writes any. Past 32, the accents mask (option_t.values, 32 bits) could not hold a scheme.
-    if len(t['schemes']) > 10:
-        err(f"{len(t['schemes'])} accents, at most 10")
+    if len(t['schemes']) > 12:
+        err(f"{len(t['schemes'])} accents, at most 12")
     # the chevrons and song rows' marks stand on the set's right column; the wheel's indicator draws sb_w wide between
     # sb_top and sb_bottom
     if not geometry(t).right_x:

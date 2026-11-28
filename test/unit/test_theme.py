@@ -162,7 +162,7 @@ def oled():
 
 
 def test_accent_names():
-    assert theme.ACCENT_NAMES == ['graphite', 'crimson', 'tidal', 'champagne', 'cobalt', 'tangerine', 'plum', 'ivory', 'green']
+    assert theme.ACCENT_NAMES == ['graphite', 'crimson', 'tidal', 'champagne', 'cobalt', 'tangerine', 'plum', 'ivory', 'green', 'arterial']
     assert theme.ACCENT_NAMES[theme.O['CRIMSON']] == 'crimson'
     assert theme.ACCENT_NAMES[theme.O['MINIMAL_ACCENT']] == 'ivory'
 
@@ -259,8 +259,8 @@ C = '<colorSchemes accents="cobalt"/><option setting="accent" key="ACCENT" defau
     ('<colorSchemes accents=""/>', None, 'colorSchemes is empty'),
     (A + f'<option key="NPTIME" label="Art">{V}</option><option key="NPTIME" label="Art">{V}</option>', None, 'NPTIME declared twice'),
     ('<option setting="accent" key="NPTIME"/>' + f'<option key="NPTIME" label="Art">{V}</option>', None, 'NPTIME declared twice'),
-    (A + '<colorScheme name="sky" base="cobalt" label="Sky"/><colorScheme name="sea" base="tidal" label="Sea"/>', None,
-     '11 accents, at most 10'),
+    (A + '<colorScheme name="sky" base="cobalt" label="Sky"/><colorScheme name="sea" base="tidal" label="Sea"/>'
+     '<colorScheme name="dew" base="green" label="Dew"/>', None, '13 accents, at most 12'),
     (A + '<option setting="battery" default="percent"/>', None,
      "SETTING_BATTERY: default has no effect without values (settings_read holds a stock setting's default)"),
     ('<colorSchemes accents="cobalt"/>' + A, None, 'accent: slot 0 is not offered, so a missing key needs a default'),
@@ -352,23 +352,26 @@ def test_resolve_takes_a_long_name():
 
 def test_emit(tmp_path):
     """OLED's scheme rows and its options, as emit writes them: the rows its colorSchemes leaves out are zero, its
-    own Blue on its own tones, its chevron MINIMAL_CHEVRON (ROLE_MACROS); the dark half on black."""
+    own Blue and Arterial on their own tones, its chevron MINIMAL_CHEVRON (ROLE_MACROS); the dark half on black."""
     theme.emit([oled()], tmp_path)
     zero = '.chevron = 0x000000, .muted = 0x000000, .sel_text = 0x000000, .mode = SCHEME_DERIVE, .paper = 0x000000, .ink = 0xffffff }'
     assert (tmp_path/'themes.inc').read_text().startswith('\n'.join([
         '/* tools/theme.py wrote this from assets/themes/<id>/theme.xml; edit those. */',
         'static const unsigned oled_tones[][5] = {',
         '    { 0x2160d8, 0x2160d8, 0x2160d8, 0x2160d8, 0x2160d8 },',
+        '    { 0xb8141c, 0xb8141c, 0xb8141c, 0xb8141c, 0xb8141c },',
         '};',
         'static const scheme_t oled_schemes[] = {',
-        *(f'    {{ .tones = accents[{v}], {zero},' for v in range(9)),
+        *(f'    {{ .tones = accents[{v}], {zero},' for v in range(10)),
         '    { .tones = oled_tones[0], .chevron = 0x777777, .muted = 0x858585, .sel_text = 0xffffff, .mode = SCHEME_DERIVE, '
         '.paper = 0x000000, .ink = 0xffffff, .label = "Blue" },',
+        '    { .tones = oled_tones[1], .chevron = 0x777777, .muted = 0x858585, .sel_text = 0xffffff, .mode = SCHEME_DERIVE, '
+        '.paper = 0x000000, .ink = 0xffffff, .label = "Arterial" },',
         '};']))
     text = (tmp_path/'themes.inc').read_text()
     assert ('static const option_t oled_opts[] = {\n'
             '    { .setting = SETTING_LIGHT, .def = -1, .preset = 0, .keep = 2, .values = 0x0 },\n'
-            '    { .setting = SETTING_ACCENT, .def = 9, .preset = 9, .keep = -1, .values = 0x200 },\n'
+            '    { .setting = SETTING_ACCENT, .def = 11, .preset = 11, .keep = -1, .values = 0xc00 },\n'
             '    { .setting = SETTING_HOME, .def = -1, .preset = 0, .keep = -1, .values = 0x0 },\n'
             '    { .setting = SETTING_BATTERY, .def = 0, .preset = -1, .keep = -1, .values = 0x3 },\n') in text
     assert 'const theme_t themes[THEME_N] = {\n    {\n        .sel_radius = 8,\n        .sel_inset = 16,\n' in text
@@ -723,21 +726,22 @@ def test_own_scheme_rejects(body, message):
 
 def test_own_scheme_label_takes_48_bytes():
     t = resolved(f'<colorScheme name="sky" base="cobalt" label="{"é" * 24}"/>')
-    assert theme.scheme_names(t)[9:] == ['sky'] and t['schemes'][9]['label'] == 'é' * 24
+    assert theme.scheme_names(t)[10:] == ['sky'] and t['schemes'][10]['label'] == 'é' * 24
 
 
 def test_own_scheme_restated_is_its_row():
     # a theme on OLED restating its Blue, OLED's own scheme, changes that row and adds none
     t = resolved('<colorScheme name="oled-blue" base="cobalt" label="Blue" muted="#123456"/>',
                  'id="t" name="T" index="2" extends="oled"')
-    assert theme.scheme_names(t)[9:] == ['oled-blue'] and t['schemes'][9]['muted'] == 0x123456
-    assert t['accents'] == 1 << 9  # OLED's: its Blue alone
+    assert theme.scheme_names(t)[10:] == ['oled-blue', 'oled-arterial'] and t['schemes'][10]['muted'] == 0x123456
+    assert t['accents'] == 3 << 10  # OLED's: its Blue and Arterial
 
 
 def test_emit_own_scheme(tmp_path):
     inc = geom_inc(tmp_path, theme.builtins())
-    assert inc.split('static const scheme_t oled_schemes[] = {')[1].split('\n')[10].startswith('    { .tones = oled_tones[0], ')
-    assert '.label = "Blue" }' in inc and inc.count('.n_schemes = 10,') == 1
+    assert inc.split('static const scheme_t oled_schemes[] = {')[1].split('\n')[11].startswith('    { .tones = oled_tones[0], ')
+    assert inc.split('static const scheme_t oled_schemes[] = {')[1].split('\n')[12].startswith('    { .tones = oled_tones[1], ')
+    assert '.label = "Blue" }' in inc and '.label = "Arterial" }' in inc and inc.count('.n_schemes = 12,') == 1
     assert inc.count('/ sizeof *oled_schemes >= ACCENT_N') == 1
 
 
@@ -789,28 +793,61 @@ OLED = (f'<colorScheme name="oled-blue" base="cobalt" label="Blue" tones="{OLED_
 def test_own_scheme_states_its_tones(tmp_path):
     t = resolved(OLED)
     theme.validate(t, 't.xml')
-    blue = t['schemes'][9]
-    assert theme.scheme_names(t)[9:] == ['oled-blue'] and t['accents'] == 1 << 9
+    blue = t['schemes'][10]
+    assert theme.scheme_names(t)[10:] == ['oled-blue'] and t['accents'] == 1 << 10
     assert blue['tones'] == (0x2f5bea, 0x2f5bea, 0x5a7cee, 0x5a7cee, 0x2f5bea) and blue['base'] == 4
-    assert not any('tones' in s for s in t['schemes'][:9])  # the ACCENTS rows keep theirs
+    assert not any('tones' in s for s in t['schemes'][:10])  # the ACCENTS rows keep theirs
     assert (t['sel_radius'], t['sel_inset'], t['np_track_rgb']) == (6, 8, 0x262626)
     inc = geom_inc(tmp_path, [t])
     assert 'static const unsigned t_tones[][5] = {\n    { 0x2f5bea, 0x2f5bea, 0x5a7cee, 0x5a7cee, 0x2f5bea },\n};\n' \
            'static const scheme_t t_schemes[] = {' in inc
     rows = inc.split('static const scheme_t t_schemes[] = {\n')[1].split('\n};')[0].splitlines()
-    assert [r.split(',')[0] for r in rows] == [f'    {{ .tones = accents[{v}]' for v in range(9)] + ['    { .tones = t_tones[0]']
+    assert [r.split(',')[0] for r in rows] == [f'    {{ .tones = accents[{v}]' for v in range(10)] + ['    { .tones = t_tones[0]']
 
 
 def test_own_scheme_without_tones_keeps_its_base_s():
     t = resolved('<colorScheme name="sky" base="cobalt" label="Sky"/>')
-    assert 'tones' not in t['schemes'][9]
+    assert 'tones' not in t['schemes'][10]
 
 
 def test_builtins_state_no_tones(tmp_path):
-    """Every built-in scheme's tones stay its ACCENTS row but OLED's Blue, its own row: only OLED writes a tones table."""
+    """Every built-in scheme's tones stay its ACCENTS row but OLED's Blue and Arterial, its own rows: only OLED writes a
+    tones table."""
     inc = geom_inc(tmp_path, theme.builtins())
     assert inc.count('_tones[][5] = {') == 1 and 'static const unsigned oled_tones[][5] = {' in inc
-    assert [(t['id'], s['name']) for t in theme.builtins() for s in t['schemes'] if 'tones' in s] == [('oled', 'oled-blue')]
+    assert [(t['id'], s['name']) for t in theme.builtins() for s in t['schemes'] if 'tones' in s] == [('oled', 'oled-blue'), ('oled', 'oled-arterial')]
+
+
+def test_arterial_is_the_default_accent_at_the_panel_s_level():
+    """The owner's #B8121B as the 6-bit panel shows it: (184, 20, 28), the nearer of its two neighbours by Delta E
+    2000 and the level ui/fb.c narrow rounds #B8121B to; the ACCENTS row and OLED's own scheme agree on it."""
+    assert theme.panel_level(0xb8121b) == theme.DEFAULT_ACCENT == 0xb8141c
+    row = theme.ACCENT_TONES[theme.ACCENT_NAMES.index('arterial')]
+    assert row == [0xb8141c, 0xb8141c, 0xc03038, 0xc03038, 0xc03038] and all(theme.panel_level(c) == c for c in row)
+    assert row[2] == theme.panel_level(theme.mix_rgb(row[0], 0xffffff, 0.12))  # the light tone, as every row's
+    assert theme.ACCENT_NAMES[-1] == 'arterial'  # appended: a stored ACCENT keeps its meaning
+
+
+@pytest.mark.parametrize('top', [0xb8141c, 0x2160d8, *(r[0] for r in theme.ACCENT_TONES)])
+def test_accent_set_reads(top):
+    """Each accent's companions hold their contrast: text 4.5:1 on black and on white, the caption 4.5:1 on the
+    selection, else white; each at a panel level but white."""
+    pressed, dark, light, caption = theme.accent_set(top)
+    assert theme.contrast(dark, 0) >= 4.5 and theme.contrast(light, 0xffffff) >= 4.5
+    assert theme.contrast(caption, top) >= 4.5 or caption == 0xffffff
+    assert all(theme.panel_level(c) == c for c in (pressed, dark, light, caption) if c != 0xffffff)
+    assert theme.luminance(pressed) >= theme.luminance(top)
+
+
+def test_ui_accents_follow_the_theme():
+    """tokens.h's accents for q2ui: OLED's key and default, Blue and Arterial rows, zero rows for what it does not
+    offer; the tokens' accent text and caption are the default's."""
+    h = theme.token_header()
+    assert '#define UI_ACCENT_KEY "OLED_ACCENT"\n#define UI_ACCENT_N 12\n#define UI_ACCENT_DEFAULT 11\n' in h
+    rows = h.split('#define UI_ACCENTS {')[1].split('}}')[0]
+    assert rows.count('{0}') == 10 and '{0x2160d8, ' in rows and '{0xb8141c, ' in rows
+    assert theme.TOKENS['accent_text'] == theme.accent_set(theme.DEFAULT_ACCENT)[1:3]
+    assert theme.TOKENS['status_blue'] == (0x2160d8, 0x2160d8)
 
 
 @pytest.mark.parametrize('body, message', [
@@ -833,7 +870,7 @@ NPTIME = own('NPTIME', 'Track Time', ('Remaining', 'Total'), default=0, preset=0
 def test_own_option():
     o = oled()
     assert [x for x in o['opts'] if x.get('key')] == [SONGARTIST, SONGLENGTH, NPTIME]
-    assert theme.theme_keys([o]) == {'OLED_ACCENT': (10, 9, None), 'SONGARTIST': (4, 0, SONGARTIST), 'SONGLENGTH': (3, 0, SONGLENGTH), 'NPTIME': (2, 0, NPTIME)}
+    assert theme.theme_keys([o]) == {'OLED_ACCENT': (12, 11, None), 'SONGARTIST': (4, 0, SONGARTIST), 'SONGLENGTH': (3, 0, SONGLENGTH), 'NPTIME': (2, 0, NPTIME)}
     assert {'ACCENT', 'HOME', 'BATTERY', 'THEME', 'LIGHT'} <= theme.PAYLOAD_KEYS and 'VIS' not in theme.PAYLOAD_KEYS
     assert not {'SONGARTIST', 'OLED_ACCENT'} & theme.PAYLOAD_KEYS and set(theme.ACCENT_KEYS) == {'ACCENT'}
 
@@ -904,7 +941,7 @@ def test_emit_own_options(tmp_path):
     assert opts[-3:] == [f'    {{ .setting = SETTING_OWN + {i}, .def = 0, .preset = 0, .keep = -1, .values = 0x0 }},' for i in (1, 2, 3)]
     assert inc.count('.accent_slot = &st.own[0],') == 1 and '.accent_key = "OLED_ACCENT",' in inc
     assert ('const theme_key_t theme_keys[THEME_KEYS] = {\n'
-            '    { .key = "OLED_ACCENT", .label = 0, .names = 0, .n = 10, .def = 9 },\n'
+            '    { .key = "OLED_ACCENT", .label = 0, .names = 0, .n = 12, .def = 11 },\n'
             '    { .key = "SONGARTIST", .label = "Song Artist", .names = (const char *const[]){"Inline", "Selected Row", "Right", "Off"}, .n = 4, .def = 0 },\n'
             '    { .key = "SONGLENGTH", .label = "Song Length", .names = (const char *const[]){"Albums", "All Lists", "Off"}, .n = 3, .def = 0 },\n'
             '    { .key = "NPTIME", .label = "Track Time", .names = (const char *const[]){"Remaining", "Total"}, .n = 2, .def = 0 },\n};') in inc
@@ -1109,8 +1146,9 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
                      'font[ROLE_TALL]': inter, 'font_px[ROLE_TALL]': 24, 'font[ROLE_NP]': medium, 'font_px[ROLE_NP]': 27,
                      'font[ROLE_INFO]': inter, 'font_px[ROLE_INFO]': 18, 'font[ROLE_HOME]': inter, 'font_px[ROLE_HOME]': 24,
                      'font[ROLE_BAR]': medium, 'font_px[ROLE_BAR]': 18}
-    blue = o['schemes'][9]
-    assert theme.scheme_names(o)[9:] == ['oled-blue'] and o['accents'] == 1 << 9 and blue['tones'] == (0x2160d8,) * 5
+    blue, arterial = o['schemes'][10:]
+    assert theme.scheme_names(o)[10:] == ['oled-blue', 'oled-arterial'] and o['accents'] == 3 << 10 and blue['tones'] == (0x2160d8,) * 5
+    assert arterial['tones'] == (0xb8141c,) * 5 and theme.accent_default(o) == 11 and arterial['label'] == 'Arterial'
     assert (blue['sel_text'], blue['light']['sel_text'], blue['muted'], blue['paper'], blue['ink']) == (0xffffff, 0xffffff, 0x858585, 0xffffff, 0)
     assert (o['set_text'], o['set_switch'], o['set_value_ink'], o['light']['set_value_ink']) == (1, 1, 0xababab, 0x5c5c5c)
     assert (o['sel_inset'], o['sel_radius']) == (16, 8)

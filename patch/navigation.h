@@ -542,9 +542,13 @@ void wifi_busy_show(void *win); /* "Searching..." on the section's line while a 
 void wifi_rows_keep(void *view), wifi_rows_follow(const char *ssid), wifi_rows_end(void),
     wifi_rows_scanned(void);
 void wifi_rows_failed(const char *ssid, int wrong);
+int wifi_rows_failed_kind(const char *ssid); /* 3 its join failed, 4 its password refused, else 0 */
 void *wifi_tap_button(void *view, int id); /* the row button of the list's tap target id */
 /* wifi_flows.c: Settings > Wi-Fi's flows past stock's */
 int ringnav_wifi_rows(void *win), wifi_flows_hold(void *top), wifi_flows_cancel_join(void);
+/* ... and for q2ui's Wi-Fi page (q2ui_gate.c): a search, the networks told, a join by name */
+int wifi_flows_scan(void), wifi_flows_join(const char *ssid);
+unsigned wifi_flows_networks(char *b, unsigned room);
 
 /* synclink.c: SyncLink off unless the user turns it on (from ringnav_usb_config) */
 void synclink_default(void);
@@ -760,6 +764,7 @@ enum { SONG_LENGTH_ALBUMS, SONG_LENGTH_ALL, SONG_LENGTH_OFF };
 enum { SONGS_MIXED = 1, SONGS_ARTIST, SONGS_ALBUM, SONGS_FOLDER };
 enum { SONG_INLINE = 1, SONG_RIGHT };
 int song_artist(void), song_length(void);
+int song_option_set(int length, int v); /* theme_engine.c: q2ui's choice of Song Artist (0) or Song Length (1) */
 /* theme_engine.c: Track Time's value, and its switch on a tap (np_bar.c np_time_tap) */
 int np_time_total(void), np_time_toggle(void);
 int np_time_tap(void *ctx, void *event);
@@ -1013,6 +1018,7 @@ int ringnav_timezone(void); /* navigation.c: g_time_zone's TZ set, the clock red
 void autozone_poll(void), autozone_due(void), autozone_off(void),
     autozone_config(const char *section, const char *key);
 int autozone_busy(void), autozone_match(const char *zone), autozone_enabled(void);
+const char *autozone_tz(void);
 void pod_row_at(void *view, int i, const char *icon, unsigned at);
 
 /* config_ini.c: toolsWriteConfig's hook, and the settled keys write_int_config's hook holds */
@@ -1066,6 +1072,9 @@ unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_fav(void *r);           /* My Fav, a server song's offline copy by its row */
 int rate_now_set(int n);         /* n stars for the playing track; 1 kept */
 int rate_now(void);              /* the playing track's 0-5 stars, -1 when it can't be rated */
+void np_screen_off(void);        /* the screen off as Now Playing's short Centre hold turns it off (nav/now_playing.c) */
+int rate_now_liked(void);        /* the playing song's like: 1, 0, -1 when it has no heart here */
+int rate_now_like(void);         /* ... flipped with no page open: the new like, -1 none, -2 an app refused */
 int rate_saved(int k);
 void rate_album_favs(void *album, int on);
 int fav_told(void *r, int on); /* ratings: a My Fav change told to the song's card app */
@@ -1162,6 +1171,11 @@ int bt_acl_up(const char *mac), bt_acl_listed(const unsigned char *req, int max,
 void bt_dev_rename(int i, const char *name);
 /* bt_detail.c: a Bluetooth device's page */
 void bt_detail_open(int dev), bt_detail_poll(void);
+int bt_forget(const char *mac); /* bt_detail.c: Forget This Device's steps; 1 done */
+void bt_output_back(void);      /* ... the output back to a jack after its device went */
+/* bt_ui.c: q2ui's Bluetooth page (q2ui_gate.c): a scan, the devices told, a connect or disconnect, a forget */
+int bt_q2ui_scan(void), bt_q2ui_link(const char *mac), bt_q2ui_forget(const char *mac);
+unsigned bt_q2ui_devices(char *b, unsigned room);
 const char *bt_detail_title(const char *name);
 int bt_codec_line(char *s, unsigned n);
 unsigned bt_kbps(const char *codec, unsigned hz);
@@ -1310,6 +1324,9 @@ extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pas
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
 void coda_rc_poll(void), coda_rc_toggle(void);
 int coda_rc_enabled(void);
+/* control_center.c: q2ui's Control Center's states (q2ui_gate.c tell) and switches (q2ui_gate.c ctl) */
+unsigned q2ui_cc_state(char *b, unsigned room);
+int q2ui_cc_set(const char *name, int on), q2ui_on(void);
 int coda_rc_wants_wifi(void); /* Smart Wi-Fi: Car Remote needs the radio (coda_rc_shim.c) */
 int coda_rc_online(void);     /* a phone has an authenticated Car Remote session */
 void coda_rc_note(const char *text); /* a toast, for the car (NowPlaying.notice) */

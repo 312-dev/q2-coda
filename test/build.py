@@ -570,7 +570,7 @@ def validate_assets(directory):
         try: settings_icon(name, old[:-1] + b'x')
         except ValueError: pass
         else: raise AssertionError(f'{name}: accepted a changed icon')
-        for bg in ('#000000', '#2160d8'):  # the list, and OLED's selection bar (its Blue scheme's accent)
+        for bg in ('#000000', '#b8141c', '#2160d8'):  # the list, and OLED's selection bar (Arterial, and Blue when chosen)
             assert max(abs(a - b) for a, b in zip(mean(old, bg), mean(new, bg))) < 0.02, (name, bg)
         px = bytearray(imagemagick('png:-', '-depth', '8', 'rgba:-', data=new))
         sat = lambda i: max(px[i:i+3]) - min(px[i:i+3])
@@ -676,6 +676,16 @@ def validate_assets(directory):
             assert absent.returncode != 0, f'release rootfs contains {path}'
         for n in USB_SCRIPTS:
             assert read('rootfs.squashfs', 'usr/bin/' + n) == read('stock.squashfs', 'usr/bin/' + n), f'release {n} is not stock\'s'
+    from build import UI
+    # q2ui is in an --ui-spike build alone, and no boot script starts it in any: demo does (patch/q2ui_gate.c,
+    # docs/ui-rewrite.md#cutover), and with no /usr/bin/q2ui to start, a default build's demo never tries
+    has_ui = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), UI],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    assert has_ui == ('q2ui_sha256' in manifest), 'q2ui in the image and in the manifest disagree'
+    if has_ui:
+        q2ui = read('rootfs.squashfs', UI)
+        assert sha(q2ui) == manifest['q2ui_sha256'] and q2ui[:4] == b'\x7fELF'
+    assert b'q2ui' not in expected_start
     assert read('rootfs.squashfs', S90PLAY) == expected_start
     assert read('rootfs.squashfs', S11LOGO) == read('stock.squashfs', S11LOGO).replace(*LOGO_HOOK)  # the card's logo, if saved
     # keep-alive 5 s, the source role alone while Guest Play is on, and q2-bip started on the line before bluealsa's
@@ -710,7 +720,8 @@ def validate_assets(directory):
     assert expected_start.count(b'\n        rm -f /mnt/data/baidu_token.conf\n') == 1
     # bluealsa: AAC capability, AAC's peak and VBR mode, the two DROP jumps, the silence sites, and one appended LOAD payload.
     from build import BT_AAC_SITES, BT_DROP, BT_DROP_HANDLER, BT_DROP_PAYLOAD, BT_SILENCE_SITES, patch_bluealsa, segments
-    old, new = read('stock.squashfs', BLUEALSA), read('rootfs.squashfs', BLUEALSA)
+    from build import BLUEALSA_APLAY, BT_LAUNCH, BT_WATCH, stock_program
+    old, new = read('stock.squashfs', BLUEALSA), read('rootfs.squashfs', stock_program(BLUEALSA, manifest))
     header = segments(old)[-1][0]
     allowed = {AAC_44K1, *range(header, header+32)}
     for address, size in ((BT_DROP, 8), (BT_DROP_HANDLER, 8), *((a, 4) for a, *_ in BT_SILENCE_SITES), *((a, 4) for a, *_ in BT_AAC_SITES)):
@@ -726,8 +737,18 @@ def validate_assets(directory):
     check_bluetooth_drop(directory)
     # bluetoothd: the control channel's GetElementAttributes from g_track_meta (tools/bt_meta.c)
     from build import BLUETOOTHD, patch_bluetoothd
-    assert read('rootfs.squashfs', BLUETOOTHD) == patch_bluetoothd(read('stock.squashfs', BLUETOOTHD))
-    assert manifest['bluetoothd_sha256'] == sha(read('rootfs.squashfs', BLUETOOTHD))
+    assert read('rootfs.squashfs', stock_program(BLUETOOTHD, manifest)) == patch_bluetoothd(read('stock.squashfs', BLUETOOTHD))
+    assert manifest['bluetoothd_sha256'] == sha(read('rootfs.squashfs', stock_program(BLUETOOTHD, manifest)))
+    # the launcher (docs/bluez.md#the-launcher) at each stock path the build carries an own daemon for, and its
+    # watcher's copy; stock's bluealsa-aplay moved aside whole. A build without the flags has none of them.
+    launcher = (ROOT/BT_LAUNCH).read_bytes()
+    stands = [BLUETOOTHD] * ('own_bluez' in manifest) + [BLUEALSA, BLUEALSA_APLAY] * ('own_bluealsa' in manifest)
+    for path in (BLUETOOTHD, BLUEALSA, BLUEALSA_APLAY):
+        assert (read('rootfs.squashfs', path) == launcher) == (path in stands), path
+    if stands:
+        assert read('rootfs.squashfs', BT_WATCH) == launcher
+    if 'own_bluealsa' in manifest:
+        assert read('rootfs.squashfs', stock_program(BLUEALSA_APLAY, manifest)) == read('stock.squashfs', BLUEALSA_APLAY)
     from bluetoothd import check as check_bluetoothd
     check_bluetoothd(directory)
     from build import SCROBBLE_CA

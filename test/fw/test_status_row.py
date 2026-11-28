@@ -1,10 +1,11 @@
 """patch/status_row.c: the status row's glyph slots, right to left the battery, the level bars, Wi-Fi, a card app's
-sync, wired headphones, Bluetooth (its link, a headset's battery, a car) and Buttons Lock's padlock; their layout (the
+sync, wired headphones, Bluetooth (its link, a car, a guest's phone) and Buttons Lock's padlock; their layout (the
 clock's edge), paint, taps and repaints."""
 import ctypes as C
 import struct
 
 import pytest
+import host
 
 from conftest import O, Files, threads_now
 from test_addon import Ap
@@ -30,7 +31,7 @@ class Row(StatusRow):
         self.online = 1
         fw.mock('networkGetConnectStatus', lambda *_: self.online)
         # the player's output: 0 the Q2's DAC (its jacks), 1 Bluetooth, 2 a USB DAC, 3 the car's USB audio: an output
-        # with no glyph of its own, so the other slots lay out alone (0 with nothing in would show the deaf ear)
+        # with no glyph of its own, so the other slots lay out alone
         self.way = 3
         fw.mock('mclGetOutputWay', lambda *_: self.way)
         self.timers: list = []
@@ -69,9 +70,10 @@ class Row(StatusRow):
             return load(w, name, bitmap)
         self.fw.mock('widget_load_image', loaded)
         canvas.art = {n: (WIFI_W, 14) for n in ('oled_status_wifi_3_d', 'oled_status_wifi_2_d', 'oled_status_wifi_1_d', 'oled_status_wifi_x_d')}
-        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (RUNE_W, 14), 'oled_status_down_d': (14, 14), 'oled_status_wired_d': (14, 14),
+        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (RUNE_W, 14), 'oled_status_wired_d': (14, 14),
                        'oled_status_offline_d': (14, 14)}
         canvas.art |= {f'oled_status_sync_{f}_d': (14, 14) for f in range(30)}
+        canvas.art |= {f'oled_status_drop_{f}_d': (14, 14) for f in range(30)}
         self.fw.fn('status_slots_paint', None, C.c_void_p, C.c_void_p)(self.bar.addr, canvas.addr)
         return canvas, names
 
@@ -99,9 +101,9 @@ def test_the_slots_lay_out_right_to_left_from_the_battery(fw, row):
     row.app(1)
     assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 12
     row.app(2, 500)
-    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 16
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 14  # a download's box
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
-    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 16 - GAP - 13
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 14 - GAP - 13
 
 
 @pytest.mark.parametrize('status, wifi, left', [(1, None, BODY), (0, 3, BODY - GAP - WIFI_W), (3, 0, BODY - GAP - 10),
@@ -145,7 +147,7 @@ def bt_link(fw, status=None, level=None, cls=None, thread=0):
     (None, 0, None, None, 0, []),  # off or idle: nothing
     (1, 1, None, None, RUNE_W, ['oled_status_btdim_d']),  # connecting: the dim rune
     (3, 0, None, None, RUNE_W, ['oled_status_bt_d']),  # connected, no level: the white rune
-    (3, 0, 72, 0x240404, 14 + 2 + 15 + 2, ['oled_status_headphones_d']),  # a headset's level: headphones, battery
+    (3, 0, 72, 0x240404, RUNE_W, ['oled_status_bt_d']),  # a headset that says its level: the rune alone (option A)
     (3, 0, None, 0x200420, 19, ['oled_status_car_d']),  # a car: 11 px tall, 19 wide (SR_CAR_W)
 ])
 def test_the_bluetooth_slot_says_what_the_link_is(fw, row, status, thread, level, cls, width, art):
@@ -158,18 +160,6 @@ def test_the_bluetooth_slot_says_what_the_link_is(fw, row, status, thread, level
     canvas.art = {n: (14, 14) for n in art}
     fw.fn('status_row__headset_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY)
     assert names == art
-
-
-@pytest.mark.parametrize('level, fill', [(72, 0xffffff), (20, 0xffffff), (19, 0xff453a)])
-def test_the_headset_s_battery_is_15_by_8_and_red_under_20(fw, row, level, fill):
-    from test_peq_page import rgb
-    bt_link(fw, 3, level, 0x240404)
-    fw.mock('canvas_get_vgcanvas', lambda *_: 1)
-    canvas = Canvas(fw)
-    canvas.art = {'oled_status_headphones_d': (14, 14)}
-    fw.fn('status_row__headset_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY)
-    assert rgb(fw.calls('vgcanvas_set_fill_color')[0][1][1]) == fill  # the level's fill, then the nub's grey
-    assert len(fw.calls('vgcanvas_stroke')) == 1  # the body's outline
 
 
 def jacks(fw, po=0, bal=0):
@@ -187,8 +177,7 @@ def jacks(fw, po=0, bal=0):
 ])
 def test_wired_headphones_show_while_they_take_the_sound(fw, row, way, po, bal, shown):
     """The wired slot (the user's, 2026-11-25): Phosphor's headphones while the player's output is a jack or a USB
-    DAC, 14 px wide, GAP left of the slot on its right (Wi-Fi's here); not otherwise (here a headset is linked, so no
-    deaf ear either: the test below)."""
+    DAC, 14 px wide, GAP left of the slot on its right (Wi-Fi's here); not otherwise."""
     bt_link(fw, 3)
     row.wifi(3)
     row.way = way
@@ -200,9 +189,6 @@ def test_wired_headphones_show_while_they_take_the_sound(fw, row, way, po, bal, 
     assert 'oled_status_noaudio_d' not in names
 
 
-EAR_W = 10  # SR_EAR_W: ear-slash 12 px tall is 9.4 wide (tools/art.py STATUS_TALL_FIT)
-
-
 class Air(C.Structure):
     """patch/airplay.c's air, whole (fw.var checks its size): on is a speaker playing."""
     _fields_ = [('t', C.c_void_p), ('look', C.c_uint), ('on', C.c_int), ('local', C.c_int), ('limit', C.c_int),
@@ -211,60 +197,23 @@ class Air(C.Structure):
 
 
 @pytest.mark.parametrize('way, po, bal, art, width', [
-    (0, 0, 0, 'oled_status_noaudio_d', EAR_W),  # nothing plugged in, nothing linked: the deaf ear
+    (0, 0, 0, None, 0),  # nothing plugged in, nothing linked: nothing (no deaf ear: the owner's, 2026-11-27)
     (0, 1, 0, 'oled_status_wired_d', 14),  # the 3.5 mm jack: headphones
     (0, 0, 1, 'oled_status_wired_d', 14),  # the 4.4 mm jack
     (2, 0, 0, 'oled_status_wired_d', 14),  # a USB DAC
-    (3, 0, 0, None, 0),  # the car's USB audio (usb_car.c) plays: no ear
-    (1, 1, 0, 'oled_status_noaudio_d', EAR_W),  # Bluetooth's way with no device linked plays to no one: the ear
+    (3, 0, 0, None, 0),  # the car's USB audio (usb_car.c)
+    (1, 1, 0, None, 0),  # Bluetooth's way with no device linked
 ])
-def test_with_no_output_connected_the_wired_slot_shows_a_deaf_ear(fw, row, way, po, bal, art, width):
-    """The user's, 2026-11-25 ("a deaf ear icon ... ship it"): with no jack, no USB DAC and no Bluetooth device
-    connected, Phosphor's ear-slash (regular) in the wired slot, EAR_W wide, GAP left of Wi-Fi; any output connected,
-    the slot is as before."""
+def test_the_wired_slot_shows_headphones_alone_and_no_ear(fw, row, way, po, bal, art, width):
+    """The owner's, 2026-11-27 ("do away with the deaf icon"): with no output connected the wired slot is empty and the
+    slots left of it close up; headphones while a jack or a USB DAC takes the sound."""
     row.wifi(3)
     row.way = way
     jacks(fw, po, bal)
     assert fw.fn('status_row__wired_shown', C.c_int)() == width
     assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - (GAP + width if width else 0)
     canvas, names = row.paint()
-    shown = [n for n in names if n in ('oled_status_noaudio_d', 'oled_status_wired_d')]
-    assert shown == ([art] if art else [])
-
-
-@pytest.mark.parametrize('status, thread, ear', [(3, 0, 0), (1, 1, 1), (None, 0, 1)])
-def test_a_bluetooth_device_connected_takes_the_ear_away(fw, row, status, thread, ear):
-    """Connected (the rune, a headset, a car) is an output: no ear. Connecting is not yet: the ear and the dim rune."""
-    row.way = 0
-    jacks(fw)
-    bt_link(fw, status, None, None, thread)
-    assert fw.fn('status_row__wired_shown', C.c_int)() == (EAR_W if ear else 0)
-
-
-def test_a_guest_or_an_airplay_speaker_playing_takes_the_ear_away(fw, row):
-    """A guest's phone plays through the Q2 (Guest Play), and an AirPlay speaker is an output of its own."""
-    row.way = 0
-    jacks(fw)
-    assert fw.fn('status_row__wired_shown', C.c_int)() == EAR_W
-    air = fw.var('airplay__air', Air)
-    air.on = 1
-    assert fw.fn('status_row__wired_shown', C.c_int)() == 0
-    air.on = 0
-    from test_guest import Rig
-    rig = Rig(fw)
-    rig.state(state='playing', out='jack')
-    rig.poll()
-    assert fw.fn('status_row__wired_shown', C.c_int)() == 0
-
-
-def test_the_ear_coming_or_going_repaints_the_row(fw, row):
-    """The car's USB audio stopping (way 3 to 0) changes nothing else the signature holds but the ear."""
-    jacks(fw)
-    row.sync_sig()
-    assert row.sync_sig() == 0
-    row.way = 0
-    assert row.sync_sig() == 1
-    assert row.sync_sig() == 0
+    assert [n for n in names if n in ('oled_status_noaudio_d', 'oled_status_wired_d')] == ([art] if art else [])
 
 
 @pytest.mark.parametrize('way, po, wired, rune', [(0, 1, 1, 0), (2, 0, 1, 0), (1, 1, 0, 1)])
@@ -308,6 +257,19 @@ def test_the_slot_s_kind_repaints_the_row(fw, row):
     assert row.sync_sig() == 0
     bt_link(fw, 3, None, None, 0)
     assert row.sync_sig() == 1
+
+
+def test_a_headset_s_level_changing_repaints_nothing(fw, row):
+    """The rune alone stands for a headset (option A): its battery level moving changes nothing the row draws."""
+    files = bt_link(fw, 3, 72, 0x240404)
+    level = fw.fn('bt_headset_battery', C.c_int)
+    row.sync_sig()
+    assert row.sync_sig() == 0 and level() == 72
+    fw.var('g_backlight_status', C.c_ubyte).value = 1  # lit: the level asked again BATT_POLL_MS on
+    files.files['/tmp/q2-btbatt'] = f'{HEAD} 40 48000 {0x240404}\n'.encode()
+    fw.mock('time_now_ms', lambda *_: 100000 + 300000)
+    level()  # the run starts and ends; its answer read at the next look
+    assert level() == 40 and row.sync_sig() == 0
 
 
 def test_the_play_state_stands_on_the_digits_baseline_in_text_primary_playing_or_paused(fw, st, row):
@@ -468,10 +430,11 @@ def test_wifi_lights_arcs_by_its_bars_and_crosses_out_with_no_internet(fw, row, 
     assert names == [art] and canvas.images == [(x, CY - 7, WIFI_W, 14)]
 
 
-def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_ring(fw, row):
+def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_tray(fw, row):
     """The user's (2026-11-20): the arrows at 30 fps, a half turn a second as before. They ride ui_kit's one 33 ms loop
     timer (no timer of their own), their frame the clock's place in the half turn's second (SR_TURN_MS over SR_SPIN
-    frames), and each new frame repaints only their art's box; a download's ring does not turn."""
+    frames), and each new frame repaints only their art's box. A download (Download option A) is a 2 px tray, Text
+    Primary at 30% filled in Status Blue to its share, under an arrow falling onto it on the same loop and clock."""
     now = [10_000]
     fw.mock('time_now_ms', lambda *_: now[0])
     row.status = 0
@@ -495,9 +458,14 @@ def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_ring(fw, row):
     row.app(2, 250)
     fw.mock('canvas_get_vgcanvas', lambda *_: 1)
     canvas, names = row.paint()
-    assert names == ['oled_status_down_d'] and canvas.images == [(BODY - GAP - 16 + 4, CY - 4, 14, 14)]
-    assert len(fw.calls('vgcanvas_arc')) == 2 and len(fw.calls('vgcanvas_stroke')) == 2  # the track, then the fill
-    assert tick(None) == 7  # a download does not turn: the loop drops the arrows and, the last, ends
+    assert names == ['oled_status_drop_0_d'] and canvas.images == [(BODY - GAP - 14, CY - 7, 14, 14)]
+    assert not fw.calls('vgcanvas_arc') and len(fw.calls('vgcanvas_stroke')) == 2  # the tray, then its filled part
+    row.dirty.clear()
+    now[0] += 34
+    assert tick(None) == 8 and row.dirty == [(BODY - GAP - 14, 0, 14, 26)]  # the arrow's next frame, its box alone
+    assert row.paint()[1] == ['oled_status_drop_1_d']
+    row.app(0)
+    assert tick(None) == 7  # nothing to move: the loop drops the sync and, the last, ends
 
 
 def test_the_padlock_sits_where_buttons_lock_put_it(fw, row):
@@ -551,13 +519,13 @@ def test_a_tap_on_the_bars_opens_now_playing_after_the_dispatch(fw, row):
 
 CLOCK_W = 38  # test_nav_painters.StatusRow's widest clock, "00:00"
 LEFT_ROOM = 62 + CLOCK_W + 7  # the strip's left edge: CLOCK_BESIDE past the widest clock at the row's left
-ROOM = 214  # a room narrower than the crowd below, for the marquee's tests: 30 px short
+ROOM = 240  # a room narrower than the crowd below, for the marquee's tests: 30 px short
 OFFLINE_W = 14  # SR_OFFLINE: cloud-slash's 13.6 px of ink at 11 tall
 
 
 def crowd(fw, row, room=ROOM):
-    """Every slot shown: bars 10, Wi-Fi 16, a download's ring 16, a headset 33, the padlock 13 and the offline cloud
-    14, with their six gaps: 138 px left of the battery's body, 30 more than ROOM leaves; the strip's room then set
+    """Every slot shown: bars 10, Wi-Fi 16, a download 14, a headset's rune 9, the padlock 13 and the offline cloud
+    14, with their six gaps: 112 px left of the battery's body, 30 more than ROOM leaves; the strip's room then set
     to room."""
     row.wifi(3)
     row.app(2, 500)
@@ -566,7 +534,7 @@ def crowd(fw, row, room=ROOM):
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
     row.place()
     fw.fn('status_strip_room', None, C.c_int)(room)
-    return 10 + WIFI_W + 16 + 33 + 13 + OFFLINE_W + 6 * GAP
+    return 10 + WIFI_W + 14 + RUNE_W + 13 + OFFLINE_W + 6 * GAP
 
 
 def test_the_clock_at_the_row_s_left_leaves_every_glyph_room(fw, row):
@@ -815,3 +783,61 @@ def test_under_reduce_motion_the_bars_stand_still(fw, st, xf):
     still = xf.bars_of(0)
     xf.now += 400
     assert xf.sync_sig() == 0 and xf.bars_of(0) == still and 33 not in [ms for _, ms in xf.timers]
+
+
+def state(fw):
+    """status_row_state's lines for q2ui (q2ui_gate.c tell), as a dict."""
+    b = C.create_string_buffer(200)
+    n = fw.fn('status_row_state', C.c_uint, C.c_char_p, C.c_uint)(b, 200)
+    text = b.raw[:n].decode()
+    assert text.endswith('\n') and n == len(b.value)
+    return dict(line.split('=', 1) for line in text.splitlines())
+
+
+@pytest.mark.parametrize('way, po, link, level, cls, out, bt, btbatt', [
+    (0, 0, None, None, None, 'other', 'none', '-1'),  # nothing in, nothing linked: no glyph
+    (0, 1, None, None, None, 'wire', 'none', '-1'),  # the 3.5 mm jack
+    (2, 0, None, None, None, 'wire', 'none', '-1'),  # a USB DAC
+    (3, 0, None, None, None, 'other', 'none', '-1'),  # the car's USB audio
+    (1, 0, 3, None, None, 'other', 'rune', '-1'),  # a headset linked that says no level
+    (1, 0, 3, 72, 0x240404, 'other', 'rune', '-1'),  # one that says its level: the rune all the same
+    (1, 0, 3, None, 0x200420, 'other', 'car', '-1'),  # a car
+])
+def test_q2ui_is_told_where_the_sound_goes_and_what_bluetooth_links(fw, row, way, po, link, level, cls, out, bt, btbatt):
+    """q2ui draws its own status row while it has the screen; these are the states it cannot read itself
+    (docs/ui-rewrite.md#cutover), by the same tests demo's row paints from: what the line says is what the slots
+    above show."""
+    row.way = way
+    jacks(fw, po, 0)
+    if link is not None:
+        bt_link(fw, link, level, cls)
+    said = state(fw)
+    assert (said['out'], said['bt'], said['btbatt'], said['relay']) == (out, bt, btbatt, 'none')
+    assert fw.fn('status_row__wired_shown', C.c_int)() == (14 if out == 'wire' else 0)
+
+
+def test_q2ui_is_told_of_the_lock_a_sync_a_server_out_of_reach_and_wifi_with_no_internet(fw, row):
+    row.wifi(3)
+    said = state(fw)
+    assert (said['lock'], said['sync'], said['syncpm'], said['offline'], said['net']) == ('0', '0', '0', '0', '1')
+    fw.var('g_keylock_flag', C.c_ubyte).value = 1
+    row.app(2, 450)
+    row.ap.a[0].reach = 1
+    row.online = 0
+    said = state(fw)
+    assert (said['lock'], said['sync'], said['syncpm'], said['offline'], said['net']) == ('1', '2', '450', '1', '0')
+
+
+def test_q2ui_is_told_the_clocks_zone_and_24_hour_setting(fw, row):
+    """q2ui's clock follows demo's time zone and 24-hour setting (nav/lyrics_status_bar.c clock_show): demo says the
+    zone's TZ (tools/build.py TIMEZONES, by stock's saved index g_time_zone) and the setting, as it says the slots."""
+    names = [tz for _, tz in host.tools_build.TIMEZONES]
+    zone, hours = fw.var('g_time_zone', C.c_ubyte), fw.var('g_time24h_flag', C.c_ubyte)
+    zone.value, hours.value = names.index('America/New_York'), 0
+    said = state(fw)
+    assert (said['tz'], said['clock24']) == ('America/New_York', '0')
+    zone.value, hours.value = names.index('UTC'), 1
+    said = state(fw)
+    assert (said['tz'], said['clock24']) == ('UTC', '1')
+    zone.value = 250  # an index no row has: no zone said, so q2ui keeps the one it has
+    assert state(fw)['tz'] == ''

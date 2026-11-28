@@ -1,0 +1,37 @@
+# Built by tools/ui.py, which passes the compiler, stb_truetype's folder, SQLite's header and library:
+#   make OUT=build/host CC=cc STB=DIR STBI=DIR SQLITE_INC=DIR SQLITE_LIB=/usr/lib/<arch>-linux-gnu/libsqlite3.so.0
+#   make OUT=build/mips CC="mips-mti-linux-gnu-gcc -EL ..." STB=DIR STBI=DIR SQLITE_INC=DIR SQLITE_LIB=ROOTFS/usr/lib/libsqlite3.so.0.8.6
+OUT ?= build/host
+STRIP ?= strip
+SRC := main.c ui.c anim.c fb.c panel.c draw.c text.c image.c input.c theme.c status.c lib.c api.c player.c now.c notice.c art.c config.c list.c card.c page_songs.c page_library.c page_settings.c page_display.c page_playback.c page_general.c page_wifi.c page_bluetooth.c page_control.c page_home.c page_now.c page_depth.c page_gallery.c page_edit.c page_menu.c cells.c \
+       ../patch/wheel_accel.c
+OBJ := $(patsubst %.c,$(OUT)/%.o,$(notdir $(SRC)))
+# GCC 14 (Buildroot's, VampOS's image) makes these three errors; every compiler that builds q2ui is held to them so
+# a missing header fails here first, not in VampOS's image build
+STRICT := -Werror=implicit-function-declaration -Werror=implicit-int -Werror=incompatible-pointer-types
+CFLAGS := -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra $(STRICT) -ffunction-sections -fdata-sections -isystem $(STB) -isystem $(STBI) -isystem $(SQLITE_INC)
+# SQLite linked by file: the root filesystem has the library and no header, and no libsqlite3.so link for -l
+LIBS := $(SQLITE_LIB) -Wl,--allow-shlib-undefined -lm -lpthread
+
+$(OUT)/q2ui: $(OBJ)
+	$(CC) -o $@.debug $(OBJ) -Wl,--gc-sections $(LIBS)
+	$(STRIP) -o $@ $@.debug
+
+# the toolkit's own checks (test_engine.c): everything but main.c, with stdarg for its printer
+$(OUT)/q2ui-test: $(filter-out $(OUT)/main.o,$(OBJ)) $(OUT)/test_engine.o
+	$(CC) -o $@ $^ -Wl,--gc-sections $(LIBS)
+
+$(OUT)/%.o: %.c q2ui.h px.h bluenoise.inc cells.h ../patch/tokens.h | $(OUT)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OUT)/wheel_accel.o: ../patch/wheel_accel.c ../patch/wheel_accel.h | $(OUT)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OUT)/list.o: ../patch/wheel_accel.h
+
+$(OUT)/player.o: ../patch/coda_rc_cmdq.h
+
+$(OUT)/cells.o: cells_data.inc
+
+$(OUT):
+	mkdir -p $@

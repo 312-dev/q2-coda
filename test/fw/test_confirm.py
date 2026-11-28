@@ -6,8 +6,8 @@ import struct
 import pytest
 
 from conftest import O
-from test_nav_hold import Ui, ui  # noqa: F401 (fixtures)
-from test_nav_painters import GEOMETRY, Canvas, scratch, st, theme  # noqa: F401 (fixtures)
+from test_nav_hold import Ui, menu, ui  # noqa: F401 (fixtures)
+from test_nav_painters import GEOMETRY, Canvas, rgba, scratch, st, theme  # noqa: F401 (fixtures)
 
 KEY_RETURN, KEY_PLAY, EVT_KEY_UP = O['KEY_RETURN'], O['KEY_PLAY'], O['EVT_KEY_UP']
 NEUTRAL, DESTRUCTIVE, CONSEQUENTIAL, INFO = range(4)
@@ -332,3 +332,43 @@ def test_the_install_cards_long_title_scrolls_never_cut(fw, ui, st):
     for _ in range(3):  # every frame repaints and asks for the next
         card.now[0] += 33
         assert repeat(ui, 'feedback__card_marq') == [8]
+
+
+class AnyTrash(dict):
+    """The theme images widget_load_image finds: the card's trash in either half, 18 px."""
+    def get(self, name, default=None):
+        return (18, 18) if name.endswith(('cardtrash_d', 'cardtrash_l')) else default
+
+
+@pytest.mark.parametrize('light', [0, 1])
+def test_a_destructive_verb_has_the_trash_before_it_and_lit_sits_on_gray_in_text_primary(fw, ui, st, light):
+    """docs/oled-design.md#confirmation-card, the owner's danger-card ruling (2026-11-28): unlit, the verb in Negative
+    (#FF453A, Light #D70015); lit, a gray platter (#3A3A3C, Light #E5E5EA) and the verb in Text Primary; the trash
+    before it either way, the two centred together, so the verb stays put as the selection moves. Cancel lit (as the
+    card opens) takes the same gray platter in Text Primary, never the accent: red on the card marks only the verb."""
+    theme(fw, **({'LIGHT': b'1'} if light else {}))
+    is_light = fw.fn('ipod_light', C.c_int)()
+    assert is_light == light
+    card = Card(fw, ui)
+    assert card.ask('Forget %s?', ['Cancel', 'Forget Device'], name='WH-1000XM5')
+    paint = fw.fn('confirm_rows_paint', None, C.c_void_p, C.c_void_p)
+    red, gray, primary = (0xd70015, 0xe5e5ea, 0x000000) if is_light else (0xff453a, 0x3a3a3c, 0xffffff)
+    seen = {}
+    for sel in (0, 1):
+        menu(fw, card.items())  # the painted selection: the C's menu of the card's answers, sel lit
+        st('sel_w', C.c_void_p).value, st('sel_row').value = card.view, sel
+        rows = Canvas(fw)
+        rows.art = AnyTrash()
+        paint(card.view, rows.addr)
+        verb = [t for t in rows.texts if t[0] == 'Forget Device']
+        cancel = [t for t in rows.texts if t[0] == 'Cancel']
+        seen[sel] = (verb[0][2] if verb else None, [b[1] for b in rows.boxes], rows.images[:], verb[0][1][0] if verb else None,
+                     cancel[0][2] if cancel else None, [b[0][1] for b in rows.boxes if b[1] == rgba(gray)])
+    unlit, lit = seen[0], seen[1]
+    assert unlit[0] == rgba(red) and rgba(red) not in unlit[1]
+    # Cancel lit: its own gray platter (above the verb's row) and Text Primary, as the verb's when lit
+    assert unlit[4] == rgba(primary) and len(unlit[5]) == 1 and len(lit[5]) == 1 and unlit[5][0] < lit[5][0]
+    assert lit[0] == rgba(primary) and rgba(gray) in lit[1] and rgba(red) not in lit[1]
+    assert len(unlit[2]) == 1 and len(lit[2]) == 1 and unlit[2] == lit[2]  # the trash, in one place lit or not
+    trash_x = unlit[2][0][0]
+    assert unlit[3] == lit[3] == trash_x + 18 + 8  # the verb after it, unmoved

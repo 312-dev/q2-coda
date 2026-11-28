@@ -1,7 +1,10 @@
 /* Settings > Wi-Fi's flows past stock's (docs/internals.md#wi-fi-page-flows): a failed join asks
  * for the password again with why; a held saved network offers Forget; Reset Network Settings at
  * the page's foot; Search Again shows its search at once; and the switch (and Control Center's Wi-Fi
- * circle) or the network's own row ends a join that is still trying, where stock's click handlers ignore both until it gives up. */
+ * circle) or the network's own row ends a join that is still trying, where stock's click handlers ignore both until it gives up.
+ * And for q2ui's own Wi-Fi page (ui/page_wifi.c), which stock's page is not open under: a search
+ * asked for down q2ui's pipe and its results read, the networks told in a file of their own, and a
+ * join by name (docs/ui-rewrite.md#cutover). */
 #include "navigation.h"
 
 /* g_wifiStatus at 0xd8: wpa_supplicant's wpa_state as stock's monitor thread last read its STATUS,
@@ -12,6 +15,9 @@
 #define WIFI_PAGE "wifi_page"
 #define WIFI_VIEW "scroll_view_wifi"
 #define SSID_MAX 33 /* 32 bytes and its end */
+#define SCAN_TICK_MS 200     /* stock's Wi-Fi page's timer (its widget_add_timer, 0x4d570c), which counts a search down */
+#define SCAN_WAIT_TICKS 150  /* a search asked for while Wi-Fi starts or a join tries waits this long, 30 s */
+#define JOIN_TAP_X 0         /* check_wifinextaction's tap: left of its Forget (x 276 to 375) */
 
 /* ssid: the network a join is trying (stock's wifi_name while wifi_connectstatus is 1); shook: that
  * join reached the handshake that checks its password; linked: it got past it (COMPLETED); ask: it
@@ -22,6 +28,10 @@ static struct {
     char ssid[SSID_MAX], forget[SSID_MAX];
     int shook, linked, ask, wrong, tries;
     const char *why; /* the reason the password entry shows */
+    /* q2ui's: scan, 1 a search asked for and not started, 2 started and counted down (scan_tick);
+     * waits, the passes it may wait to start; join, the network a join was asked for */
+    int scan, waits;
+    char join[SSID_MAX];
 } wf __attribute__((section(".scratch")));
 
 static const char *name_of(void *w) { return w ? widget_get_prop_str(w, "name", "") : ""; }
@@ -272,4 +282,115 @@ int ringnav_wifi_rows(void *win) {
         widget_set_text_utf8(list_row_core(view, 0, reset_click, 0, 325, 0),
                              "Reset Network Settings");
     return r;
+}
+
+/* A search q2ui asked for (wifi_flows_scan), a SCAN_TICK_MS timer's passes: started as Search Again
+ * starts one (wifi_scan, which sets wifi_searchtime to 10) once Wi-Fi is up and no join tries,
+ * then counted down and its results read (networkGetWifiResult) as stock's page's timer does,
+ * since only that timer reads them and the page is not open. Off, the search goes; with stock's page
+ * in use, its own timer counts it. */
+static int scan_tick(const void *unused) {
+    (void)unused;
+    if (!g_wififlag || wifi_page()) return wf.scan = 0; /* RET_REMOVE */
+    if (wf.scan == 1) {
+        if (wifi_initstatus || connecting()) return --wf.waits > 0 ? 8 : (wf.scan = 0); /* RET_REPEAT */
+        wifi_rows_scanned();
+        wifi_scan();
+        wf.scan = 2;
+        return 8;
+    }
+    if ((signed char)wifi_searchtime > 0 && --wifi_searchtime) return 8;
+    void *list = P(wifi_showlist, 0);
+    if (list) networkGetWifiResult(list);
+    return wf.scan = 0;
+}
+
+/* q2ui's "scan" (q2ui_gate.c ctl): 0 when a search is under way or set going, 1 with Wi-Fi off. */
+int wifi_flows_scan(void) {
+    if (!g_wififlag) return 1;
+    if (wf.scan) return 0;
+    wf.scan = 1, wf.waits = SCAN_WAIT_TICKS;
+    if (!timer_add(scan_tick, 0, SCAN_TICK_MS)) wf.scan = 0;
+    return !wf.scan;
+}
+
+/* A network's level, 1 to 4, from its record's signal (dBm at 0x14), by stock's steps for its
+ * wifi_sig1..4 images (wifimenu_rows_build). */
+static int level_of(int at) {
+    void *r = record(at);
+    int dbm = r ? *(int *)((char *)r + 0x14) : -100;
+    return dbm >= -65 ? 4 : dbm >= -75 ? 3 : dbm >= -80 ? 2 : 1;
+}
+/* What q2ui is told of a network's join: 1 trying, 2 joined (stock's own row's lines), 3 failed, 4
+ * its password refused (wifi_rows.c), else 0. */
+static int join_state(const char *ssid) {
+    int status = wifi_connectstatus;
+    if ((status == 1 || status == 2) && !tk_strcmp(ssid, (const char *)wifi_name)) return status;
+    return wifi_rows_failed_kind(ssid);
+}
+
+/* q2ui's list of the networks (q2ui_gate.c tell, its own file): "scan 1" while a search runs, else
+ * "scan 0", then with Wi-Fi on a line a network, "LEVEL LOCK STATE NAME", LOCK 1 when it asks for a
+ * password and STATE join_state's; the name last, its backslashes and newlines as \\ and \n. The
+ * network with a state first, as demo's page lists it (wifi_rows.c), the rest in the scan's order;
+ * whole lines only, as many as fit room. Its length. */
+unsigned wifi_flows_networks(char *b, unsigned room) {
+    int k = tk_snprintf(b, room, "scan %d\n", wf.scan || (signed char)wifi_searchtime > 0);
+    unsigned n = k > 0 && (unsigned)k < room ? (unsigned)k : 0;
+    const char *s;
+    for (int pass = 0; g_wififlag && pass < 2; ++pass)
+        for (int at = 0; (s = ssid_of(at)); ++at) {
+            int state = join_state(s);
+            if ((pass == 0) != (state != 0)) continue;
+            char line[8 + 2 * SSID_MAX];
+            unsigned m = (unsigned)tk_snprintf(line, sizeof line, "%d %d %d ", level_of(at), secured(at) != 0, state);
+            for (unsigned i = 0; s[i] && i < SSID_MAX - 1; ++i) {
+                if (s[i] == '\\' || s[i] == '\n') line[m++] = '\\';
+                line[m++] = s[i] == '\n' ? 'n' : s[i];
+            }
+            line[m++] = '\n';
+            if (n + m > room) return n;
+            memcpy(b + n, line, m);
+            n += m;
+        }
+    return n;
+}
+
+/* The join q2ui asked for, from a timer as stock's own dialogs open (ask_again): stock's row's own
+ * steps (wifimenu_network_row) for the network by its name now, check_wifinextaction deciding: 3 a
+ * join with what it has (an open network, or a saved one), 4 its password asked for first by
+ * stock's entry, 2 (joined already) nothing. The entry is a window of demo's, so the gate ends q2ui
+ * for it and starts it again on Home after (q2ui_gate.c). */
+static int join_now(const void *unused) {
+    (void)unused;
+    char ssid[SSID_MAX];
+    tk_snprintf(ssid, sizeof ssid, "%s", wf.join);
+    int at = find(ssid);
+    if (at < 0 || !g_wififlag || wifi_initstatus || connecting()) return 0;
+    wifi_searchtime = 0; /* as stock's row's click */
+    int next = check_wifinextaction(at, JOIN_TAP_X, 276, 375);
+    if (next == 4) {
+        memset((char *)prepare_linkpasswd, 0, 128);
+        if (navigator_to("dialog/kbwifipass_dialog")) return 0; /* Cancel */
+        at = find(ssid);
+    }
+    if ((next == 3 || next == 4) && at >= 0) {
+        wifi_rows_follow(ssid);
+        wifi_action_connect(at);
+    }
+    return 0;
+}
+
+/* q2ui's "join NAME" (q2ui_gate.c ctl): 0 when the join of network ssid will be tried; the network a
+ * join is trying ends that join, as its own row does on stock's page. 1 when nothing will be done:
+ * Wi-Fi off or starting, another join trying, or no such network in the scan. */
+int wifi_flows_join(const char *ssid) {
+    if (!g_wififlag || wifi_initstatus) return 1;
+    if (connecting() && !tk_strcmp(ssid, (const char *)wifi_name)) {
+        cancel();
+        return 0;
+    }
+    if (connecting() || find(ssid) < 0) return 1;
+    tk_snprintf(wf.join, sizeof wf.join, "%s", ssid);
+    return !timer_add(join_now, 0, 50);
 }

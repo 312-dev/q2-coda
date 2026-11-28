@@ -5555,3 +5555,7 @@ int library_scanning(void) { return *(volatile int *)SCAN_THREAD && !*(volatile 
  * Its flag is set on the UI thread before its thread starts, as the dialog loads, before stock's
  * init starts the scan's thread. So a scan that finds none can drop the table. */
 int library_counting(void) { return msg_counting(); }
+
+/* Home's Cover Flow row as q2ui's gate opens it (q2ui_gate.c openers): the row's own click, which takes
+ * nothing from the click. */
+int coverflow_row_open(void *ctx, void *event) { return coverflow_open(ctx, event); }

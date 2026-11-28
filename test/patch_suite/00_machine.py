@@ -31,7 +31,9 @@ assert ACCENTS[O['MINIMAL_ACCENT']]==ACCENTS[0]
 def color_t(rgb): return 0xff000000|(rgb&255)<<16|(rgb>>8&255)<<8|rgb>>16
 O_GLYPH=re.search(r'#define BT_GLYPH "(\w+)"',INC)[1]  # the plain Bluetooth glyph a codec badge fades into
 CONFIG={}  # config.ini [IPOD] keys a new Machine starts with; the payload reads them on first use
-SEED={}  # values a Machine reads for a missing key in place of the payload's default
+# values a Machine reads for a missing key in place of the payload's default. LIGHT: the checks were written for the dark
+# half, and the payload's default, Auto (theme_engine.c settings_read), follows the host's clock: light by day.
+SEED={'LIGHT':'0'}
 # Reduce Motion's flat selection bar, for the checks that pin the bar's shape and place: the bar's rest lift and press
 # (tilt.c, docs/internals.md#row-press) widen it and cast a shadow, and test/fw/test_tilt.py pins those.
 FLAT={'REDUCEMOTION':'1'}
@@ -1013,9 +1015,9 @@ assert not m.rounded and not m.strokes and m.global_alpha==0
 # corner pixels the band's colour at their coverage (corner_cover.c, tools/art.py corner_cover) as alpha.
 OLED_T=theme_builtins()[0]  # assets/themes/oled/theme.xml, the one theme
 OLED_G=built_geometry(theme_builtins()); assert OLED_G==OLED_T['geom']  # its grid, baked into the build
-OLED_SCHEME=OLED_T['schemes'][next(o['def'] for o in OLED_T['opts'] if o['setting']=='SETTING_ACCENT')]  # Accent's default, oled-blue
+OLED_SCHEME=OLED_T['schemes'][next(o['def'] for o in OLED_T['opts'] if o['setting']=='SETTING_ACCENT')]  # Accent's default, oled-arterial
 OLED_TONES=OLED_SCHEME['tones']
-assert len(set(OLED_TONES))==1  # Accent Blue, one value for every tone: the bar is solid
+assert len(set(OLED_TONES))==1  # the Accent, one value for every tone: the bar is solid
 OLED_BLUE,inset,radius=color_t(OLED_TONES[0]),OLED_T['sel_inset'],OLED_T['sel_radius']
 def corner_mask_bands(x,y,w,h,R,color):
     """corner_mask's fills (nav/row_paint.c) rounding the box x, y, w, h by R into color (a color_t, opaque): each

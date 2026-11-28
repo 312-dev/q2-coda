@@ -96,7 +96,7 @@ LIBC = {
 }
 
 # The payload's C beside navigation.c (build.py compile_payload), in link order; test/fw builds the same set.
-UI_SOURCES = ['peq.c', 'hash.c', 'peq_level.c', 'card_store.c', 'wheel_accel.c', 'peq_ui.c', 'coverflow.c', 'coverflow_thumb.c', 'coverflow_letters.c', 'coverflow_loader.c', 'playlist_art.c', 'slideshow.c', 'library_scope.c', 'scrobble.c', 'videos.c', 'games.c', 'playback.c', 'spotify.c', 'addon.c', 'addon_library.c', 'radio.c', 'tidal.c', 'netupdate.c', 'onlinematch.c', 'crossfade.c', 'nightshift.c', 'headset.c', 'usb_keys.c', 'guest.c', 'chapters.c', 'lyrics.c', 'xiph.c', 'airplay.c', 'stock_tls.c', 'splash_hold.c', 'fb_rotate.c',
+UI_SOURCES = ['peq.c', 'hash.c', 'peq_level.c', 'card_store.c', 'wheel_accel.c', 'peq_ui.c', 'coverflow.c', 'coverflow_thumb.c', 'coverflow_letters.c', 'coverflow_loader.c', 'playlist_art.c', 'slideshow.c', 'library_scope.c', 'scrobble.c', 'videos.c', 'games.c', 'playback.c', 'spotify.c', 'addon.c', 'addon_library.c', 'cloud_reach.c', 'radio.c', 'tidal.c', 'netupdate.c', 'onlinematch.c', 'crossfade.c', 'nightshift.c', 'headset.c', 'usb_keys.c', 'guest.c', 'chapters.c', 'lyrics.c', 'xiph.c', 'airplay.c', 'stock_tls.c', 'splash_hold.c', 'q2ui_gate.c', 'fb_rotate.c',
               'release_sig.c', 'corner_cover.c', 'monocypher/monocypher.c', 'monocypher/monocypher-ed25519.c']
 # The UI_SOURCES tools/format.sh leaves alone: upstream's files written before the formatter was adopted, kept
 # as upstream writes them so merges of them stay clean, and the vendored monocypher, never reformatted. A new

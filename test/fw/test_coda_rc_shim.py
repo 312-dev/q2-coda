@@ -536,6 +536,40 @@ def test_rate_hearts_the_playing_song_and_now_playing_shows_them(fw, ui, mcl, re
     assert q2.ack() == b'32 3\n'
 
 
+def test_like_flips_the_playing_songs_heart_as_its_click_does_and_now_playing_shows_it(fw, ui, mcl, recs):
+    """q2ui's ring heart: "like ID" flips the playing song's My Fav as Now Playing's heart click does (ratings.c
+    rate_now_like: stock's manage_myfav, then its notifyFavor), and the now file's liked follows; another song's id is
+    NOT_FOUND, and a song with no heart here (a stream of the player's own) is refused with nothing flipped."""
+    q2 = Q2(fw, ui, recs)
+    q2.queue(at=2)
+    C.c_int.from_address(O['MCL_TYPE']).value = 1
+    kind, fav, notified = [1], [0], []
+
+    def flip(*_):
+        fav[0] ^= 1
+        return 1 if fav[0] else 0
+    fw.mock('mclGetPlayType', lambda *_: kind[0])
+    fw.mock('checkFavExist', lambda *_: fav[0])
+    fw.mock('manage_myfav', flip)
+    fw.mock('notifyFavor', lambda *_: notified.append(1) or 0)
+    q2.tick()
+    assert q2.now()['liked'] == '0' and q2.now()['hearts'] == '0'
+    q2.files[CMD] = b'50 like 12\n'
+    q2.tick()
+    assert q2.ack() == b'50 0\n' and q2.now()['liked'] == '1' and fav == [1] and notified == [1]
+    assert q2.now()['hearts'] == '0'  # the stars left alone
+    q2.files[CMD] = b'51 like 12\n'
+    q2.tick()
+    assert q2.ack() == b'51 0\n' and q2.now()['liked'] == '0' and fav == [0] and notified == [1, 1]
+    q2.files[CMD] = b'52 like 11\n'  # not the playing song
+    q2.tick()
+    assert q2.ack() == b'52 3\n' and fav == [0] and len(notified) == 2
+    kind[0] = 0xf2  # a stream: stock's click refuses it
+    q2.files[CMD] = b'53 like 12\n'
+    q2.tick()
+    assert q2.ack() == b'53 1\n' and fav == [0] and len(notified) == 2 and q2.now()['liked'] == '-1'
+
+
 def test_a_stream_has_no_hearts(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs)
     q2.queue()
@@ -1025,3 +1059,41 @@ def test_find_with_no_buzzer_is_refused(fw, ui, mcl, recs):
     q2.files[CMD] = b'33 find\n'
     q2.tick()
     assert q2.ack() == b'33 2\n' and q2.now()['find'] == '0'
+
+
+def test_a_set_down_the_queue_is_not_known_even_while_q2ui_runs(fw, ui, mcl, recs):
+    """Control Center's and Display's settings are q2ui's alone, sent down the pipe only q2ui holds (q2ui_gate.c
+    q2ui_ctl): the queue, which the phone's daemon writes too, has no "set", with q2ui up or not."""
+    from test_q2ui_gate import CHILD, Gate
+    q2 = Q2(fw, ui, recs)
+    saved = []
+    fw.mock('write_int_config', lambda v, sec, key, *_: saved.append(C.string_at(key).decode()) or 0)
+    g = Gate(fw)
+    g.poll()
+    assert g.on() == CHILD  # q2ui has the screen
+    q2.files[CMD] = b'34 set smart 1\n'
+    q2.tick()
+    assert q2.ack() == b'34 1\n' and 'SMARTWIFI' not in saved
+
+
+def test_queue_adds_the_listed_ids_next_or_last_as_the_hold_menus_rows_do(fw, ui, mcl, recs):
+    """q2ui's hold menu: "queue next N" or "queue last N" adds the N listed ids as the hold menu's Play Next and Play
+    Last add them (library_pages.c queue_add): with nothing queued they load as a song list's queue without playing;
+    a list with none of the library's ids, or a word other than next or last, is refused with nothing loaded."""
+    q2 = Q2(fw, ui, recs)
+    loaded = []
+    fw.mock('mclLoadPlayList', lambda q, at, cls, *_: loaded.append(([C.c_int.from_address(r).value for r in ui.deques[q]], at, cls)) or 0)
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = ui.deques.new([])
+    q2.tick()
+    q2.files[LIST] = b'13\n11\n'
+    q2.files[CMD] = b'8 queue next 2\n'
+    q2.tick()
+    assert loaded == [([13, 11], 0, 0xf001)] and q2.ack(keep=True) == b'8 0\n'
+    q2.files[LIST] = b'99\n'
+    q2.files[CMD] = b'9 queue last 1\n'
+    q2.tick()
+    assert len(loaded) == 1 and q2.ack(keep=True) == b'9 1\n'
+    q2.files[LIST] = b'12\n'
+    q2.files[CMD] = b'10 queue soon 1\n'
+    q2.tick()
+    assert len(loaded) == 1 and q2.ack(keep=True) == b'10 1\n'

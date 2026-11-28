@@ -83,4 +83,10 @@ done < <(compgen -e)
 tty=()
 [ -t 0 ] && [ -t 1 ] && tty=(-t)
 [ $# -eq 0 ] && set -- bash
-exec "${run[@]}" ${pass[@]+"${pass[@]}"} -i "${tty[@]}" -e TERM="${TERM:-dumb}" -w "$PWD" "$image" "$@"
+# The working directory as the disk spells it. The Mac's home is case-insensitive, so a shell can stand in
+# ~/repos/... when the folder is ~/Repos/...; inside the container that spelling still opens every file, but
+# clang refuses an include whose path differs in case from the name on disk (-Wnonportable-include-path, an
+# error under test/unit's -Werror host builds).
+here_real=$(python3 -c 'import fcntl, os; print(fcntl.fcntl(os.open(".", os.O_RDONLY), fcntl.F_GETPATH, bytes(1024)).rstrip(b"\0").decode())' 2>/dev/null || true)
+[ -d "$here_real" ] || here_real=$PWD
+exec "${run[@]}" ${pass[@]+"${pass[@]}"} -i "${tty[@]}" -e TERM="${TERM:-dumb}" -w "$here_real" "$image" "$@"

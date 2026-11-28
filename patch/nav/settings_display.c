@@ -78,8 +78,8 @@ static int setting_click(void *ctx, void *event) {
     const theme_t *T = theme();
     int *value = option_slot(T, i);
     const char *key = option_key(T, i);
-    /* Graphite, ..., Plum, Green, then Ivory (a theme's mask skips what it does not offer) */
-    static const int accent_next[] = { 1, 2, 3, 4, 5, 6, 8, 0, MINIMAL_ACCENT };
+    /* Graphite, ..., Green, Arterial, then Ivory (a theme's mask skips what it does not offer) */
+    static const int accent_next[] = { 1, 2, 3, 4, 5, 6, 8, 0, 9, MINIMAL_ACCENT };
     _Static_assert(sizeof accent_next / sizeof *accent_next == ACCENT_N, "one per ACCENTS row");
     if (i) {
         const option_t *o = option_of(T, i);
@@ -88,7 +88,7 @@ static int setting_click(void *ctx, void *event) {
             *value = (*value + 1) %
                      (i >= SETTING_OWN ? theme_keys[i - SETTING_OWN].n : setting_counts[i]);
         while (!(mask >> *value & 1));
-    } else { /* Graphite, ..., Green, Ivory; a theme's own schemes after Green */
+    } else { /* Graphite, ..., Green, Arterial, Ivory; a theme's own schemes after Ivory */
         const option_t *o = option_of(T, SETTING_ACCENT);
         unsigned mask = o && o->values ? o->values : (1u << ACCENT_N) - 1;
         do {
@@ -273,6 +273,9 @@ static int display_open(void *ctx, void *event) {
     display_sub = 0;
     return 0;
 }
+
+/* Settings > Controls as q2ui's gate opens it (q2ui_gate.c openers): Home's Controls row's own click */
+int controls_open(void *ctx, void *event) { return display_open((void *)DISPLAY_CONTROLS, event); }
 
 static void setting_row(void *view, int i) {
     static const char *const icons[SETTING_OWN] = {

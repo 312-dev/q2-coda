@@ -237,7 +237,8 @@ def test_under_reduce_motion_the_bar_steps_without_leaning(fw):
 
 
 DOWN, DOWN_MS, SPRING, FADE_MS, RM_HOLD_MS = 965, 90, 280, 120, 80  # tilt.c's PRESS_DOWN and its timings, ms
-BLUE, PRESSED = 0x2160d8, 0x4080f0  # the OLED accent and its pressed step (PRESS_BLUE)
+BLUE = 0xb8141c  # the OLED accent, Arterial (theme.xml oled-arterial), named as the tests were written
+PRESSED = sum((((BLUE >> s & 255) * 880 + 255 * 120) // 1000) << s for s in (0, 8, 16))  # tilt.c PRESS_LIGHT_STEP: 120/1000 to white
 
 
 def cubic_out(t):

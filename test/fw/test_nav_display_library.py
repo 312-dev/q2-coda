@@ -360,8 +360,9 @@ def test_oled_appearance_rows_read_title_and_value_in_its_order(fw):
     assert read['Accent'] == accent_name(t, host.tools_theme.accent_default(t))
     own = [o for o in t['opts'] if o['setting'] == 'SETTING_OWN']
     assert own and [read[o['label']] for o in own] == [o['names'][o['def']] for o in own]  # each at its default
-    # nothing stored: the payload's own defaults (dark, Split, Battery's Icon); no Shortcut row
-    assert (read['Light Mode'], read['Home'], read['Battery']) == ('Off', 'Split', 'Icon') and 'Shortcut' not in read
+    # nothing stored: the payload's own defaults (Light Mode's Auto, the owner's 2026-11-27; Split, Battery's Icon); no
+    # Shortcut row
+    assert (read['Light Mode'], read['Home'], read['Battery']) == ('Auto', 'Split', 'Icon') and 'Shortcut' not in read
 
 
 def clicks_of(fw, ui, page, title, n):
@@ -375,15 +376,27 @@ def clicks_of(fw, ui, page, title, n):
     return seen
 
 
-def test_oled_accent_offers_its_blue_alone(fw):
-    """OLED's accent option names one value, its own scheme (theme.xml): a click comes back to it."""
+def test_oled_accent_offers_arterial_and_blue(fw):
+    """OLED's accent option names its two own schemes (theme.xml), Arterial the default: a click moves to Blue and the
+    next back."""
     ui = Ui(fw)
     t = OLED_THEME
     v = host.tools_theme.accent_default(t)
+    blue = host.tools_theme.scheme_names(t).index('oled-blue')
     (o,) = [o for o in t['opts'] if o['setting'] == 'SETTING_ACCENT']
-    assert o['values'] == 1 << v
+    assert o['values'] == 1 << v | 1 << blue and accent_name(t, v) == 'Arterial' and blue == v - 1
     page = appearance(fw, ui, **{t['accent_key']: b'%d' % v})
-    assert clicks_of(fw, ui, page, 'Accent', 2) == [(accent_name(t, v), [(t['accent_key'], v)])] * 2
+    assert clicks_of(fw, ui, page, 'Accent', 2) == [('Blue', [(t['accent_key'], blue)]), ('Arterial', [(t['accent_key'], v)])]
+
+
+@pytest.mark.parametrize('stored', (None, b'9', b'12', b'x'))
+def test_an_accent_never_chosen_or_not_offered_reads_as_arterial(fw, stored):
+    """No OLED_ACCENT, or one the theme does not offer (9, what a Q2 stored while Blue was OLED's one value, is now the
+    ACCENTS row Arterial), shows Arterial, and the stored value is not written back until a click."""
+    ui = Ui(fw)
+    t = OLED_THEME
+    page = appearance(fw, ui, **({t['accent_key']: stored} if stored else {}))
+    assert dict(rows(page.view()))['Accent'] == 'Arterial' and not writes(fw)
 
 
 def test_home_cycles_split_and_full(fw):
