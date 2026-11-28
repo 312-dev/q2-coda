@@ -1,6 +1,6 @@
 # q2dacloop: USB DAC mode
 
-USB DAC mode makes the Q2 a USB Audio 2.0 DAC for a computer: the computer plays, the Q2's DAC and amplifier are its sound card. It is kept in Vamp OS's scope ([roadmap: Scope](vamp-os.md#scope)); stock's `uac2_loopback` and `uac_device_config.sh` do it today, and in Vamp OS q2sysd's `usb dac` and `q2dacloop` do.
+USB DAC mode makes the Q2 a USB Audio 2.0 DAC for a computer: the computer plays, the Q2's DAC and amplifier are its sound card. It is kept in VampOS's scope ([roadmap: Scope](vamp-os.md#scope)); stock's `uac2_loopback` and `uac_device_config.sh` do it today, and in VampOS q2sysd's `usb dac` and `q2dacloop` do.
 
 | What | Where |
 | --- | --- |

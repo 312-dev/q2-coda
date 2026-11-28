@@ -1,5 +1,5 @@
 config BR2_PACKAGE_Q2SYSD
 	bool "q2sysd"
 	help
-	  Vamp OS's system service (sysd/, docs/sysd.md), its first slice: the power key, the screen's
+	  VampOS's system service (sysd/, docs/sysd.md), its first slice: the power key, the screen's
 	  light and the battery, and Q2SYS/1 on /run/vamp/sys.sock.

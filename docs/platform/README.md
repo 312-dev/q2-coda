@@ -1,6 +1,6 @@
 # Vamp API 1
 
-The API Vamp OS offers a program that is not part of it ([roadmap: Platform](../vamp-os.md#platform)): service sockets, each with its protocol here, and a conformance test that runs the real service on a laptop and replays this folder's transcripts against it. It is **experimental** until two apps written outside the project ship on it ([roadmap: The API](../vamp-os.md#the-api)).
+The API VampOS offers a program that is not part of it ([roadmap: Platform](../vamp-os.md#platform)): service sockets, each with its protocol here, and a conformance test that runs the real service on a laptop and replays this folder's transcripts against it. It is **experimental** until two apps written outside the project ship on it ([roadmap: The API](../vamp-os.md#the-api)).
 
 | Area | Service | Socket | Protocol | Permission (planned) |
 | --- | --- | --- | --- | --- |
@@ -12,7 +12,7 @@ The API Vamp OS offers a program that is not part of it ([roadmap: Platform](../
 | Packages: the manifest, users, starting and stopping | `q2pkgd` | the card; `/run/vamp/pkg.sock` | [Packages](packages.md), [Q2PKG/1](packages.md#starting-and-stopping-q2pkg1) | none: each command checks the caller's uid |
 | Notices and questions (designed, not served) | `q2ui` | `/run/vamp/ui.sock` | [Q2UI/1 notices](notices.md) | `notices`, `ask` |
 
-Not in API 1 yet: the declarative UI (Q2SPOT/1 stays API 0, served by today's Vamp; Vamp OS has no shim for it yet), `libvampui`, the canvas, input, a settings namespace, storage folders, power holds and notices, and the checks of the permissions no socket guards yet ([Packages: Users and groups](packages.md#users-and-groups)).
+Not in API 1 yet: the declarative UI (Q2SPOT/1 stays API 0, served by today's Vamp; VampOS has no shim for it yet), `libvampui`, the canvas, input, a settings namespace, storage folders, power holds and notices, and the checks of the permissions no socket guards yet ([Packages: Users and groups](packages.md#users-and-groups)).
 
 ## The common shape
 

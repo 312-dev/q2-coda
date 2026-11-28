@@ -1,4 +1,4 @@
-/* q2playd: Vamp OS's playback service (docs/vamp-os.md#who-owns-what, docs/playd.md). It is the server end of the
+/* q2playd: VampOS's playback service (docs/vamp-os.md#who-owns-what, docs/playd.md). It is the server end of the
  * player's socket that demo is on today's Vamp (docs/player.md#the-socket): q2player connects to /tmp/sock_play and
  * q2playd says what to play. It owns the queue (the songs' ids from the library, an index, shuffle), what plays now,
  * and the volume, and takes commands from two places:

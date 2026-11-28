@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vamp OS's base image (tools/vampos.py, docs/vamp-os-base.md): what it holds, and how it boots under the emulator.
+"""VampOS's base image (tools/vampos.py, docs/vamp-os-base.md): what it holds, and how it boots under the emulator.
 
     test/os_image.py BUILD [--zip ZIP [--no-boot] [--qemu QEMU_MIPSEL_STATIC] [--keep DIR]] [--perturb WHAT]
 
@@ -781,7 +781,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
         extra = ['--bind', emu/'data', '/mnt/data', '--ro-bind', emu/'modules', '/proc/modules']
     outer = []
     if card:
-        # as on a Q2: today's Vamp's init stays PID 1 and q2vampos runs Vamp OS's rcS and runsvdir in a chroot, beside
+        # as on a Q2: today's Vamp's init stays PID 1 and q2vampos runs VampOS's rcS and runsvdir in a chroot, beside
         # what today's boot started: its Wi-Fi (wpa_supplicant, udhcpc) and its Wi-Fi adbd on 5555, stand-ins here
         outer = outer_vamp(work, outer_adbd)
         ns, proc_args = [], ['--bind', '/proc', '/proc']

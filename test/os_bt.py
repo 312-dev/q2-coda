@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vamp OS's Bluetooth services (docs/vamp-os-base.md#bluetooth) under the emulator: the image's dbus, bt-attach,
+"""VampOS's Bluetooth services (docs/vamp-os-base.md#bluetooth) under the emulator: the image's dbus, bt-attach,
 bluetoothd, bluealsa and q2btd services run by its own runsvdir, every program MIPS under qemu-mipsel through binfmt in a
 bwrap chroot of the image, with test/bluez_own.py's stand-in for the kernel's management socket.
 

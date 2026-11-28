@@ -1,5 +1,5 @@
 #!/bin/sh
-# After an install (docs/pkgd.md): rcS has put the rescue copy back already (q2pkgd restore); once Vamp OS has been up a
+# After an install (docs/pkgd.md): rcS has put the rescue copy back already (q2pkgd restore); once VampOS has been up a
 # minute the install is no longer pending (q2pkgd confirm, which restores again if anything undid it). Then nothing.
 . /usr/libexec/vamp/log
 sleep 60

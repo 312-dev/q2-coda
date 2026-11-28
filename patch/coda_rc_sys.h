@@ -1,7 +1,7 @@
 /* What coda-rc uses from libc and SQLite. There is no MIPS sysroot (docs/building.md), so for the
  * Q2 these are declared here with MIPS o32 Linux's constants, as patch/remote.c and patch/video.c declare
  * theirs; CODA_HOST takes the host's own headers instead, for the tests, and CODA_LIBC a libc's own headers for a Q2
- * build that has them (Vamp OS's image, os/package/coda-rc), which otherwise behaves as the device build. Only what
+ * build that has them (VampOS's image, os/package/coda-rc), which otherwise behaves as the device build. Only what
  * coda_rc*.c calls. */
 #ifndef CODA_RC_SYS_H
 #define CODA_RC_SYS_H

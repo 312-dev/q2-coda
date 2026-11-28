@@ -2,6 +2,6 @@ config BR2_PACKAGE_Q2CARRD
 	bool "q2carrd"
 	select BR2_PACKAGE_SQLITE
 	help
-	  Car Remote (docs/carrd.md): q2carrd, its side on Vamp OS (carrd/), and the coda-rc daemon
+	  Car Remote (docs/carrd.md): q2carrd, its side on VampOS (carrd/), and the coda-rc daemon
 	  it runs (patch/coda_rc*.c, tools/build.py CODA_RC_SOURCES), built against this image's
 	  libc and SQLite, from the tree tools/vampos.py exported.

@@ -1,4 +1,4 @@
-/* q2btd: Vamp OS's Bluetooth service (docs/btd.md), the client of the image's own bluetoothd and bluealsa
+/* q2btd: VampOS's Bluetooth service (docs/btd.md), the client of the image's own bluetoothd and bluealsa
  * (docs/vamp-os-base.md#bluetooth), with Q2BT/1 on /run/vamp/bt.sock (docs/platform/bt.md).
  *
  *   - BlueZ (org.bluez) and bluez-alsa (org.bluealsa) on the system bus: what they hold is read once with each one's

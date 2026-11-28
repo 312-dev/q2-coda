@@ -1,4 +1,4 @@
-/* q2scrobd: Vamp OS's scrobble log (docs/vamp-os-services.md#scrobbling). It watches Q2PLAY/1 (/run/vamp/play.sock)
+/* q2scrobd: VampOS's scrobble log (docs/vamp-os-services.md#scrobbling). It watches Q2PLAY/1 (/run/vamp/play.sock)
  * and, for each song heard long enough, appends a line to the card's /mnt/mmc/.scrobbler.log in Rockbox's
  * AudioScrobbler 1.1 format, as today's Vamp does (docs/internals.md#scrobbling), for any .scrobbler.log uploader.
  *

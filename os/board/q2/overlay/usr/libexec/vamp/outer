@@ -1,4 +1,4 @@
-# Sourced by the adb services' scripts: whether an adbd that is not Vamp OS's is already serving (today's Vamp's, outside
+# Sourced by the adb services' scripts: whether an adbd that is not VampOS's is already serving (today's Vamp's, outside
 # the chroot of a card boot, docs/vamp-os-base.md#card-boot), decided by what is running and listening, not by what
 # kind of boot this is.
 #   outer_usb_adbd: a process named adbd running without --tcp (the USB one)

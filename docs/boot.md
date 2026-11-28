@@ -38,7 +38,7 @@ Vamp can share the device with [Rockbox](https://github.com/DiamondBond/q2-rockb
 | Rockbox    | `/mnt/mmc/.rockbox/rockbox`, run from that folder, its output in `rockbox.log` there       |
 | Started by | `S90play`, in place of `/release/bin/demo &`                                               |
 
-On a `--dev` build, before that choice, `S90play` runs `/usr/bin/q2vampos`, which hands the Q2 to a Vamp OS image on the card when the card asks for it, and otherwise returns to the choice below ([vamp-os-base: Card boot](vamp-os-base.md#card-boot)).
+On a `--dev` build, before that choice, `S90play` runs `/usr/bin/q2vampos`, which hands the Q2 to a VampOS image on the card when the card asks for it, and otherwise returns to the choice below ([vamp-os-base: Card boot](vamp-os-base.md#card-boot)).
 
 When the saved choice is Rockbox and Play/Pause is not held, `S90play` waits up to 3 s for the card (`/tmp/mmc_add`); the card's driver polls for it, so it can't tell an empty slot from a card still being read. If the card has Rockbox, it runs Rockbox and appends `exit N` to `rockbox.log`; any exit, including 0x51 (81) from **Boot stock OS**, falls through to demo, which starts with its usual name so the watchdog finds it. Install Rockbox by unzipping its `rockbox.zip` to the card's root. A Rockbox that hangs keeps Vamp away: hold Play/Pause at the next power-on, or remove `/.rockbox/rockbox` with a card reader.
 

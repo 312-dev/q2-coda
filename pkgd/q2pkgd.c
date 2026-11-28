@@ -1,4 +1,4 @@
-/* q2pkgd: Vamp OS's update service (docs/vamp-os.md#installer-and-updates, docs/pkgd.md):
+/* q2pkgd: VampOS's update service (docs/vamp-os.md#installer-and-updates, docs/pkgd.md):
  *
  *     q2pkgd stage RELEASE_DIR [--rootfs DIR] [--card DIR]    a release checked, composed, staged beside the rescue copy
  *     q2pkgd install [--card DIR]                             the staged image put where Shanling's recovery reads it
@@ -31,7 +31,7 @@
  *            unless they are there already. Shanling's recovery removes recovery-update/ once it has flashed it (seen on a
  *            Q2: the folder gone after each install), so the card has no recovery at all until this runs: rcS runs it as
  *            soon as the card is mounted, before anything else that can fail.
- *   confirm  restore, then pending removed. Vamp OS runs it once its services have been up a minute (/etc/sv/q2pkgd-confirm).
+ *   confirm  restore, then pending removed. VampOS runs it once its services have been up a minute (/etc/sv/q2pkgd-confirm).
  *
  *   download a release from the feed (FEED, a GitHub repository; --feed another) over HTTPS verified against --ca
  *            (/etc/scrobble-ca.pem): the tag from releases/latest's redirect (or --tag), release.sig and release.txt
@@ -346,7 +346,7 @@ static int stage(const char *dir, const char *rootfs, const char *out, char *dig
         if (place(rel.file[i].path, where, sizeof where))
             return remove_tree(tmp), fail("%s has no place under /vendor", rel.file[i].path);
         snprintf(p, sizeof p, "%s/%s", rootfs, rel.file[i].path);
-        if (hash_file(p, 0, h, 0) || strcmp(h, rel.file[i].sha256)) { /* not at its stock path: Vamp OS keeps it in /vendor */
+        if (hash_file(p, 0, h, 0) || strcmp(h, rel.file[i].sha256)) { /* not at its stock path: VampOS keeps it in /vendor */
             snprintf(p, sizeof p, "%s/%s", rootfs, where);
             if (hash_file(p, 0, h, 0) || strcmp(h, rel.file[i].sha256))
                 return remove_tree(tmp), fail("%s is not the file this release was tested with (an unsupported stock version, or damaged)",
@@ -427,7 +427,7 @@ static int install(const char *card) {
         snprintf(b, sizeof b, "%s/rootfs.squashfs", rescue), put(b, a); /* as it was */
         return fail("cannot write %s", a);
     }
-    printf("installed: %s holds the staged image; hold Previous and power on with Centre to flash it. Vamp OS puts the "
+    printf("installed: %s holds the staged image; hold Previous and power on with Centre to flash it. VampOS puts the "
            "rescue copy back as soon as it has the card (q2pkgd restore, from rcS)\n", rec);
     return 0;
 }
@@ -839,7 +839,7 @@ static int manifest(const char *dir, struct manifest *mp) {
     char *end;
     long api = strtol(m.api, &end, 10);
     if (!*m.api || *end || api < 1) return fail("q2app: api= is the lowest Vamp API it needs, a number from 1");
-    if (api > API_SERVED) return fail("q2app: needs API %ld; this Vamp OS serves API %d", api, API_SERVED);
+    if (api > API_SERVED) return fail("q2app: needs API %ld; this VampOS serves API %d", api, API_SERVED);
     if (!*m.version || strspn(m.version, "0123456789.") != strlen(m.version) || m.version[0] == '.' ||
         m.version[strlen(m.version) - 1] == '.' || strstr(m.version, ".."))
         return fail("q2app: version= is dotted numbers (1.4.2)");

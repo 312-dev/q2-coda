@@ -1,4 +1,4 @@
-/* q2sysd: Vamp OS's system service (docs/vamp-os.md#who-owns-what, docs/sysd.md), its first slice: the power key,
+/* q2sysd: VampOS's system service (docs/vamp-os.md#who-owns-what, docs/sysd.md), its first slice: the power key,
  * the screen's light, and the battery.
  *
  *   - The power key (KEY_POWER on any input device: md-gpio-keys' power button, the PMIC's key, and the touchscreen's
@@ -800,7 +800,7 @@ static void *fm_worker(void *unused) {
 }
 
 /* ---- Key Tone's buzzer (docs/sysd.md#key-tone) ----
- * Stock clicks the MCU's buzzer (cmd_mcu write_str buzzer, a stock program and an MCU firmware load Vamp OS has not
+ * Stock clicks the MCU's buzzer (cmd_mcu write_str buzzer, a stock program and an MCU firmware load VampOS has not
  * got); the same buzzer is PWM channel 1 through /dev/jz_pwm, as Find My Vamp plays it: a click is one short note,
  * CLICK_HZ for CLICK_MS, on a thread, the channel taken and given back as findmy_tune.h does. A click while one sounds,
  * or while the jingle plays, is dropped, as the buzzer could not play it yet. */

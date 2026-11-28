@@ -1,11 +1,11 @@
-# Car Audio on Vamp OS
+# Car Audio on VampOS
 
-Car Audio ([iphone-mode](iphone-mode.md#car-audio-in-the-image)) is kept in Vamp OS's scope. Vamp OS carries today's pieces unchanged and puts q2sysd where demo was:
+Car Audio ([iphone-mode](iphone-mode.md#car-audio-in-the-image)) is kept in VampOS's scope. VampOS carries today's pieces unchanged and puts q2sysd where demo was:
 
-| Piece | Today's Vamp | Vamp OS |
+| Piece | Today's Vamp | VampOS |
 | --- | --- | --- |
 | The iPhone a car sees, iAP2, the car's buttons, Now Playing, the cover | `q2-iap` (`patch/q2_iap.c`, `iap2_*.c`, `q2_iap_lib.c`) | the same sources, built by Buildroot (`os/package/q2-iap`), `/usr/bin/q2-iap` |
-| The gadget and the module | `patch/q2car.sh` as `/usr/bin/q2car`, `/module_driver/usb_f_uac1.ko` | `patch/q2car.sh` as `/usr/libexec/vamp/q2car`, run by `/usr/bin/q2car` with Vamp OS's paths (`Q2CAR_MODULE`, `Q2CAR_PLAYER`, `Q2CAR_IAP_ARGS`); the module tools/uac1.py pins, from the third-party cache (`pins.py uac1`), at `/usr/lib/vamp/usb_f_uac1.ko` |
+| The gadget and the module | `patch/q2car.sh` as `/usr/bin/q2car`, `/module_driver/usb_f_uac1.ko` | `patch/q2car.sh` as `/usr/libexec/vamp/q2car`, run by `/usr/bin/q2car` with VampOS's paths (`Q2CAR_MODULE`, `Q2CAR_PLAYER`, `Q2CAR_IAP_ARGS`); the module tools/uac1.py pins, from the third-party cache (`pins.py uac1`), at `/usr/lib/vamp/usb_f_uac1.ko` |
 | Starting it, following the verdict | demo (`patch/usb_ui.c`, `patch/usb_car.c`) at a cable in on Automatic | q2sysd at a cable in on Automatic ([q2sysd: The cable](sysd.md#the-cable)), or its `usb car` ([Q2SYS/1](platform/system.md)): the song paused, `q2car start`; `/tmp/q2car.state` read twice a second: `verdict=car` is a `car` event and the mode stays; any other verdict, once q2car writes `down=1`, is adb again (`usb adb`), except a computer at Automatic's cable, which gets the card (`usb storage`). `usb adb` while shown, or the cable out, runs `q2car stop` |
 | The audio | `q2player`'s way 3 while `/tmp/q2-iap.audio` is there | the same: the image's `q2player` is built with `Q2_CAR_USB` |
 | The car's buttons and Now Playing | the shim's `/tmp/coda-rc.cmdq` and `/tmp/coda-rc.now`, answered in `/tmp/coda-rc.ack` | `q2playd` reads the same FIFO, answers each command in the same ack file and writes the same now file ([q2playd](playd.md)) |
@@ -24,4 +24,4 @@ Car Audio ([iphone-mode](iphone-mode.md#car-audio-in-the-image)) is kept in Vamp
 
 ## Needs a Q2
 
-All of Car Audio's car and desk results ([iphone-mode](iphone-mode.md)) are from today's Vamp; on Vamp OS the module loading under this init, the iPhone gadget on the controller beside q2adb's park, and a drive.
+All of Car Audio's car and desk results ([iphone-mode](iphone-mode.md)) are from today's Vamp; on VampOS the module loading under this init, the iPhone gadget on the controller beside q2adb's park, and a drive.

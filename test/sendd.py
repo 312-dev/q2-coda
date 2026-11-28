@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""q2sendd (sendd/q2sendd.c, docs/vamp-os-services.md#localsend): LocalSend's receive side on Vamp OS. Today's q2send
+"""q2sendd (sendd/q2sendd.c, docs/vamp-os-services.md#localsend): LocalSend's receive side on VampOS. Today's q2send
 (patch/localsend.c, patch/localsend_core.c) built for this machine against its OpenSSL, run by q2sendd beside stand-ins
 for Q2UI/1 (docs/platform/notices.md: the socket q2ui will serve), Q2NET/1 and Q2SYS/1; a sender made here speaks
 LocalSend v2 over TLS with a client certificate. Checked: the question asked as a Q2UI/1 card and the files taken only

@@ -1,4 +1,4 @@
-/* q2netd: Vamp OS's network service (docs/vamp-os.md#who-owns-what, docs/netd.md), its first slice: Wi-Fi.
+/* q2netd: VampOS's network service (docs/vamp-os.md#who-owns-what, docs/netd.md), its first slice: Wi-Fi.
  *
  *   - The radio: on, it brings wlan0 up and runs wpa_supplicant on the networks saved in /mnt/data/wpa_supplicant.conf
  *     (stock's file and format, so stock and today's Vamp read what is saved here), and udhcpc once it is associated;
@@ -10,7 +10,7 @@
  *   - The saved networks: q2netd edits the conf itself (a network={} block added or removed, the rest of the file kept)
  *     and asks wpa_supplicant to read it again (RECONFIGURE), so no update_config line is needed in a file stock wrote.
  *
- * On a card boot (--card-boot: Vamp OS run in a chroot by today's Vamp, docs/vamp-os-base.md#card-boot) Wi-Fi is how the
+ * On a card boot (--card-boot: VampOS run in a chroot by today's Vamp, docs/vamp-os-base.md#card-boot) Wi-Fi is how the
  * developer reaches today's adbd outside the chroot, so it is never turned off: a wpa_supplicant already running
  * (today's Vamp's) is left exactly as it is, nothing started, stopped or restarted beside it (state "external"); with
  * none, the radio is brought up on the saved networks and kept up, Smart Wi-Fi and `off` refused.

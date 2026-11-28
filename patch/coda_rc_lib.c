@@ -6,7 +6,7 @@
  * (lib_open), and nothing is ever written to it. While demo lets the card go (CARD_HOLD, before Standby, a power-off or
  * a restart) the catalogue on the card is not opened, and a SIGUSR1 closes the connection (lib_release), so nothing
  * of the daemon's holds the card as it is unmounted. Play.resume's places, the song each list last played from a phone was on,
- * are the daemon's own file (PLACES). Under Vamp OS (crc_vampos) the library is q2libd's instead (docs/carrd.md#the-library). */
+ * are the daemon's own file (PLACES). Under VampOS (crc_vampos) the library is q2libd's instead (docs/carrd.md#the-library). */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
 #include "stream_path.h"
@@ -15,11 +15,11 @@
 #define CAT "/mnt/mmc/.q2pod/catalogue.db"
 #define CARD_HOLD "/tmp/mmc_hold" /* demo's pid while it lets the card go (card_release.c) */
 #define DURATIONS "/mnt/data/ringnav-durations-v1"
-/* --library vampos: Vamp OS's library, q2libd's (docs/libd.md): stock's songtable with each song's length in its time
+/* --library vampos: VampOS's library, q2libd's (docs/libd.md): stock's songtable with each song's length in its time
  * column, in seconds, and stock's playlist; no myfav (Favorites empty) and no durations file; the servers' songs in
  * q2libd's catalogue on the card, whose servertable has the length in time too and whose servermeta names a row by its
  * id, so a temporary view (vmeta) gives it today's shape (fileurl, app, sid, seconds). Stock's database.db and today's
- * Vamp's catalogue are not read, as Vamp OS leaves both alone; the servers' playlists are q2libd's serverpl and
+ * Vamp's catalogue are not read, as VampOS leaves both alone; the servers' playlists are q2libd's serverpl and
  * serveritem (VAMPOS_PLS), not stock's playlist table. */
 #define VAMPOS_DB "/mnt/data/vamp/library.db"
 #define VAMPOS_CAT "/mnt/mmc/.vamp/catalogue.db"
@@ -329,7 +329,7 @@ typedef struct {
     long long size[3], mtime[3];
 } lib_key_t;
 static lib_key_t lib_key;
-static int fav_on; /* likes.db attached as fav (Vamp OS) */
+static int fav_on; /* likes.db attached as fav (VampOS) */
 
 static void lib_key_now(lib_key_t *k) {
     static const char *const files[3] = {DB, CAT, DURATIONS}, *const vampos[3] = {VAMPOS_DB, VAMPOS_CAT, VAMPOS_LIKES};
@@ -401,7 +401,7 @@ static int lib_open(void) {
         if (strchr(q, '\'') || sqlite3_exec(db, sql, 0, 0, 0) != SQLITE_OK) server = 0;
     }
     cat_on = server;
-    fav_on = 0; /* Vamp OS's likes, attached while q2playd has made them; a like moves lib_key, so they are attached again */
+    fav_on = 0; /* VampOS's likes, attached while q2playd has made them; a like moves lib_key, so they are attached again */
     if (crc_vampos && access(crc_path(p, sizeof p, VAMPOS_LIKES), 0) == 0 && !strchr(p, '\'')) {
         snprintf(sql, sizeof sql, "attach '%s' as fav", p);
         fav_on = sqlite3_exec(db, sql, 0, 0, 0) == SQLITE_OK;
@@ -564,7 +564,7 @@ static const char *arg_ok(const char *a) {
 #define TAIL(bk, pos) ", " bk " bk, nt, ord, " pos " pos, nal, nar, naa, added, year, ak"
 #define NO_TAIL(bk, nt, pos, year) ", " bk " bk, " nt " nt, '' ord, " pos " pos, '' nal, '' nar, '' naa, 0 added, " year " year, '' ak"
 
-/* Vamp OS's server playlists (q2libd's serverpl and serveritem, docs/libd.md#the-servers-playlists), after the card's:
+/* VampOS's server playlists (q2libd's serverpl and serveritem, docs/libd.md#the-servers-playlists), after the card's:
  * each "pl:" 100 plus its serverpl rowid (a card playlist's id is at most 100), its art its server's cover once its app
  * has it, else its first song's album's. An item is its synced card file (path) or its sid's server song (vmeta). */
 #define VAMPOS_STR_(x) #x
@@ -602,7 +602,7 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         l->order = order_of("tracks", l->sort, &l->bucketed, &l->years, &bk);
         snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "0") " from s2 where %s", bk, where);
     } else if (!strcmp(kind, "favorites")) {
-        /* the liked songs: stock's My Fav (docs/internals.md#ratings), by path; under Vamp OS q2playd's likes */
+        /* the liked songs: stock's My Fav (docs/internals.md#ratings), by path; under VampOS q2playd's likes */
         l->sorts = FAV_SORTS;
         l->actions = 3;
         l->sort = pick(l->sorts, sort)->key;
@@ -634,7 +634,7 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         l->sort = pick(l->sorts, sort)->key;
         l->order = order_of("pl", l->sort, &l->bucketed, &l->years, &bk);
         /* a playlist row's place is its row id, so a song listed twice keeps both places */
-        if (n > 100) /* a server's (Vamp OS): its items in the server's order */
+        if (n > 100) /* a server's (VampOS): its items in the server's order */
             snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "pid") " from (select s2.*, i.pos pid from "
                      "cat.serverpl sp join cat.serveritem i on i.app = sp.app and i.pid = sp.pid join s2 on s2.url = "
                      VAMPOS_ITEM_URL " where sp.rowid = %lu)", bk, n - 100);

@@ -1,4 +1,4 @@
-/* q2carrd: Car Remote's side on Vamp OS (docs/carrd.md). The coda-rc daemon (patch/coda_rc.c, docs/remote-protocol.md)
+/* q2carrd: Car Remote's side on VampOS (docs/carrd.md). The coda-rc daemon (patch/coda_rc.c, docs/remote-protocol.md)
  * is the protocol, run here as a child; q2carrd is what demo's shim (patch/coda_rc_shim.c) is for it today, through
  * the same files in /tmp, less what q2playd already answers (the now and queue files, the command queue and its
  * acks: docs/playd.md):

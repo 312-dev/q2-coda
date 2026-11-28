@@ -1,6 +1,6 @@
 # q2gate
 
-`q2ui` (`ui/` at `Q2UI_COMMIT`) talks to `demo` on today's Vamp: it writes settings and verbs down a pipe it is handed (`--ctl FD`, `patch/q2ui_gate.c` on `feat/render-engine`), and reads what `demo` says in three files. With no `demo`, `q2gate` (`gate/q2gate.c`) is that other end, so the UI's status row, Control Center, Wi-Fi page and Bluetooth page work on Vamp OS until `q2ui` speaks Vamp API 1 itself ([ui-rewrite: The seams](ui-rewrite.md) on `feat/render-engine`).
+`q2ui` (`ui/` at `Q2UI_COMMIT`) talks to `demo` on today's Vamp: it writes settings and verbs down a pipe it is handed (`--ctl FD`, `patch/q2ui_gate.c` on `feat/render-engine`), and reads what `demo` says in three files. With no `demo`, `q2gate` (`gate/q2gate.c`) is that other end, so the UI's status row, Control Center, Wi-Fi page and Bluetooth page work on VampOS until `q2ui` speaks Vamp API 1 itself ([ui-rewrite: The seams](ui-rewrite.md) on `feat/render-engine`).
 
 | What | Where |
 | --- | --- |
@@ -24,7 +24,7 @@ A line each, at most 80 bytes with its `\n` (a longer one is dropped), as `q2ui_
 | `set gapless`, `xfade` | `[PLAYSET] GAPLESS`, `[Q2POD] XFADE`, which `q2playd` reads again |
 | `set light` (0 to 2), `motion`, `home` (0, 1), `songartist` (0 to 3), `songlength` (0 to 2), `night` (0 to 2), `nightk` (2000 to 5000 in hundreds) | `[IPOD] LIGHT`, `REDUCEMOTION`, `HOME`, `SONGARTIST`, `SONGLENGTH`, `[Q2POD] NIGHTSHIFT`, `NIGHTK`: `q2ui` reads its own settings back from `config.ini` |
 | `scan` | Q2NET/1 `scan` (on a thread of its own: it waits for the radio) |
-| `join NAME` | a saved network is `q2netd`'s to join; an open one heard is saved (`add`); then `wake`. A secured network not saved needs its password typed, on a page Vamp OS has not got (`demo`'s `kbwifipass_dialog`): it reads `Couldn't connect` |
+| `join NAME` | a saved network is `q2netd`'s to join; an open one heard is saved (`add`); then `wake`. A secured network not saved needs its password typed, on a page VampOS has not got (`demo`'s `kbwifipass_dialog`): it reads `Couldn't connect` |
 | `btscan` | Q2BT/1 `scan` (60 s of discovery) |
 | `btlink MAC` | as the row's click: the connected one `disconnect`ed, a paired one `connect`ed, a found one `pair`ed |
 | `btforget MAC` | Q2BT/1 `forget` |
@@ -36,7 +36,7 @@ A value out of its setting's range is refused (logged); a setting is written by 
 
 Asked of the services once a second and after each line, each written whole beside itself and renamed, only when it changes:
 
-- **`/tmp/q2ui.status`**, `status_row.c` `status_row_state` then `control_center.c` `q2ui_cc_state`, in their order: `out` (`wire` when a jack is plugged and the music goes to the DAC, else `other`), `bt` (`none` with Bluetooth off, `connecting`, `rune` on and idle, `headset`, `car`), `btbatt` (a headset's level, else -1), `relay`, `lock`, `sync`, `syncpm`, `offline` (none of those on Vamp OS yet: `none` or 0), `net` (1), `clock24` (`[SYSSET] TIME24H`, 1 when absent); then `wifi` (the radio not off), `bton`, `btbusy` (0), `airplay` (0), `car`, `smart`, `eq` (Q2PLAY/1 `eq`'s `on`: 1 while the 3EQ or the PEQ plays, as `g_equalizer_flag`), `usb` (`[Q2POD] USBPICK`'s name: Automatic, Charge Only, Transfer Files, USB Audio, USB Debugging, Ask Every Time), `cable` (Q2SYS/1 `battery`'s), `bright` (`[SYSSET] LIGHTNESS`, 50 when absent), `vol` (Q2PLAY/1 `now`'s) and `volmax` (`[PLAYSET] MAXVOLUME`). No `tz`: the zone is the system's (`/etc/localtime`, [sysd: The clock](sysd.md#the-clock)).
+- **`/tmp/q2ui.status`**, `status_row.c` `status_row_state` then `control_center.c` `q2ui_cc_state`, in their order: `out` (`wire` when a jack is plugged and the music goes to the DAC, else `other`), `bt` (`none` with Bluetooth off, `connecting`, `rune` on and idle, `headset`, `car`), `btbatt` (a headset's level, else -1), `relay`, `lock`, `sync`, `syncpm`, `offline` (none of those on VampOS yet: `none` or 0), `net` (1), `clock24` (`[SYSSET] TIME24H`, 1 when absent); then `wifi` (the radio not off), `bton`, `btbusy` (0), `airplay` (0), `car`, `smart`, `eq` (Q2PLAY/1 `eq`'s `on`: 1 while the 3EQ or the PEQ plays, as `g_equalizer_flag`), `usb` (`[Q2POD] USBPICK`'s name: Automatic, Charge Only, Transfer Files, USB Audio, USB Debugging, Ask Every Time), `cable` (Q2SYS/1 `battery`'s), `bright` (`[SYSSET] LIGHTNESS`, 50 when absent), `vol` (Q2PLAY/1 `now`'s) and `volmax` (`[PLAYSET] MAXVOLUME`). No `tz`: the zone is the system's (`/etc/localtime`, [sysd: The clock](sysd.md#the-clock)).
 - **`/tmp/q2ui.wifi`**, `wifi_flows.c` `wifi_flows_networks`: `scan 1` while a search runs, else `scan 0`; then, with Wi-Fi on, `LEVEL LOCK STATE NAME` a network the last search heard, the ones joining, joined or failed first; LEVEL 1 to 4 by stock's steps (-65, -75, -80 dBm), STATE 0, 1 Connecting, 2 Connected, 3 Couldn't connect (30 s after a join that did not connect); a name's `\` and newline as `\\` and `\n`.
 - **`/tmp/q2ui.bt`**, `bt_ui.c` `bt_q2ui_devices`: `scan 1` while a scan runs, else `scan 0`; then, with Bluetooth on, `PAIRED STATE MAC NAME` a device Q2BT/1 `devices` lists, the paired first; STATE 2 connected, else 0.
 

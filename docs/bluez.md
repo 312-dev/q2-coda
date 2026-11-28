@@ -222,7 +222,7 @@ stock rootfs. A `--dev --own-bluez` image is 56,164,352 bytes of the 75,497,472 
 
 ## Bases
 
-The owner's direction of 2026-11-26: bluetoothd is one component of a Vamp OS in which every userspace piece
+The owner's direction of 2026-11-26: bluetoothd is one component of a VampOS in which every userspace piece
 is our own or built from open source on a clean base (such as Buildroot), over Shanling's kernel and drivers.
 So the build has to target today's stock rootfs and a newer base from one source tree and one set of patches,
 with the differences in the recipe's settings, never in the code.
@@ -354,7 +354,7 @@ other: stock's bluealsa must work on our bluetoothd, and the own bluealsa on sto
   stock base two ways: `bluez` against stubs (`glib`, `dbus`, `stub_library`), `bluealsa` against stock's own
   libraries (`stocksdk`, which needs an unpacked stock rootfs). Merged on `feat/bt-own` (2026-11-27) as they
   were, so each keeps its cached build; one way should be kept (`stocksdk`'s is the simpler, where the build
-  has the stock rootfs to hand), and on a Vamp OS base neither is used ([Bases](#bases)).
+  has the stock rootfs to hand), and on a VampOS base neither is used ([Bases](#bases)).
 - Switch one at a time, a release apart, so a regression has one suspect; test all four pairings on a Q2
   first.
 

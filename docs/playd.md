@@ -1,6 +1,6 @@
 # q2playd
 
-Vamp OS's playback service ([roadmap: Who owns what](vamp-os.md#who-owns-what)): the server end of the player's socket, the queue and what plays. On today's Vamp `demo` is that server ([player: The socket](player.md#the-socket)); in Vamp OS `q2playd` is, so `q2player` and `q2ui` play local files with no `demo` ([vamp-os-base](vamp-os-base.md)). This is its first slice: server songs through their app, the cover, and a URL played with audio focus; no resume, play counts, ratings or gapless preload yet ([What is missing](#what-is-missing)).
+VampOS's playback service ([roadmap: Who owns what](vamp-os.md#who-owns-what)): the server end of the player's socket, the queue and what plays. On today's Vamp `demo` is that server ([player: The socket](player.md#the-socket)); in VampOS `q2playd` is, so `q2player` and `q2ui` play local files with no `demo` ([vamp-os-base](vamp-os-base.md)). This is its first slice: server songs through their app, the cover, and a URL played with audio focus; no resume, play counts, ratings or gapless preload yet ([What is missing](#what-is-missing)).
 
 | What | Where |
 | --- | --- |
@@ -125,13 +125,13 @@ Decisions: the queue comes back paused rather than playing, so a phone that stop
 
 ## AirPlay
 
-The AirPlay sender is the q2-airplay app ([internals: AirPlay sender](internals.md#airplay-sender)): it makes `/tmp/q2cast` (`cast_tap`, `patch/peq.h`) and beats it, and `q2player`'s DSP chain (`player/dsp.c`, the same code today's Vamp ships) writes what plays into its ring and keeps the Q2's own output silent while the tap's `volume` is 0 or more. On today's Vamp `demo` writes the host's half (`patch/airplay.c`); in Vamp OS `q2playd` does, with the same layout (mirrored in `q2playd.c` as the app mirrors it):
+The AirPlay sender is the q2-airplay app ([internals: AirPlay sender](internals.md#airplay-sender)): it makes `/tmp/q2cast` (`cast_tap`, `patch/peq.h`) and beats it, and `q2player`'s DSP chain (`player/dsp.c`, the same code today's Vamp ships) writes what plays into its ring and keeps the Q2's own output silent while the tap's `volume` is 0 or more. On today's Vamp `demo` writes the host's half (`patch/airplay.c`); in VampOS `q2playd` does, with the same layout (mirrored in `q2playd.c` as the app mirrors it):
 
 - It looks for the file once a second until it is there (its magic and size read before it is mapped), then every 250 ms writes the player's `status` (1 stopped, 2 playing, 3 paused), Max Volume and `volume` (the speaker's level while one plays, else -1, so the Q2 is heard) and bumps `beat`.
 - While the app beats (its `want` under 1.5 s old), the playing song's `path`, `title`, `artist`, `album` and `length` go to `/tmp/q2cast.track` once a song (written beside and renamed, `track` bumped), again when its length becomes known.
 - When the app's state becomes `CAST_ON` the volume is the speaker's: the earphones' level and Max Volume kept (the level saved as `PLAYSET VOLUME`), the limit lifted, and the level taken from the app's `spk` (a new `spk_seq`, a reconnect, is taken again) or else `[Q2POD] AIRVOL` (35 when unset). While it plays a `volume V` changes the speaker's level only, saved as `AIRVOL`; the DAC is not set. When it stops, or its beat goes stale, the speaker's level is saved as `AIRVOL` and the earphones' comes back, set on the DAC and saved.
 
-The app runs as a service package (`/etc/sv/q2-airplay`): once added (`q2pkgd app-add /mnt/mmc/.airplay`, its manifest `kind=service`, `permissions=playback,network-hold,background`, [Packages: Examples](platform/packages.md#examples)) `q2pkgd app-run` starts it as its own user; until then the service waits and looks again every minute. Not yet: the lyrics following the speaker's place (`airplay_lyrics`, `q2ui`'s), the ⋯ row that opens its page (`q2ui`'s), Bluetooth's output key on the way back (Vamp OS has no Bluetooth yet), and the app's own release with an API 1 manifest (`group-a-study/q2-airplay`).
+The app runs as a service package (`/etc/sv/q2-airplay`): once added (`q2pkgd app-add /mnt/mmc/.airplay`, its manifest `kind=service`, `permissions=playback,network-hold,background`, [Packages: Examples](platform/packages.md#examples)) `q2pkgd app-run` starts it as its own user; until then the service waits and looks again every minute. Not yet: the lyrics following the speaker's place (`airplay_lyrics`, `q2ui`'s), the ⋯ row that opens its page (`q2ui`'s), Bluetooth's output key on the way back (VampOS has no Bluetooth yet), and the app's own release with an API 1 manifest (`group-a-study/q2-airplay`).
 
 ## The volume
 

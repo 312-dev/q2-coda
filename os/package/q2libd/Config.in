@@ -4,5 +4,5 @@ config BR2_PACKAGE_Q2LIBD
 	select BR2_PACKAGE_Q2PLAYER_FFMPEG
 	select BR2_PACKAGE_Q2_MBEDTLS
 	help
-	  Vamp OS's library service (libd/, docs/libd.md), its first slice: the card's songs and the
+	  VampOS's library service (libd/, docs/libd.md), its first slice: the card's songs and the
 	  signed-in apps' server catalogues, in the databases q2ui and q2playd read.

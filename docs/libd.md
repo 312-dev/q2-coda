@@ -1,6 +1,6 @@
 # q2libd
 
-Vamp OS's library service ([roadmap: Who owns what](vamp-os.md#who-owns-what)), its first slice: the card's songs and the server catalogues, scanned with no `demo`, into the two databases in the shapes `q2ui` and `q2playd` already read, so neither needed a change ([vamp-os-base](vamp-os-base.md)). Its second adds covers, the card's M3U playlists and duplicates between the card and a server; its third the servers' offline copies and playlists. Its fourth serves the library over a socket, [Q2LIB/1](platform/library.md#q2lib1-the-library-socket) on `/run/vamp/lib.sock`, from a thread of its own. Full-text search, incremental scans by inotify, thumbnails and CUE are later slices.
+VampOS's library service ([roadmap: Who owns what](vamp-os.md#who-owns-what)), its first slice: the card's songs and the server catalogues, scanned with no `demo`, into the two databases in the shapes `q2ui` and `q2playd` already read, so neither needed a change ([vamp-os-base](vamp-os-base.md)). Its second adds covers, the card's M3U playlists and duplicates between the card and a server; its third the servers' offline copies and playlists. Its fourth serves the library over a socket, [Q2LIB/1](platform/library.md#q2lib1-the-library-socket) on `/run/vamp/lib.sock`, from a thread of its own. Full-text search, incremental scans by inotify, thumbnails and CUE are later slices.
 
 | What | Where |
 | --- | --- |

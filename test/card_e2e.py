@@ -156,7 +156,7 @@ def main():
         (R/'mnt/mmc/.vamp/os/vampos.squashfs.sha256').write_text('0' * 64 + '  vampos.squashfs\n')
         try:
             r = subprocess.run(['sh', str(SCRIPT)], env=env, capture_output=True, text=True, timeout=60)
-        except subprocess.TimeoutExpired:  # it handed off: Vamp OS ran from a card whose hash is wrong
+        except subprocess.TimeoutExpired:  # it handed off: VampOS ran from a card whose hash is wrong
             r = subprocess.CompletedProcess([], None)
         log = (R/'mnt/data/vamp/handoff.log').read_text()
         check(r.returncode == 1 and 'mount' not in (E/'q2vampos.record').read_text() and 'SHA-256 is' in log.splitlines()[-1],

@@ -1,6 +1,6 @@
 # q2dlnad
 
-Vamp OS's DLNA renderer ([services: DLNA/UPnP renderer](vamp-os-services.md#dlnaupnp-renderer)): a UPnP AV MediaRenderer:1 that a control point on the network (BubbleUPnP on a phone, a media server's "play to", Windows' "Cast to Device") finds and plays to. On today's Vamp, stock's renderer inside `demo` does this (`libdmr.so`, [third-party](third-party.md)); in Vamp OS `q2dlnad` is a Q2PLAY/1 client like any app, and what it plays is a [source](platform/playback.md#audio-focus): the Library's queue is put aside and given back.
+VampOS's DLNA renderer ([services: DLNA/UPnP renderer](vamp-os-services.md#dlnaupnp-renderer)): a UPnP AV MediaRenderer:1 that a control point on the network (BubbleUPnP on a phone, a media server's "play to", Windows' "Cast to Device") finds and plays to. On today's Vamp, stock's renderer inside `demo` does this (`libdmr.so`, [third-party](third-party.md)); in VampOS `q2dlnad` is a Q2PLAY/1 client like any app, and what it plays is a [source](platform/playback.md#audio-focus): the Library's queue is put aside and given back.
 
 | What | Where |
 | --- | --- |

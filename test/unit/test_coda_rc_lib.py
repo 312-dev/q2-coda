@@ -487,11 +487,11 @@ def gone_pid():
     return next(p for p in range(top - 1, 1, -1) if not pathlib.Path(f'/proc/{p}').exists())
 
 
-# ---- Vamp OS's library (--library vampos, docs/carrd.md#the-library) ----
+# ---- VampOS's library (--library vampos, docs/carrd.md#the-library) ----
 
 def vampos_files(root):
     """q2libd's library.db (docs/libd.md: stock's songtable, every column, its time in seconds; stock's playlist; no
-    myfav), beside a stock database.db and today's Vamp's card catalogue that Vamp OS leaves alone: neither is read."""
+    myfav), beside a stock database.db and today's Vamp's card catalogue that VampOS leaves alone: neither is read."""
     Q2.files(root, songs=[(9, 'z/9.flac', 'Stock Only', 'Zed', 'Old', 1)], favs=(9,), server=SERVER)
     (root / 'mnt/data/vamp').mkdir(parents=True)
     db = sqlite3.connect(root / 'mnt/data/vamp/library.db')
@@ -524,7 +524,7 @@ def vampos(lib, tmp_path):
 
 
 def test_vamp_os_s_library_is_q2libd_s_with_its_lengths_and_nothing_of_stock_s(vampos):
-    """Under Vamp OS coda-rc reads q2libd's /mnt/data/vamp/library.db: its songs, each with its length from the time
+    """Under VampOS coda-rc reads q2libd's /mnt/data/vamp/library.db: its songs, each with its length from the time
     column (no durations file there), and no stock database.db's songs or today's Vamp's catalogue on the card"""
     tracks = vampos.browse('tracks')
     assert titles(tracks) == ['Alpha', 'Bravo', 'Charlie', 'Delta'], titles(tracks)

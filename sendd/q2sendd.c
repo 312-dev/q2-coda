@@ -1,4 +1,4 @@
-/* q2sendd: LocalSend's receive side on Vamp OS (docs/vamp-os-services.md#localsend). Today's q2send (patch/localsend.c
+/* q2sendd: LocalSend's receive side on VampOS (docs/vamp-os-services.md#localsend). Today's q2send (patch/localsend.c
  * on patch/localsend_core.c, docs/localsend.md) is the protocol, run here as a child; q2sendd is what demo's side
  * (patch/localsend_ui.c) is for it today, through the same files in --run:
  *

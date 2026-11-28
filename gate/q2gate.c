@@ -1,4 +1,4 @@
-/* q2gate: Vamp OS's side of q2ui's pipe and its three files, which demo's gate keeps on today's Vamp
+/* q2gate: VampOS's side of q2ui's pipe and its three files, which demo's gate keeps on today's Vamp
  * (patch/q2ui_gate.c on feat/render-engine; docs/gate.md). q2ui takes settings and verbs down a pipe it is handed
  * (--ctl FD) and reads what demo says in three files; with no demo, q2gate reads the pipe (a FIFO the q2ui service
  * opens for it, /run/vamp/ui.ctl) and turns each line into Vamp API 1's words, and writes the files from what the

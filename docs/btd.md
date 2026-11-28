@@ -1,6 +1,6 @@
 # q2btd
 
-Vamp OS's Bluetooth service ([roadmap: Who owns what](vamp-os.md#who-owns-what)), its first slice: the client of the image's own `bluetoothd` and `bluealsa` ([vamp-os-base: Bluetooth](vamp-os-base.md#bluetooth)), doing what `demo` and `libbtctl.so` do on today's Vamp for a headset: the radio on and off, scanning, pairing, connecting, the last device again at the start and after a drop, the codec, the battery, where `q2playd`'s audio goes, absolute volume, and the headset's buttons. Receiver mode (a phone playing to the Q2), Guest Play, LE devices, a Bluetooth page in `q2ui` and the pairing notice are later slices ([What is missing](#what-is-missing)).
+VampOS's Bluetooth service ([roadmap: Who owns what](vamp-os.md#who-owns-what)), its first slice: the client of the image's own `bluetoothd` and `bluealsa` ([vamp-os-base: Bluetooth](vamp-os-base.md#bluetooth)), doing what `demo` and `libbtctl.so` do on today's Vamp for a headset: the radio on and off, scanning, pairing, connecting, the last device again at the start and after a drop, the codec, the battery, where `q2playd`'s audio goes, absolute volume, and the headset's buttons. Receiver mode (a phone playing to the Q2), Guest Play, LE devices, a Bluetooth page in `q2ui` and the pairing notice are later slices ([What is missing](#what-is-missing)).
 
 | What | Where |
 | --- | --- |

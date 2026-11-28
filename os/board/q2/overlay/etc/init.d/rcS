@@ -1,5 +1,5 @@
 #!/bin/sh
-# Vamp OS's start, run once by init before any service (docs/vamp-os-base.md#what-boots), in this order:
+# VampOS's start, run once by init before any service (docs/vamp-os-base.md#what-boots), in this order:
 #   1. the kernel's file systems and a tmpfs /dev, as stock's inittab makes them; mdev, then its daemon;
 #   2. /mnt/data, the UBIFS on the "userdata" partition: attached and mounted, never erased or formatted
 #      (on any failure it is a tmpfs for this boot, and the boot log says why), or left as it is when already

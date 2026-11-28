@@ -1699,7 +1699,7 @@ def test_like_flips_the_heart_apart_from_the_stars(run):
 
 def test_stock_s_favorites_are_the_likes_and_an_unlike_takes_one_out_of_them(run):
     """a switch either way loses nothing: stock's and today's Vamp's My Fav (database.db's myfav) are the likes at the
-    start, and an unlike under Vamp OS takes the song out of it too"""
+    start, and an unlike under VampOS takes the song out of it too"""
     root, pl = run
     stock_myfav(root, ['/mnt/mmc/Music/b.mp3'])
     play_list(root, [2, 1], 0)
@@ -2095,7 +2095,7 @@ def test_a_like_under_vamp_os_is_written_through_to_stock_s_my_fav(run):
 
 
 def back_from_today(root):
-    """likes.db as Vamp OS left it (a.flac liked), then today's Vamp's My Fav changed: a.flac out, b.mp3 in"""
+    """likes.db as VampOS left it (a.flac liked), then today's Vamp's My Fav changed: a.flac out, b.mp3 in"""
     (root/'mnt/data/vamp').mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(root/'mnt/data/vamp/likes.db')
     db.execute('create table myfav(fileurl text primary key)')

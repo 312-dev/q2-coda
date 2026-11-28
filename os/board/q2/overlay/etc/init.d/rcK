@@ -1,5 +1,5 @@
 #!/bin/sh
-# Vamp OS's stop, run by init at shutdown or reboot: the services first, then the file systems.
+# VampOS's stop, run by init at shutdown or reboot: the services first, then the file systems.
 . /usr/libexec/vamp/log
 step "rcK: stopping the services"
 sv -w 5 force-stop /etc/sv/* > /dev/null 2>&1

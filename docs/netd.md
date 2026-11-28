@@ -1,6 +1,6 @@
 # q2netd
 
-Vamp OS's network service ([roadmap: Who owns what](vamp-os.md#who-owns-what)), Wi-Fi and network time with no `demo` ([vamp-os-base](vamp-os-base.md)). The DLNA renderer is `q2dlnad`'s ([q2dlnad](dlnad.md)); LocalSend and Car Remote's TCP side, and a Wi-Fi page in `q2ui`, are later slices.
+VampOS's network service ([roadmap: Who owns what](vamp-os.md#who-owns-what)), Wi-Fi and network time with no `demo` ([vamp-os-base](vamp-os-base.md)). The DLNA renderer is `q2dlnad`'s ([q2dlnad](dlnad.md)); LocalSend and Car Remote's TCP side, and a Wi-Fi page in `q2ui`, are later slices.
 
 | What | Where |
 | --- | --- |

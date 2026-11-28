@@ -3,7 +3,7 @@
 OUT ?= build/host
 CFLAGS ?= -O2
 MONO := ../patch/monocypher
-# the repository download fetches Vamp OS releases from (docs/pkgd.md#download)
+# the repository download fetches VampOS releases from (docs/pkgd.md#download)
 FEED ?= https://github.com/312-dev/q2-coda
 # mbedTLS for download: the image's static q2-mbedtls, or MBEDTLS=PREFIX (tools/player.py's host build) for a test
 TLS_LIB ?= $(if $(MBEDTLS),-L$(MBEDTLS)/lib) -lmbedtls -lmbedx509 -lmbedcrypto

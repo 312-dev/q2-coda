@@ -1,4 +1,4 @@
-/* q2libd: Vamp OS's library service (docs/vamp-os.md#who-owns-what, docs/libd.md). It keeps two
+/* q2libd: VampOS's library service (docs/vamp-os.md#who-owns-what, docs/libd.md). It keeps two
  * databases in the shapes q2ui and q2playd already read, so they need no change:
  *
  *   - /mnt/data/vamp/library.db: the card's songs, a songtable with stock's columns (id, filename, fileurl, album,
@@ -7,7 +7,7 @@
  *     and time are unchanged is not read again. Stock's own /mnt/data/database.db is never touched.
  *   - /mnt/mmc/.vamp/catalogue.db: the server library, a servertable of every signed-in card app's catalogue
  *     (/mnt/mmc/.<id>/catalogue.tsv, Q2CAT/1, docs/server-library.md), ids from 0x40000000 as the payload gives them.
- *     On the card, as today's Vamp keeps its own (/mnt/data is too small for a large server), but a file of Vamp OS's
+ *     On the card, as today's Vamp keeps its own (/mnt/data is too small for a large server), but a file of VampOS's
  *     own, so today's Vamp's catalogue.db is never touched either. A server song that is a card song is left out
  *     (serverdup names it). servermeta gives each server song's app, sid and offline copy (docs/libd.md#offline-copies):
  *     the catalogue's local path, then catalogue.avail's lines. serverpl and serveritem are the servers' playlists

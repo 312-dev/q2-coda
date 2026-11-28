@@ -28,10 +28,10 @@ CFS=/sys/kernel/config
 G=$CFS/usb_gadget/q2car
 FFS=${Q2CAR_FFS:-/dev/usb-ffs}
 SERIAL=/mnt/data/q2-iap.serial
-MODULE=${Q2CAR_MODULE:-/module_driver/usb_f_uac1.ko} # Vamp OS: its own path (os/board/q2/overlay/usr/bin/q2car)
+MODULE=${Q2CAR_MODULE:-/module_driver/usb_f_uac1.ko} # VampOS: its own path (os/board/q2/overlay/usr/bin/q2car)
 DAEMON=/usr/bin/q2-iap
 ADBG=/usr/bin/q2adb-gadget
-LOGDIR=${Q2CAR_LOGDIR:-/mnt/mmc/.q2muse/logs} # Q2CAR_RUN, _LOGDIR, _PCM, _PLAYER, _FFS: test/iap_probe.py; _MODULE, _IAP_ARGS: Vamp OS
+LOGDIR=${Q2CAR_LOGDIR:-/mnt/mmc/.q2muse/logs} # Q2CAR_RUN, _LOGDIR, _PCM, _PLAYER, _FFS: test/iap_probe.py; _MODULE, _IAP_ARGS: VampOS
 PCM=${Q2CAR_PCM:-/proc/asound/UAC1Gadget/pcm0p/sub0/status} # "closed" once nothing has the car's PCM open
 PLAYER=${Q2CAR_PLAYER:-hciplayer}                           # q2player, by stock's player's name
 mkdir -p "$RUN"
@@ -104,7 +104,7 @@ gadget_up() {
     done
     udc=$(ls /sys/class/udc | head -n 1)
     rm -f $STATE
-    # shellcheck disable=SC2086 # Q2CAR_IAP_ARGS: Vamp OS's library paths, word by word
+    # shellcheck disable=SC2086 # Q2CAR_IAP_ARGS: VampOS's library paths, word by word
     $DAEMON --iap2 --uuid "$(cat $SERIAL 2>/dev/null)" --car-pcm hw:CARD=UAC1Gadget,0 --state $STATE $Q2CAR_IAP_ARGS \
         --udc /sys/class/udc/$udc/state --counters /sys/module/usb_f_uac1/parameters "$LOG" $args \
         </dev/null >/dev/null 2>>"$LOG" &

@@ -38,17 +38,17 @@ Read [docs/architecture.md](docs/architecture.md) first (20 minutes: the payload
 | Buttons Lock, screen off and wake         | `patch/keylock.c`, `tools/build.py` (`SAVER_OFF`)                                                                        | [internals: Buttons lock](docs/internals.md#buttons-lock), [Screen off and wake](docs/internals.md#screen-off-and-wake)                                                                                                                               |
 | Boot, dual boot, the splash               | `tools/build.py` (`BOOT_HOOK`, `LOGO_HOOK`), `patch/boot.c`, `patch/splash.c`, `tools/splash.py`                         | [boot](docs/boot.md)                                                                                                                                                                                                                                  |
 | Build and versioning                      | `tools/build.py`                                                                                                         | [building](docs/building.md)                                                                                                                                                                                                                          |
-| Vamp OS base image (no `demo`, no stock rootfs) | `os/` (Buildroot external tree), `tools/vampos.py`, `test/os_image.py` | [vamp-os-base](docs/vamp-os-base.md), [vamp-os](docs/vamp-os.md) (the roadmap) |
-| Vamp OS playback service | `playd/q2playd.c`, `test/playd.py` | [playd](docs/playd.md) |
-| Vamp OS system service (power key, screen, battery) | `sysd/q2sysd.c`, `test/sysd.py` | [sysd](docs/sysd.md) |
-| Vamp OS library service | `libd/q2libd.c`, `test/libd.py` | [libd](docs/libd.md) |
-| Vamp OS network service (Wi-Fi) | `netd/q2netd.c`, `test/netd.py` | [netd](docs/netd.md) |
-| Vamp OS scrobbling and the remaining services' design | `scrobd/q2scrobd.c`, `test/scrobd.py` | [vamp-os-services](docs/vamp-os-services.md) |
-| Vamp OS DLNA renderer | `dlnad/q2dlnad.c`, `test/dlnad.py` | [dlnad](docs/dlnad.md) |
-| Vamp OS Car Audio | `os/package/q2-iap`, `os/board/q2/overlay/usr/bin/q2car`, `sysd/q2sysd.c` (`usb_set_car`) | [car-audio-os](docs/car-audio-os.md) |
-| Vamp OS USB DAC mode | `dacloop/q2dacloop.c`, `sysd/q2sysd.c` (`dac_gadget`), `test/dacloop.py` | [dacloop](docs/dacloop.md) |
-| Vamp OS Bluetooth service | `btd/q2btd.c`, `test/btd.py`, `test/btd_standin.c` | [btd](docs/btd.md) |
-| Vamp OS updates (stage a release) | `pkgd/q2pkgd.c`, `tools/vampos.py release`, `test/pkgd.py` | [pkgd](docs/pkgd.md) |
+| VampOS base image (no `demo`, no stock rootfs) | `os/` (Buildroot external tree), `tools/vampos.py`, `test/os_image.py` | [vamp-os-base](docs/vamp-os-base.md), [vamp-os](docs/vamp-os.md) (the roadmap) |
+| VampOS playback service | `playd/q2playd.c`, `test/playd.py` | [playd](docs/playd.md) |
+| VampOS system service (power key, screen, battery) | `sysd/q2sysd.c`, `test/sysd.py` | [sysd](docs/sysd.md) |
+| VampOS library service | `libd/q2libd.c`, `test/libd.py` | [libd](docs/libd.md) |
+| VampOS network service (Wi-Fi) | `netd/q2netd.c`, `test/netd.py` | [netd](docs/netd.md) |
+| VampOS scrobbling and the remaining services' design | `scrobd/q2scrobd.c`, `test/scrobd.py` | [vamp-os-services](docs/vamp-os-services.md) |
+| VampOS DLNA renderer | `dlnad/q2dlnad.c`, `test/dlnad.py` | [dlnad](docs/dlnad.md) |
+| VampOS Car Audio | `os/package/q2-iap`, `os/board/q2/overlay/usr/bin/q2car`, `sysd/q2sysd.c` (`usb_set_car`) | [car-audio-os](docs/car-audio-os.md) |
+| VampOS USB DAC mode | `dacloop/q2dacloop.c`, `sysd/q2sysd.c` (`dac_gadget`), `test/dacloop.py` | [dacloop](docs/dacloop.md) |
+| VampOS Bluetooth service | `btd/q2btd.c`, `test/btd.py`, `test/btd_standin.c` | [btd](docs/btd.md) |
+| VampOS updates (stage a release) | `pkgd/q2pkgd.c`, `tools/vampos.py release`, `test/pkgd.py` | [pkgd](docs/pkgd.md) |
 | Vamp API 1 (the protocols, the library, app manifests, permissions) | `docs/platform/`, `perm/q2perm.h`, `test/conformance.py`, `test/api.py`, `test/apps.py`, `test/perm.py` | [platform](docs/platform/README.md) |
 | Rebuilt third-party libraries             | `tools/thirdparty.py`                                                                                                    | [third-party](docs/third-party.md)                                                                                                                                                                                                                    |
 | Our own bluetoothd (a plan and a spike) | `tools/thirdparty.py` (`build_bluez`), `tools/bluez/`, `tools/build.py` (`--own-bluez`), `test/bluez_own.py`; the launcher that picks ours or stock's, `patch/bt_launch.sh`, `test/bt_launch.py` | [bluez](docs/bluez.md), [bluetoothd](docs/bluetoothd.md) (what Shanling changed in stock's), [bt-own-plan](docs/bt-own-plan.md) (turning it on on a Q2) |
@@ -61,11 +61,11 @@ Read [docs/architecture.md](docs/architecture.md) first (20 minutes: the payload
 | Tests                                     | `test/`                                                                                                                  | [building: Tests](docs/building.md#tests), [source map: test/](docs/source-map.md#test)                                                                                                                                                               |
 | The hardware                              |                                                                                                                          | [hardware](docs/hardware.md) (buses, pins, the USB port, the radio), [firmware](docs/firmware.md) (every component's version and what can be updated), [usb](docs/usb.md) (USB detection), [bluetooth](docs/bluetooth.md) (connectivity) |
 | Known costs and fragile spots             |                                                                                                                          | [inefficiencies](docs/inefficiencies.md)                                                                                                                                                                                                              |
-| Vamp OS: the end goal (a plan) | none yet: `os/` and the services arrive with their milestones | [vamp-os](docs/vamp-os.md): [scope](docs/vamp-os.md#scope), [target architecture](docs/vamp-os.md#target-architecture), [inventory](docs/vamp-os.md#inventory), [installer](docs/vamp-os.md#installer-and-updates), [platform](docs/vamp-os.md#platform), [milestones](docs/vamp-os.md#milestones), and the [study rules](docs/vamp-os.md#study-hygiene) every brief carries |
+| VampOS: the end goal (a plan) | none yet: `os/` and the services arrive with their milestones | [vamp-os](docs/vamp-os.md): [scope](docs/vamp-os.md#scope), [target architecture](docs/vamp-os.md#target-architecture), [inventory](docs/vamp-os.md#inventory), [installer](docs/vamp-os.md#installer-and-updates), [platform](docs/vamp-os.md#platform), [milestones](docs/vamp-os.md#milestones), and the [study rules](docs/vamp-os.md#study-hygiene) every brief carries |
 
 ## Plans
 
-Where the firmware is headed: [docs/vamp-os.md](docs/vamp-os.md), the roadmap to Vamp OS (every userspace piece our own or open source, on Shanling's kernel and modules; the owner's scope, the installer, the platform for other developers, milestones M0 to M8).
+Where the firmware is headed: [docs/vamp-os.md](docs/vamp-os.md), the roadmap to VampOS (every userspace piece our own or open source, on Shanling's kernel and modules; the owner's scope, the installer, the platform for other developers, milestones M0 to M8).
 
 Work planned but not built: [docs/backlog.md](docs/backlog.md) (the ordered list), [docs/oled-design.md](docs/oled-design.md) (the OLED theme), [docs/server-library.md](docs/server-library.md) (server songs in the Library), [docs/localsend.md](docs/localsend.md) (LocalSend in place of Wi-Fi Transfer).
 

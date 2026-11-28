@@ -1,4 +1,4 @@
-/* PEQ's Auto preamp as the EQ state saves it: the editor's (peq_ui.c) and Vamp OS's q2playd's one
+/* PEQ's Auto preamp as the EQ state saves it: the editor's (peq_ui.c) and VampOS's q2playd's one
  * definition, apart from the page so a service without the payload's UI links it with peq.c and
  * hash.c (playd/Makefile). */
 #include "offsets.inc" /* FNV_SEED */

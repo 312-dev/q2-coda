@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Car Remote on Vamp OS (docs/carrd.md): q2carrd (carrd/q2carrd.c) running the coda-rc daemon (patch/coda_rc.c, built
+"""Car Remote on VampOS (docs/carrd.md): q2carrd (carrd/q2carrd.c) running the coda-rc daemon (patch/coda_rc.c, built
 for this machine), with q2playd (playd/q2playd.c) answering its commands and a stand-in for q2player on the player's
 socket, beside stand-ins for Q2UI/1, Q2NET/1 and Q2PKG/1. A phone (tools/coda_rc_client.py) pairs with the code it
 reads off the Q2UI/1 card, browses q2libd's library, plays, and sees Now Playing and the queue follow q2playd. Checked

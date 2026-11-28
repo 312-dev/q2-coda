@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Vamp OS's base image from os/ (docs/vamp-os-base.md), and compose it with the vendor set.
+"""Build VampOS's base image from os/ (docs/vamp-os-base.md), and compose it with the vendor set.
 
     python3 tools/vampos.py build --out DIR [--worktree] [--jobs N]   # DIR/vampos.squashfs and DIR/manifest.json
     python3 tools/vampos.py compose --image vampos.squashfs (--zip ZIP | --rootfs DIR) --out composed.squashfs

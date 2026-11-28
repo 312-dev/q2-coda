@@ -1,4 +1,4 @@
-/* q2dlnad: Vamp OS's DLNA renderer (docs/dlnad.md, docs/vamp-os-services.md#dlnaupnp-renderer). A UPnP AV
+/* q2dlnad: VampOS's DLNA renderer (docs/dlnad.md, docs/vamp-os-services.md#dlnaupnp-renderer). A UPnP AV
  * MediaRenderer:1 that a phone's or a computer's control point (BubbleUPnP, a media server's "play to") finds by SSDP
  * and drives over SOAP: AVTransport:1, RenderingControl:1 and ConnectionManager:1, with GENA events. What it plays it
  * hands to q2playd as a Q2PLAY/1 source (docs/platform/playback.md#audio-focus): the URL with its DIDL-Lite title,
@@ -328,7 +328,7 @@ static void description(struct buf *b) {
            "<specVersion><major>1</major><minor>0</minor></specVersion><device><deviceType>" DEVICE_TYPE "</deviceType>"
            "<friendlyName>");
     put_xml(b, name);
-    put(b, "</friendlyName><manufacturer>Vamp</manufacturer><modelName>Vamp OS</modelName><modelNumber>1</modelNumber>"
+    put(b, "</friendlyName><manufacturer>Vamp</manufacturer><modelName>VampOS</modelName><modelNumber>1</modelNumber>"
            "<UDN>%s</UDN><serviceList>", uuid);
     for (int i = 0; i < NSERV; ++i)
         put(b, "<service><serviceType>urn:schemas-upnp-org:service:%s:1</serviceType><serviceId>urn:upnp-org:serviceId:%s"

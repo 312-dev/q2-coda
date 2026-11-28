@@ -5,7 +5,7 @@ vendor set from the stock ZIP:
     test/pkgd.py BUILD --zip ZIP          # BUILD: a tools/vampos.py build --out folder (its vampos.squashfs)
 
 A release made by tools/vampos.py release (signed with a key made here) is staged from a stock-shaped root filesystem
-and from Vamp OS's (the vendor set under /vendor), and each must give rootfs.squashfs byte for byte the image
+and from VampOS's (the vendor set under /vendor), and each must give rootfs.squashfs byte for byte the image
 tools/vampos.py compose gives; and when BUILD's image has its own mksquashfs, that MIPS mksquashfs, run under QEMU with
 q2pkgd's flags, must give the same bytes too (a Q2 composing what the build machine composed); then each refusal: another key's signature, release.txt changed, the image changed, a
 vendor file changed, a composed hash that is not the result; after any refusal nothing is staged. Then download, from a
@@ -353,7 +353,7 @@ def main():
         rel = work/'release'
         vampos.release(a.build/'vampos.squashfs', a.zip, 'v9.9.9-test', rel, key=pem)
         want = next(l.split()[2] for l in (rel/'release.txt').read_text().splitlines() if l.startswith('composed '))
-        # a stock root filesystem's vendor set, and the same under Vamp OS's /vendor
+        # a stock root filesystem's vendor set, and the same under VampOS's /vendor
         files, _ = vampos.read_manifest()
         stock = work/'stock'
         sq = vampos.stock_rootfs(a.zip, work)
@@ -363,7 +363,7 @@ def main():
             dst = vfs/vampos.place(n)
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(stock/n, dst)
-        for label, rootfs in (('a stock root filesystem', stock), ("Vamp OS's /vendor", vfs)):
+        for label, rootfs in (('a stock root filesystem', stock), ("VampOS's /vendor", vfs)):
             card = work/f'card-{label[0]}'
             kept = stock_recovery(card)
             code, said = stage(binary, rel, rootfs, card)

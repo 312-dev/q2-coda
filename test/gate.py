@@ -201,7 +201,7 @@ def test_join_saves_an_open_network_and_follows_it_to_connected(gate):
 
 
 def test_join_of_a_secured_network_not_saved_says_it_could_not(gate):
-    """its password is typed on demo's kbwifipass_dialog, which Vamp OS has no page for yet"""
+    """its password is typed on demo's kbwifipass_dialog, which VampOS has no page for yet"""
     root, s, ctl = gate
     send(ctl, 'scan')
     assert until(lambda: '1 1 0 Far' in text(root, 'q2ui.wifi'))

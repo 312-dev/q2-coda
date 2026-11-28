@@ -1,4 +1,4 @@
-menu "Vamp OS"
+menu "VampOS"
 source "$BR2_EXTERNAL_VAMP_PATH/package/q2-mbedtls/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/q2player-ffmpeg/Config.in"
 source "$BR2_EXTERNAL_VAMP_PATH/package/q2player/Config.in"

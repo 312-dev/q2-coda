@@ -216,7 +216,7 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 | `adb_wifi.sh`  | `q2adb-wifi`, `--dev` builds only: runs `adbd --tcp 5555` and `q2adb-mdns` while a computer is trusted and `ADBWIFI` is not 0 | the loop | [adb](adb.md#adb-over-wi-fi) |
 | `adb_mdns.c`  | `q2adb-mdns`, `--dev` builds only: coda-rc's mDNS responder (`coda_rc_mdns.c`) for `_adb._tcp`, the Wi-Fi adbd found by name | `main` | [adb](adb.md#adb-over-wi-fi) |
 | `adb_gadget.sh`  | `q2adb-gadget`, `--dev` builds only: adbd's USB gadget, which gives the controller to stock's storage and DAC gadgets | `setup`, `bind`, `park`, `unpark` | [adb](adb.md#the-usb-gadget) |
-| `q2vampos.sh` | `q2vampos`, `--dev` builds only: the card boot, a Vamp OS image on the card loop-mounted and run in a chroot before demo when the card asks for it | the order of its checks | [vamp-os-base](vamp-os-base.md#card-boot) |
+| `q2vampos.sh` | `q2vampos`, `--dev` builds only: the card boot, a VampOS image on the card loop-mounted and run in a chroot before demo when the card asks for it | the order of its checks | [vamp-os-base](vamp-os-base.md#card-boot) |
 | `tuner_core.c`, `tuner_core.h` | Radio's receiver's decisions for `q2video -t`: when the stream's sound plays and when the carrier drops, when a dead stream is started again, and the dial's click | `tuner_take`, `tuner_retry_due`, `tuner_click_mix` | [internals](internals.md#radio-static) |
 | `fmrx.c`, `fmrx.h` | Radio's FM receiver model, run by `q2video -t`: hiss, quieting, splatter, flutter and the soft mute from a station's strength and the needle's offset | `fmrx_init`, `fmrx_run` | [internals](internals.md#radio-static) |
 | `radiofetch.c`, `radiofetch_core.c`, `radiofetch.h` | `q2radiofetch`, the local radio fetcher: the stations that reach a place (the bundled FCC and Census tables) and their streams from iHeart, Radio Browser, TuneIn, Triton, Amperwave and SoundStack on one libcurl multi handle, cached on the card; the core tested on the host | `main`, `streams`, `rf_near`, `rf_zip`, `rf_iheart` | [internals](internals.md#local-radio-fetch) |
@@ -247,21 +247,21 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 | `q2player.h` | What the files share: `struct ctl`, the song and format records                              | [player-plan.md](player-plan.md#architecture)   |
 | `Makefile`   | Compile and link for `host` or `mips`; run through `tools/player.py`                         |                                                 |
 
-## playd/: Vamp OS's playback service
+## playd/: VampOS's playback service
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
 | `q2playd.c` | `q2playd`: q2player's server on `/tmp/sock_play`, the queue, what plays; q2ui's command queue and now file; Q2PLAY/1 on `/run/vamp/play.sock` | `main`, `command`, `player_message`, `client_line` | [playd](playd.md) |
 | `Makefile` | Its build, for the image (`os/package/q2playd`) and this machine (`test/playd.py`) | | [playd](playd.md) |
 
-## sysd/: Vamp OS's system service
+## sysd/: VampOS's system service
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
 | `q2sysd.c` | `q2sysd`: the power key, the screen's light, the battery, Charge Limit, USB modes and the cable, Standby, heat, the jacks, the watchdog, Q2SYS/1 on `/run/vamp/sys.sock` | `main`, `read_input`, `set_screen`, `read_battery`, `cable_poll`, `car_poll`, `wdt_start` | [sysd](sysd.md) |
 | `Makefile` | Its build, for the image (`os/package/q2sysd`) and this machine (`test/sysd.py`) | | [sysd](sysd.md) |
 
-## dacloop/: Vamp OS's USB DAC mode
+## dacloop/: VampOS's USB DAC mode
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
@@ -269,28 +269,28 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 | `pitch.h` | The fill level's controller, apart from ALSA for `test/dacloop_pitch.c`'s simulation | `pitch_step` | [dacloop: Holding the fill level](dacloop.md#holding-the-fill-level) |
 | `Makefile` | Its build, for the image (`os/package/q2dacloop`) and this machine (`test/dacloop.py`) | | [dacloop](dacloop.md) |
 
-## sendd/: Vamp OS's LocalSend
+## sendd/: VampOS's LocalSend
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
 | `q2sendd.c` | `q2sendd`: today's `q2send` run as a child, its incoming requests asked over Q2UI/1, a trusted sender toasted, the card held while a computer has it, the radio held | `main`, `look_ask`, `read_ui`, `look_state` | [vamp-os-services](vamp-os-services.md#localsend) |
 | `Makefile` | `q2sendd` and `q2send` (`patch/localsend*.c`, `LS_HOST`, OpenSSL), for the image (`os/package/q2sendd`) and this machine | | [vamp-os-services](vamp-os-services.md#localsend) |
 
-## carrd/: Vamp OS's Car Remote
+## carrd/: VampOS's Car Remote
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
 | `q2carrd.c` | `q2carrd`: today's `coda-rc` run while `[Q2POD] CARREMOTE` is on, its pairing code asked over Q2UI/1, a car's cover app started over Q2PKG/1, the radio held over Q2NET/1 | `main`, `look_pair`, `read_ui`, `look_wake`, `hold_radio` | [carrd](carrd.md) |
 | `Makefile` | `q2carrd` and `coda-rc` (`patch/coda_rc*.c`, `CODA_LIBC`, SQLite), for the image (`os/package/q2carrd`) and this machine | | [carrd](carrd.md) |
 
-## libd/: Vamp OS's library service
+## libd/: VampOS's library service
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
 | `q2libd.c` | `q2libd`: the card's songs (tags through FFmpeg) into `/mnt/data/vamp/library.db`, the signed-in apps' catalogues into `/mnt/mmc/.vamp/catalogue.db`; Q2LIB/1 on `/run/vamp/lib.sock` from a thread | `main`, `scan_card`, `lib_command`, `add_file`, `import_app` | [libd](libd.md) |
 | `Makefile` | Its build, for the image (`os/package/q2libd`) and this machine (`test/libd.py`) | | [libd](libd.md) |
 
-## netd/: Vamp OS's network service
+## netd/: VampOS's network service
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
@@ -303,28 +303,28 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 | --- | --- | --- | --- |
 | `q2perm.h` | The permissions' groups and gids, and the check q2playd, q2sysd and q2netd make of a caller (`SO_PEERCRED`, then `/etc/passwd` and `/etc/group`); q2pkgd's groups | `q2perm_allowed`, `Q2PERM_GROUPS` | [packages](platform/packages.md#users-and-groups) |
 
-## scrobd/: Vamp OS's scrobble log
+## scrobd/: VampOS's scrobble log
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
 | `q2scrobd.c` | `q2scrobd`: listens heard over Q2PLAY/1 into the card's `.scrobbler.log`, and `upload` to ListenBrainz and Last.fm (by hand, or with `AUTO=1` by itself) | `main`, `now_line`, `upload`, `auto_tick` | [vamp-os-services](vamp-os-services.md#scrobbling) |
 | `Makefile` | Its build, for the image (`os/package/q2scrobd`) and this machine (`test/scrobd.py`) | | [vamp-os-services](vamp-os-services.md#scrobbling) |
 
-## dlnad/: Vamp OS's DLNA renderer
+## dlnad/: VampOS's DLNA renderer
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
 | `q2dlnad.c` | `q2dlnad`: a UPnP MediaRenderer (SSDP, AVTransport, RenderingControl, ConnectionManager, GENA) playing its URLs as Q2PLAY/1 sources | `main`, `avtransport`, `play_line`, `ssdp_read` | [dlnad](dlnad.md) |
 | `Makefile` | Its build, for the image (`os/package/q2dlnad`) and this machine (`test/dlnad.py`) | | [dlnad](dlnad.md) |
 
-## btd/: Vamp OS's Bluetooth service
+## btd/: VampOS's Bluetooth service
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
 | `q2btd.c` | `q2btd`: BlueZ's and bluealsa's client over D-Bus (the objects and their signals), power, scan, pair, connect, the agent, the auto-reconnect, the codec, the output and absolute volume through Q2PLAY/1, the player for the headset's buttons, Q2BT/1 | `main`, `props_apply`, `route`, `reconnect_poll`, `agent_msg`, `player_msg`, `client_line` | [btd](btd.md) |
 | `Makefile` | Its build, for the image (`os/package/q2btd`) and this machine (`test/btd.py`) | | [btd](btd.md) |
 
-## pkgd/: Vamp OS's update service
+## pkgd/: VampOS's update service
 
 | File | For | Enter at | Doc |
 | --- | --- | --- | --- |
@@ -340,7 +340,7 @@ Where this tree is headed (an `os/` Buildroot tree, services of our own in place
 | `bluez/glibconfig.h` | GLib 2.74.4's `glibconfig.h` for the Q2 (32-bit little-endian MIPS, glibc), as its meson build writes it: `thirdparty.py`'s `stocksdk` installs it beside GLib's own headers | `GLIBCONFIG` | [bluealsa](bluealsa.md#build) |
 | `bluealsa/*.patch` | Vamp's changes to upstream bluez-alsa 5.0.0, a file each with its reason at its head, applied by `thirdparty.py`'s `build_bluealsa` in `BLUEALSA_PATCHES`' order | `BLUEALSA_PATCHES` | [bluealsa](bluealsa.md#the-first-patch) |
 | `adbd.patch` | `--dev` builds' adbd: Buildroot's fixes and the Q2's changes to Android 4.2.2's adbd (authorization, FunctionFS, WinUSB descriptors, services), applied by `thirdparty.py` | the list at its head | [adb](adb.md), [third-party](third-party.md#adbd) |
-| `vampos.py` | Vamp OS's base image: Buildroot over `os/` (its packages, init, overlay, vendor manifest, one Buildroot patch), the vendor set's compose, the card layout | `build`, `compose`, `card`, `BUILDROOT`, `Q2UI_COMMIT` | [vamp-os-base](vamp-os-base.md) |
+| `vampos.py` | VampOS's base image: Buildroot over `os/` (its packages, init, overlay, vendor manifest, one Buildroot patch), the vendor set's compose, the card layout | `build`, `compose`, `card`, `BUILDROOT`, `Q2UI_COMMIT` | [vamp-os-base](vamp-os-base.md) |
 | `bluez/glibconfig.h`, `bluez/stubs.tsv` | What `thirdparty.py` builds the own bluetoothd against without building GLib or D-Bus: GLib's configuration header for the Q2, and the symbols stock's `libglib-2.0.so.0` and `libdbus-1.so.3` export (library, name, kind, size), from which link-time stubs are made | `GLIBCONFIG`, `STUBS` in `thirdparty.py` | [bluez](bluez.md#build) |
 | `radiodata.py` | The local radio fetcher's tables, `assets/radio/stations.bin` (FCC FM contours and AM stations) and `zcta.bin` (Census ZIP points), from public data | `build`, `fm_stations`, `stations_table` | [internals](internals.md#local-radio-fetch) |
 | `peq.py`                                                  | The payload's libc imports; `UI_SOURCES`, `UNFORMATTED`                                                                                 | `compile_common`, `LIBC`                                            | [internals](internals.md#parametric-eq)                                                             |
@@ -414,7 +414,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | `q2remote`                               | `remote.py`                                                                                                                                                                                                                                     | nothing                         |
 | `q2eq` (`--dev`) | `q2eq.py`: the helper built for the host against a fake demo; demo's side is `fw/test_q2eq.py` | host `cc` |
 | `q2update` and `q2flash` (`--dev`) | `q2update.py`: the helper under the host `sh` against a fake demo; demo's side is `fw/test_q2update.py`, the host tool's `unit/test_q2flash.py` | `sh` |
-| Vamp OS's base image | `os_image.py`: the pins, the image's contents and ABI, the composed `/vendor`, and a boot of it under `qemu-mipsel` (and `--card-boot`); `q2vampos.py`: the card boot's hand-off under the host `sh` | `BUILD`, the ZIP, bwrap, `sh` |
+| VampOS's base image | `os_image.py`: the pins, the image's contents and ABI, the composed `/vendor`, and a boot of it under `qemu-mipsel` (and `--card-boot`); `q2vampos.py`: the card boot's hand-off under the host `sh` | `BUILD`, the ZIP, bwrap, `sh` |
 | The card boot end to end | `card_e2e.py`: the image on a stand-in card, the real q2vampos.sh with a stand-in loop mount and chroot, the image's rcS and services up, a song played, the next boot the usual one | `BUILD`, the ZIP, bwrap, sh |
 | q2playd | `playd.py`: q2playd built for this machine against a stand-in q2player: the FIFO and list file, Q2PLAY/1, the now file, ends, cuts and failures, server songs' catplay (a stand-in q2pkgd starting a stopped app) | `cc`, the host's SQLite |
 | Vamp API 1's permissions | `perm.py`: the three services' checks (a member, a refusal, root) and, in a user namespace per uid, packages' users from `q2pkgd app-add` reaching only their services; `q2pkgd`'s users, groups and `app-run` | `cc`, bwrap |
@@ -427,7 +427,7 @@ Commands and what each needs are in [building.md](building.md#tests). `BUILD` is
 | q2libd | `libd.py`: q2libd built for this machine on a stand-in card of songs ffmpeg makes: tags, ids across scans, catalogues, q2ui's query, the service's first library, Q2LIB/1's transcripts | `cc`, ffmpeg, the host's FFmpeg and SQLite |
 | q2netd | `netd.py`: q2netd built for this machine with a stand-in wpa_supplicant: the radio, DHCP, Smart Wi-Fi's holds, the saved networks, scans, Q2NET/1 | `cc`, python3 |
 | q2btd | `btd.py`: q2btd built for this machine against `btd_standin.c` (BlueZ and bluez-alsa on a bus of the test's) and a stand-in q2playd: power, the auto-reconnect, pairing and the agent, the codec, the battery, the output, absolute volume, the buttons, Q2BT/1; `os_bt.py` runs it in the image beside the image's own daemons under QEMU | `cc`, libdbus-1's headers, `dbus-daemon` |
-| q2pkgd | `pkgd.py`: a release made and signed with a test key, staged from stock's and Vamp OS's layouts byte for byte as the build composes, the image's own mksquashfs under QEMU, each refusal; `download` from a local HTTPS feed shaped as GitHub's, and its refusals | `BUILD`, the ZIP, openssl, mksquashfs, the host mbedTLS |
+| q2pkgd | `pkgd.py`: a release made and signed with a test key, staged from stock's and VampOS's layouts byte for byte as the build composes, the image's own mksquashfs under QEMU, each refusal; `download` from a local HTTPS feed shaped as GitHub's, and its refusals | `BUILD`, the ZIP, openssl, mksquashfs, the host mbedTLS |
 | Guest Play (`q2-guest`, `q2-hotspot`) | `q2_guest.py`: `q2-hotspot` under `sh` with stand-in wpa_supplicant, wpa_cli, ifconfig and udhcpd, then the daemon built for the host on a private bus against `guest/fake_bluez.py` (BlueZ, bluetoothd's `shanling.bluez`, both bluealsa daemons) and stand-in `bluealsa` and `bluealsa-aplay`; demo's side is `fw/test_guest.py` | host `cc`, `dbus-daemon`, dbus-python |
 | Cover art over Bluetooth (`q2-bip`) | `q2bip.py`: the daemon built for the host, a controller over a UNIX packet socket, a stand-in ffmpeg and a real one, the L2CAP listening socket; `unit/test_q2bip.py`: OBEX and BIP packet by packet; `fw/test_bt_cover.py`: demo's file | host `clang`, `ffmpeg` for one test |
 | ADB over USB and Wi-Fi (`--dev`), `vamp` | `adb.py`: adbd under `qemu-mipsel` in bwrap with a stand-in FunctionFS, `adbd --tcp` driven by `vamp`, `q2adb-gadget` on a stand-in configfs and `q2adb-wifi` with stand-ins; `unit/test_vamp.py` against a fake adbd, `unit/test_adb_mdns.py` | `qemu-mipsel`, bwrap; `BUILD` optional |

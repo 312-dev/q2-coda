@@ -56,7 +56,7 @@ def test_a_good_manifest_says_what_the_app_may_do(binary, tmp_path):
 
 
 @pytest.mark.parametrize('change, why', [
-    (('api=1', 'api=2'), 'needs API 2; this Vamp OS serves API 1'),
+    (('api=1', 'api=2'), 'needs API 2; this VampOS serves API 1'),
     (('api=1', 'api=x'), 'api= is the lowest Vamp API it needs'),
     (('version=1.2.0', 'version=1..2'), 'version= is dotted numbers'),
     (('kind=browse', 'kind=widget'), 'kind=widget is not a kind'),
