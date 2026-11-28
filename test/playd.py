@@ -2922,6 +2922,96 @@ def test_a_player_started_again_is_sent_the_speed_at_the_next_song(run):
     assert ('mcl-playspeed', '2') in pl2.got, pl2.got
 
 
+# ---- a CUE track's own key (docs/playd.md#cue-tracks) ----
+
+def cue_key(path, start):
+    """listen_key with a CUE track's start mixed in, as today's Vamp keys a track: FNV-1a over its 32-bit word"""
+    h = listen_key(path)
+    if start:
+        for b in struct.pack('<i', start):
+            h = ((h ^ b) * 16777619) & 0xffffffff
+    return h | (not h)
+
+
+@pytest.mark.parametrize('prepare', [cue_rows])
+def test_a_cue_file_s_tracks_keep_stars_of_their_own_and_the_first_its_file_s(run):
+    """the first track (start 0) keeps the key a whole file has, so stars kept before stay with it; the others theirs"""
+    root, pl = run
+    a = Api(root)
+    a.line()
+    for line in ('rate 2 50', 'rate 4 51', 'rate 5 53'):
+        a.say(line)
+        assert a.line() == 'ok', line
+    w = rate_words(root)
+    assert (rate_find(w, listen_key('/mnt/mmc/live.flac')), rate_find(w, cue_key('/mnt/mmc/live.flac', 4)),
+            rate_find(w, listen_key('/mnt/mmc/whole.flac'))) == (2, 4, 5)
+    a.say('rating 51')
+    assert a.line() == 'rating id=51 stars=4 liked=0'
+    a.say('rating 52')
+    assert a.line() == 'rating id=52 stars=0 liked=0'
+    play_list(root, [52, 50], 0)
+    pl.pump()
+    assert now(root)['hearts'] == '0', 'the playing track: its own stars'
+    a.say('rate 3 0')
+    assert a.line() == 'ok'
+    assert rate_find(rate_words(root), cue_key('/mnt/mmc/live.flac', 7)) == 3
+
+
+def long_cue_rows(root):
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    db.execute('alter table songtable add column time integer')
+    db.execute('alter table songtable add column time_end integer')
+    db.executemany('insert into songtable values (?, ?, ?, ?, ?, 0, ?, ?)',
+                   [(60, '/mnt/mmc/set.flac', 'Side A', 'Dee', 'Set', 0, 100), (61, '/mnt/mmc/set.flac', 'Side B', 'Dee', 'Set', 100, 200)])
+    db.commit()
+    db.close()
+
+
+@pytest.mark.parametrize('prepare', [long_cue_rows])
+def test_a_cue_track_s_listen_counts_under_its_own_key(run):
+    root, pl = run
+    card_in(root)
+    play_list(root, [61], 0)
+    pl.pump()
+    heard(root, pl, 200, range(100, 160))
+    assert plays(root)[0] == (cue_key('/mnt/mmc/set.flac', 100), 1), plays(root)[:2]
+
+
+def book_cue_rows(root):
+    """a spoken CUE book: two tracks of one file (resumed at any length)"""
+    db = sqlite3.connect(root/'mnt/data/database.db')
+    db.execute('alter table songtable add column time integer')
+    db.execute('alter table songtable add column time_end integer')
+    db.executemany('insert into songtable values (?, ?, ?, ?, ?, 0, ?, ?)',
+                   [(70, '/mnt/mmc/Audiobooks/b.flac', 'Part 1', 'Eff', 'Book', 0, 4000),
+                    (71, '/mnt/mmc/Audiobooks/b.flac', 'Part 2', 'Eff', 'Book', 4000, 8000)])
+    db.commit()
+    db.close()
+
+
+@pytest.mark.parametrize('prepare', [book_cue_rows])
+def test_a_cue_book_keeps_one_place_as_its_file_s_and_each_track_goes_back_only_to_its_own(run):
+    """playback.c's resume_key is the file's: a CUE book's place is kept in file seconds, and gone back to only by the
+    track whose span holds it"""
+    root, pl = run
+    card_in(root)
+    play_list(root, [71], 0)
+    pl.pump()
+    heard(root, pl, 8000, list(range(4000, 4100, 3)) + [4100, 4100, 4100])
+    assert spots(root)[0] == (path_key('/mnt/mmc/Audiobooks/b.flac'), 4100), spots(root)[:2]
+    play_list(root, [71], 0)
+    pl.pump()
+    heard(root, pl, 8000, [4001, 4002, 4003])
+    assert ('mcl-seek', '4100') in pl.got, pl.got[-4:]
+    heard(root, pl, 8000, [4100, 4101])  # where the seek put it (the stand-in reports what it is told)
+    sent = len(pl.got)
+    play_list(root, [70], 0)
+    pl.pump()
+    heard(root, pl, 8000, [1, 2, 3, 4])
+    assert 'mcl-seek' not in [n for n, _ in pl.got[sent:]], ('a place in Part 2: Part 1 starts at its own start', pl.got[sent:])
+    assert spots(root)[0] == (path_key('/mnt/mmc/Audiobooks/b.flac'), 4101), ('kept for Part 2', spots(root)[:2])
+
+
 # ---- gapless (docs/playd.md#gapless) ----
 
 def test_the_next_song_is_sent_ahead_six_seconds_before_the_end_and_plays_on_with_nothing_sent(run):

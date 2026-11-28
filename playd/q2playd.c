@@ -1456,10 +1456,16 @@ static int rate_keep(unsigned key, int n) { return table_keep(&rt[0], key, n); }
 /* What is rated: the queue's song, by its server row's fileurl for an offline copy; a source's URL has an empty queue
  * (its own put aside: source_take) */
 static const char *rated_path(void) { return !q.n || !*q.file ? 0 : *q.row_url ? q.row_url : q.file; }
-static unsigned listen_key(const char *p) { /* listen_key's: the path's FNV-1a and fnv's separator, never 0 */
+static int rated_cue(void) { return *q.row_url ? 0 : q.cue_start; } /* its CUE start: a server row has none */
+/* listen_key's (patch/nav/chapters_streams_folders.c): the path's FNV-1a and fnv's separator, with a CUE track's start
+ * (seconds) mixed in as its 32-bit word, since a CUE file's tracks share one path; never 0. A whole file and a CUE
+ * file's first track (start 0) have the path's key alone, so what was kept under it before stays theirs. */
+static unsigned listen_key_at(const char *p, int cue) {
     unsigned k = fnv(2166136261u, p, strlen(p)) * 16777619u;
+    if (cue) k = fnv(k, &cue, sizeof cue);
     return k | !k;
 }
+static unsigned listen_key(const char *p) { return listen_key_at(p, 0); }
 static int playing_id(void) { return q.n && !q.paths ? q.ids[q.order[q.at]] : 0; } /* the now file's id= */
 
 /* likes.db: myfav, the likes as coda-rc lists them, and waiting, likes not yet written through to stock's myfav
@@ -1600,7 +1606,7 @@ static int liked_now(void) { /* the song's like, 0 or 1, -1 when nothing is rate
 
 static int hearts_now(void) { /* the song's stars (the shim's hearts), -1 when nothing is rated */
     const char *p = rated_path();
-    return p ? rate_kept(listen_key(p)) : -1;
+    return p ? rate_kept(listen_key_at(p, rated_cue())) : -1;
 }
 
 /* A change of the song's stars or like told to the servers (catalogue.c rated_line, docs/server-library.md#ratings-
@@ -1646,9 +1652,9 @@ static void rated_out_for(const char *p, const char *what, int v) {
  * the song playing */
 /* n stars for the song p names (its path, or a server row's fileurl): 0 set, 1 refused (past 5, the table full or not
  * written) */
-static int rate_path(const char *p, int n) {
+static int rate_path(const char *p, int cue, int n) {
     if (n < 0 || n > 5) return 1;
-    int k = rate_keep(listen_key(p), n);
+    int k = rate_keep(listen_key_at(p, cue), n);
     if (k <= 0) logf_(k ? "rating not saved" : "ratings are full");
     if (k > 0) rated_out_for(p, "stars", n), ratings_copy_due(now_ms());
     ++q.seq;
@@ -1657,7 +1663,7 @@ static int rate_path(const char *p, int n) {
 static int rate_cmd(int n, int id) {
     const char *p = rated_path();
     if (!p || id != playing_id()) return 3;
-    return rate_path(p, n);
+    return rate_path(p, rated_cue(), n);
 }
 
 /* The FIFO's "like ID" (the pin's coda_rc_shim.c, ratings.c rate_now_like): the like flipped */
@@ -1705,23 +1711,29 @@ static int like_cmd(int id) {
     return like_path(p, !liked_now());
 }
 
-/* What Q2PLAY/1's rating words name: song ID's path (a card song's, or a server row's fileurl), 0 the song playing;
- * 1 when there is one */
-static int id_path(int id, char *out, size_t room) {
+/* What Q2PLAY/1's rating words name: song ID's path (a card song's, or a server row's fileurl) and its CUE start (a card
+ * row's time, 0 for a whole file or a server row), 0 the song playing; 1 when there is one */
+static int id_path(int id, char *out, size_t room, int *cue) {
+    *cue = 0;
     if (!id) {
         const char *p = rated_path();
+        *cue = rated_cue();
         return p && snprintf(out, room, "%s", p) < (int)room;
     }
     sqlite3 *db;
     sqlite3_stmt *st;
-    int ok = 0;
+    int ok = 0, server = (unsigned)id >= CAT_ID_BASE;
     *out = 0;
-    if (sqlite3_open_v2((unsigned)id >= CAT_ID_BASE ? cat_path : db_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
-        sqlite3_prepare_v2(db, (unsigned)id >= CAT_ID_BASE ? "select fileurl from servertable where id = ?"
-                                                           : "select fileurl from songtable where id = ?", -1, &st, 0) == SQLITE_OK) {
+    if (sqlite3_open_v2(server ? cat_path : db_path, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK &&
+        (sqlite3_prepare_v2(db, server ? "select fileurl, 0 from servertable where id = ?"
+                                       : "select fileurl, max(ifnull(time, 0), 0) from songtable where id = ?", -1, &st, 0) == SQLITE_OK ||
+         /* a songtable without stock's time columns (a test's stand-in): whole files */
+         (!server && sqlite3_prepare_v2(db, "select fileurl, 0 from songtable where id = ?", -1, &st, 0) == SQLITE_OK))) {
         sqlite3_bind_int(st, 1, id);
-        if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0))
+        if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0)) {
             ok = snprintf(out, room, "%s", (const char *)sqlite3_column_text(st, 0)) < (int)room && *out;
+            *cue = sqlite3_column_int(st, 1);
+        }
         sqlite3_finalize(st);
     }
     sqlite3_close(db);
@@ -1768,9 +1780,10 @@ static void in_song(sqlite3 *cat, const char *app, const char *sid, unsigned key
     }
     sqlite3 *db;
     if (*path_ || sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, 0) != SQLITE_OK) return;
-    if (sqlite3_prepare_v2(db, "select fileurl from songtable", -1, &st, 0) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, "select fileurl, max(ifnull(time, 0), 0) from songtable", -1, &st, 0) == SQLITE_OK ||
+        sqlite3_prepare_v2(db, "select fileurl, 0 from songtable", -1, &st, 0) == SQLITE_OK) { /* a CUE track's key has its start */
         while (!*path_ && sqlite3_step(st) == SQLITE_ROW)
-            if (sqlite3_column_text(st, 0) && listen_key((const char *)sqlite3_column_text(st, 0)) == key)
+            if (sqlite3_column_text(st, 0) && listen_key_at((const char *)sqlite3_column_text(st, 0), sqlite3_column_int(st, 1)) == key)
                 snprintf(path_, room, "%s", (const char *)sqlite3_column_text(st, 0));
         sqlite3_finalize(st);
     }
@@ -1932,10 +1945,11 @@ static void rc_field(const char *s, size_t room, char end) {
     for (; s && *s && n < room && n < sizeof b; ++s) b[n++] = *s == '\t' || *s == '\n' || *s == '\r' ? ' ' : *s;
     rc_put(b, n), rc_put(&end, 1);
 }
-static void rc_song(const char *p, int stars, int liked) {
+static void rc_song(const char *p, int stars, int liked, int cue) { /* cue: a CUE track's start, ratings.c rc_song's */
     char b[32];
     rc_put(b, (size_t)snprintf(b, sizeof b, "song\t%d\t%d\t", stars, liked));
     rc_field(p, 1099, '\t');
+    if (cue) rc_put(b, (size_t)snprintf(b, sizeof b, "%d", cue));
     rc_put("\n", 1);
 }
 static void rc_album(const char *name, const char *artist, const char *p, int hearts) {
@@ -2013,12 +2027,12 @@ static void rc_write(void) {
     if (rename(tmp, file)) unlink(tmp);
 }
 
-static void rc_row(sqlite3_stmt *st) { /* a library row: id, fileurl, album, albumsonger */
+static void rc_row(sqlite3_stmt *st) { /* a library row: id, fileurl, album, albumsonger, its CUE start */
     const char *p = (const char *)sqlite3_column_text(st, 1);
-    int v;
+    int v, cue = sqlite3_column_int(st, 4);
     rc.last = sqlite3_column_int64(st, 0);
     if (!p) return;
-    if (rc.left[0] && (v = rc_take(0, listen_key(p)))) rc_song(p, v, 0);
+    if (rc.left[0] && (v = rc_take(0, listen_key_at(p, cue)))) rc_song(p, v, 0, cue);
     const char *al = (const char *)sqlite3_column_text(st, 2), *aa = (const char *)sqlite3_column_text(st, 3);
     if (rc.left[1] && (v = rc_take(1, album_key(al, aa, p)))) rc_album(al, aa, p, v);
 }
@@ -2036,7 +2050,7 @@ static void rc_page(void) {
         while (sqlite3_step(st) == SQLITE_ROW)
             if (sqlite3_column_text(st, 0)) {
                 const char *p = (const char *)sqlite3_column_text(st, 0);
-                rc_song(p, rc_take(0, listen_key(p)), 1);
+                rc_song(p, rc_take(0, listen_key(p)), 1, 0); /* a like is its file's (myfav's fileurl) */
             }
         sqlite3_finalize(st), sqlite3_close(db);
         rc.table = 1, rc.last = 0;
@@ -2054,15 +2068,19 @@ static void rc_page(void) {
                 there = sqlite3_step(st) == SQLITE_ROW;
                 sqlite3_finalize(st);
             }
-            char *u = sqlite3_mprintf("select id, fileurl, album, albumsonger from %s where id > ? order by id limit %d",
-                                      table, RC_PAGE);
-            if (there && sqlite3_prepare_v2(db, u, -1, &st, 0) != SQLITE_OK) there = -1;
+            /* a card row's time is its CUE start; a server row, or a songtable without stock's time columns, has none */
+            char *u = sqlite3_mprintf("select id, fileurl, album, albumsonger, max(ifnull(time, 0), 0) from %s where id > ? "
+                                      "order by id limit %d", table, RC_PAGE),
+                 *whole = sqlite3_mprintf("select id, fileurl, album, albumsonger, 0 from %s where id > ? order by id limit %d",
+                                          table, RC_PAGE);
+            if (there && sqlite3_prepare_v2(db, u, -1, &st, 0) != SQLITE_OK && sqlite3_prepare_v2(db, whole, -1, &st, 0) != SQLITE_OK)
+                there = -1;
             else if (there) {
                 sqlite3_bind_int64(st, 1, rc.last);
                 while (sqlite3_step(st) == SQLITE_ROW) rc_row(st), rows++;
                 sqlite3_finalize(st);
             }
-            sqlite3_free(u);
+            sqlite3_free(u), sqlite3_free(whole);
         }
         sqlite3_close(db);
         if (there < 0) {
@@ -2263,7 +2281,7 @@ static int spoken(const char *p) { /* under the card's Podcasts or Audiobooks, o
 static void listen_tick(int sec, int len) {
     const char *p = rated_path();
     if (!p || spoken(q.file)) return;
-    unsigned key = listen_key(p);
+    unsigned key = listen_key_at(p, rated_cue());
     if (key != pc.key || (sec < 2 && pc.sec > LISTEN_MIN_S)) pc.key = key, pc.sec = sec, pc.heard = pc.done = 0;
     int d = sec - pc.sec;
     if (d > 0 && d <= 3 && q.state == PLAYING) pc.heard += d;
@@ -2298,6 +2316,7 @@ static struct {
     int read, held, min;
     unsigned key;                            /* the song read, 0 none: its first second then only noted */
     int settle, on, sec, saved, still, pending, total;
+    int cue, cue_end; /* the song read's CUE span in its file (0 0 a whole file): a place is kept as its file's */
     unsigned long long looked;
 } rs;
 
@@ -2332,8 +2351,10 @@ static int spot_at(unsigned key) {
 }
 
 /* key's place moved first at sec, or forgotten near either end (playback_power.c spot_keep) */
-static void spot_keep(unsigned key, int sec, int total) {
+/* sec of total into the song, kept as its file's place, at seconds in (a CUE track's start; 0 for a whole file) */
+static void spot_keep(unsigned key, int sec, int total, int at) {
     int i = 0, keep = sec >= RESUME_EDGE_S && sec < total - RESUME_EDGE_S;
+    sec += at;
     while (i < RESUME_SLOTS - 1 && spots[i].key != key) i++;
     if (keep ? !i && spots[0].key == key && spots[0].sec == sec : spots[i].key != key) return;
     if (keep) {
@@ -2348,24 +2369,27 @@ static void spot_keep(unsigned key, int sec, int total) {
 
 /* the song read before: its place kept as another starts (start_from) */
 static void resume_leave(void) {
-    if (rs.key && rs.on && !rs.pending) spot_keep(rs.key, rs.sec, rs.total);
+    if (rs.key && rs.on && !rs.pending) spot_keep(rs.key, rs.sec, rs.total, rs.cue);
     rs.key = 0;
 }
 
 /* The player's second for the song playing (media-info's), len its length */
 static void resume_tick(int sec, int len) {
     if (!q.n || !*q.file || len <= 0) return;
-    unsigned key = listen_key(q.file);
-    if (key != rs.key) {
+    unsigned key = listen_key(q.file); /* the file's alone (playback.c's resume_key): a CUE file keeps one place */
+    if (key != rs.key || q.cue_start != rs.cue) { /* another song, or the same file's next CUE track */
         resume_leave();
-        rs.key = key, rs.on = 0, rs.settle = 1;
+        rs.key = key, rs.on = 0, rs.settle = 1, rs.cue = q.cue_start, rs.cue_end = q.cue_end;
         return;
     }
     if (rs.settle) {
         rs.settle = 0;
         spots_load();
         rs.on = (rs.min && len >= rs.min * 60) || spoken(q.file);
-        rs.pending = rs.on ? spot_at(key) : 0;
+        /* today's Vamp keeps one place a file, its file's (a CUE book's tracks share it): one inside this track's
+         * span is gone back to, one in another track left for that track */
+        int at = rs.on ? spot_at(key) - rs.cue : 0;
+        rs.pending = at > 0 && (!rs.cue_end || at < rs.cue_end - rs.cue) ? at : 0;
         rs.sec = rs.saved = sec, rs.still = 0;
     }
     rs.total = len;
@@ -2373,7 +2397,7 @@ static void resume_tick(int sec, int len) {
         if (sec < 1 || q.state != PLAYING) return; /* a paused start waits for Play */
         if (sec < RESUME_START_S) {
             char s[16];
-            snprintf(s, sizeof s, "%d", rs.pending);
+            snprintf(s, sizeof s, "%d", rs.cue + rs.pending); /* the file's place */
             player_send("mcl-seek", s);
             sec = rs.pending, q.pos_ms = sec * 1000, ++q.seq;
         }
@@ -2384,7 +2408,7 @@ static void resume_tick(int sec, int len) {
     rs.still = sec == rs.sec ? rs.still + 1 : 0;
     rs.sec = sec;
     int moved = sec - rs.saved;
-    if (moved && (rs.still >= 2 || moved >= RESUME_SAVE_S || moved <= -RESUME_SAVE_S)) rs.saved = sec, spot_keep(key, sec, len);
+    if (moved && (rs.still >= 2 || moved >= RESUME_SAVE_S || moved <= -RESUME_SAVE_S)) rs.saved = sec, spot_keep(key, sec, len, rs.cue);
 }
 
 static void resume_flush(unsigned long long t) { /* the ring kept while the card was away */
@@ -3524,14 +3548,17 @@ static void client_line(struct client *c, char *line) {
         client_say(c, "now %s", text);
     } else if (sscanf(line, "rating %d%n", &a, &n) == 1 && !line[n]) { /* the stars and like of song a, 0 the one playing */
         char p[1100];
-        if (!id_path(a, p, sizeof p)) client_say(c, "err rating");
-        else client_say(c, "rating id=%d stars=%d liked=%d", a ? a : playing_id(), rate_kept(listen_key(p)), path_liked(p));
+        int cue;
+        if (!id_path(a, p, sizeof p, &cue)) client_say(c, "err rating");
+        else client_say(c, "rating id=%d stars=%d liked=%d", a ? a : playing_id(), rate_kept(listen_key_at(p, cue)), path_liked(p));
     } else if (sscanf(line, "rate %d %d%n", &a, &b, &n) == 2 && !line[n]) {
         char p[1100];
-        client_say(c, !id_path(b, p, sizeof p) || rate_path(p, a) ? "err rate" : "ok");
+        int cue;
+        client_say(c, !id_path(b, p, sizeof p, &cue) || rate_path(p, cue, a) ? "err rate" : "ok");
     } else if (sscanf(line, "like %d %d%n", &a, &b, &n) == 2 && !line[n]) {
         char p[1100];
-        client_say(c, (a != 0 && a != 1) || !id_path(b, p, sizeof p) || like_path(p, a) ? "err like" : "ok");
+        int cue; /* a like is the file's: stock's myfav keeps a song by its fileurl */
+        client_say(c, (a != 0 && a != 1) || !id_path(b, p, sizeof p, &cue) || like_path(p, a) ? "err like" : "ok");
     } else if (sscanf(line, "album %d %d%n", &a, &b, &n) == 2 && !line[n]) {
         client_say(c, album_cmd(a, b) ? "err album" : "ok");
     } else if (!strcmp(line, "click wheel") || !strcmp(line, "click button") || !strcmp(line, "click beep")) {
