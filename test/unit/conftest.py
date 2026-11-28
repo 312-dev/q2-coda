@@ -78,3 +78,50 @@ def contained(monkeypatch):
     monkeypatch.setattr(time, 'sleep', lambda seconds: None)
     for name in ('Q2_HOST', 'Q2_KEY', 'Q2_KEY_FILE', 'Q2_BUILD', 'Q2_PROF_BIN'):
         monkeypatch.delenv(name, raising=False)
+
+
+# A stall's record (STATUS.md: a test timing out at 60 s inside a plain read of a tracked file, seen only in a full run
+# after test/sendd.py). With Q2_STALL_DIR set, a test still running at Q2_STALL_S seconds (50, before pytest-timeout's
+# 60) has written there: every thread's Python stack, and per OS thread its state, kernel wait channel and system call
+# with its arguments (/proc/self/task/*/syscall: a read's first argument is its fd), each open fd's target, and the mount
+# each target is on, so the record names the file, its mount (the container's virtiofs share or not) and where the read
+# waits. Nothing is retried or hidden: the test goes on to its timeout as before.
+@pytest.fixture(autouse=True)
+def _stall_record(request):
+    where = os.environ.get('Q2_STALL_DIR')
+    if not where:
+        yield
+        return
+    import faulthandler
+
+    def record():
+        out = pathlib.Path(where) / f'stall-{time.strftime("%Y%m%d-%H%M%S")}-{os.getpid()}.txt'
+        with open(out, 'w') as f:
+            f.write(f'{request.node.nodeid}\nat {time.strftime("%Y-%m-%d %H:%M:%S %z")}\n\n')
+            for task in sorted(pathlib.Path('/proc/self/task').iterdir()):
+                fields = {}
+                for n in ('comm', 'wchan', 'syscall'):
+                    try:
+                        fields[n] = (task / n).read_text().strip()
+                    except OSError as e:
+                        fields[n] = f'({e.strerror})'
+                try:
+                    state = next(l for l in (task / 'status').read_text().splitlines() if l.startswith('State:'))
+                except (OSError, StopIteration):
+                    state = 'State: ?'
+                f.write(f'task {task.name} {fields["comm"]}: {state}, wchan {fields["wchan"]}, syscall {fields["syscall"]}\n')
+            f.write('\nfds:\n')
+            for fd in sorted(pathlib.Path('/proc/self/fd').iterdir(), key=lambda p: int(p.name)):
+                try:
+                    f.write(f'  {fd.name} -> {os.readlink(fd)}\n')
+                except OSError:
+                    pass
+            f.write('\nmounts:\n' + pathlib.Path('/proc/self/mountinfo').read_text() + '\nstacks:\n')
+            f.flush()
+            faulthandler.dump_traceback(file=f, all_threads=True)
+
+    timer = threading.Timer(float(os.environ.get('Q2_STALL_S', '50')), record)
+    timer.daemon = True
+    timer.start()
+    yield
+    timer.cancel()
