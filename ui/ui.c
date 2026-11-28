@@ -65,7 +65,8 @@ static void (*hold_fn)(void);
 void ui_on_hold(int key, void (*fn)(void)) { hold_key = key, hold_fn = fn; }
 /* A finger that lands above PULL_Y and goes PULL_PX down: pull_fn, on every page (stock's pull-down,
  * on_wm_tsmove_fun: g_pressdown_y under 31, 20 px down), given the move that crossed and every event
- * of that touch after it, its lift too, so what it opens can follow the finger; no page sees them. */
+ * of that touch after it, its lift too, so what it opens can follow the finger; no page sees them. The page that
+ * had the touch until then is given an IN_TOUCH_UP of value 1: the touch is over for it, and it is no tap. */
 #define PULL_Y 31
 #define PULL_PX 20
 static void (*pull_fn)(const input_t *e);
@@ -77,6 +78,10 @@ static int pulled(const input_t *e) {
     if (e->type == IN_TOUCH_DOWN) pull.y0 = e->y, pull.pulled = 0;
     if (e->type < IN_TOUCH_DOWN) return 0;
     if (!pull.pulled && !(e->type == IN_TOUCH_MOVE && pull_fn && pull.y0 < PULL_Y && e->y - pull.y0 >= PULL_PX)) return 0;
+    if (!pull.pulled && depth && stack[depth - 1].page->event) { /* the page had the touch until now: it ends, no tap */
+        input_t gone = { IN_TOUCH_UP, 1, 0, e->ms, e->x, e->y };
+        stack[depth - 1].page->event(stack[depth - 1].st, &gone);
+    }
     pull.pulled = e->type != IN_TOUCH_UP;
     pull_fn(e);
     return 1;

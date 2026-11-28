@@ -1603,6 +1603,84 @@ HYN_PULL = [(0, 3, 0, 308), (0, 3, 1, 73), (0, 3, 24, 1), (0, 0, 0, 0), (11, 3, 
             (56, 0, 0, 0), (68, 3, 0, 180), (68, 0, 0, 0), (78, 3, 24, 0), (78, 0, 0, 0)]
 
 
+def list_touch(binary, work, home):
+    """A finger on a list (ui/list.c list_touch, docs/ui-rewrite.md#the-toolkit): a tap on Home's Library row opens the
+    Library and a tap on a song plays it; a drag moves the rows with the finger and, let go fast, flings them on to rest
+    on whole rows; a slow one only settles; past the top the rows give and spring back; a still finger held on a song
+    opens its hold menu; and a pull down from the status row opens Control Center with no tap on the row under it."""
+    good = True
+    rows = lambda d, name: [r.split('\t')[0] for r in (d/name).read_text().splitlines()] if (d/name).exists() else []
+    # Home's rows from y 40, 32 px each: Library is the first when nothing plays
+    _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'rows @home.txt', 'touch 60 56', 'lift', 'rest', 'rows @after.txt'], *home,
+                                queue=True)
+    home_rows, after = rows(d, 'home.txt'), rows(d, 'after.txt')
+    good &= check('a tap on Home\'s Library row opens the Library', home_rows[:1] == ['Library']
+                  and 'Songs' in after and after != home_rows, f'{home_rows[:3]} {after[:3]}')
+    # Songs: Shuffle pinned at y 58, the songs from y 90; a tap on the second song (y 138) plays it
+    _, _, _, (sent, ids, d) = script(binary, work, 60, ['rest', 'rows @songs.txt', 'touch 150 138', 'lift', 'rest'], queue=True)
+    songs = rows(d, 'songs.txt')
+    good &= check('a tap on a song plays it', any(' play' in f' {s}' for s in sent), str(sent))
+    # a fast drag up 150 px over 100 ms: the rows follow, then fling on and come to rest on whole rows
+    trace, _, _ = script(binary, work, 400, ['rest', 'swipe 150 260 150 110 100', 'rest'])
+    at_lift = [t['scroll'] for t in trace]
+    peak, end = max(at_lift), at_lift[-1]
+    good &= check('a fast drag up flings the rows past where the finger left them, to rest on a whole row',
+                  end > 160 and end % 32 == 0 and any(120 <= s <= 150 for s in at_lift), f'end {end} trace {at_lift[:12]}')
+    trace, _, _ = script(binary, work, 400, ['rest', 'swipe 150 260 150 110 1500', 'rest'])
+    end = trace[-1]['scroll']
+    good &= check('a slow drag of 150 px settles on the nearest whole row, no fling', end in (128.0, 160.0), str(end))
+    trace, _, _ = script(binary, work, 400, ['rest', 'touch 150 120', 'move 150 140', 'move 150 220', 'rest'])
+    given = min(t['scroll'] for t in trace)
+    trace2, _, _ = script(binary, work, 400, ['rest', 'touch 150 120', 'move 150 140', 'move 150 220', 'lift', 'rest'])
+    good &= check('dragged down past the top the rows give, less than the finger, and spring back on the lift',
+                  -80 < given < -10 and trace2[-1]['scroll'] == 0, f'{given} {trace2[-1]["scroll"]}')
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'touch 150 138', 'run 700', 'lift', 'rest', 'rows @menu.txt'], queue=True)
+    good &= check('a still finger held on a song opens its hold menu, and plays nothing', rows(d, 'menu.txt')[:2] == ['Play Next', 'Play Last']
+                  and not sent, f'{rows(d, "menu.txt")[:2]} {sent}')
+    trace, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'swipe 150 10 150 200 300', 'rest', 'rows @cc.txt'], queue=True)
+    good &= check('a pull from the status row opens Control Center, and the list under it neither scrolls nor plays',
+                  not sent and all(t['scroll'] == 0 for t in trace if 'scroll' in t), f'{sent}')
+    return good
+
+
+def list_touch_device(binary, work, home):
+    """List touch through q2ui's own reader (ui/input.c), events as a Q2's panel sends them (ABS_PRESSURE alone, the
+    panel's portrait axes: upright (x, y) is ABS_X 319 - y, ABS_Y x): a tap on Home's Library row opens the Library, and
+    a drag on Songs moves its rows. The device read of the same is ~/.cache/q2-xfer/q2touch.py tap and drag."""
+    good = True
+
+    def stroke(run, points, gap=0.016):
+        for k, (x, y) in enumerate(points):
+            run.touch.write(event(3, 0, 319 - y) + event(3, 1, x) + (event(3, 24, 1) if not k else b'') + event(0, 0, 0))
+            time.sleep(gap)
+        run.touch.write(event(3, 24, 0) + event(0, 0, 0))
+
+    run = Run(binary, work, 60, *home, '--clock', '12:00')
+    try:
+        run.rest()
+        stroke(run, [(60, 56)])
+        top = run.rest().get('top')
+        good &= check("a tap the panel's way on Home's Library row opens the Library", top == 'list', str(top))
+    finally:
+        run.proc.kill()
+        run.proc.wait(timeout=5)
+        os.close(run.queue)
+    run = Run(binary, work, 400, '--clock', '12:00')
+    try:
+        run.rest()
+        before = run.picture()
+        stroke(run, [(150, 260 - 10 * k) for k in range(16)], gap=0.03)
+        run.rest()
+        after = run.picture()
+        changed = sum(shot.pixel(before, x, y) != shot.pixel(after, x, y) for x in range(10, 300, 10) for y in range(100, 280, 4))
+        good &= check("a drag the panel's way on Songs moves its rows", changed > 300, str(changed))
+    finally:
+        run.proc.kill()
+        run.proc.wait(timeout=5)
+        os.close(run.queue)
+    return good
+
+
 def touch_device(binary, work, home):
     """The touch panel as a Q2's own sends it (HYN_PULL, recorded on one): a finger is ABS_PRESSURE alone, no
     BTN_TOUCH. Replayed through q2ui's reader (ui/input.c), the pull down from the top edge opens Control Center, and
@@ -3125,6 +3203,9 @@ def main():
             good &= night_shift(binary, work, ('--page', 'home'))
         if not only or 'playing' in only:
             good &= playing_row(binary, work)
+        if not only or 'listtouch' in only:
+            good &= list_touch(binary, work, ('--page', 'home'))
+            good &= list_touch_device(binary, work, ('--page', 'home'))
         if not only or 'touchdev' in only:
             good &= touch_device(binary, work, ('--page', 'home'))
         if not only or 'edithome' in only:

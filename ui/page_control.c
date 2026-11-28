@@ -317,6 +317,7 @@ static int touch(struct cc_st *s, const input_t *e) {
         return 0;
     }
     if (!s->touch.on) return 0;
+    if (e->type == IN_TOUCH_UP && e->value) return s->touch.on = 0; /* the pull took the touch (ui.c pulled): no tap */
     if (!s->touch.moved && (abs(dx) >= SLIDE_PX || abs(dy) >= SLIDE_PX))
         s->touch.moved = 1, s->touch.dragging = slider && abs(dx) > abs(dy);
     /* SLIDE_PX up or down, whatever it did first (a thumb from the screen's foot goes sideways before it goes up),

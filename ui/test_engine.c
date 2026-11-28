@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "../patch/night_scale.h"
 #include "px.h"
 #include "q2ui.h"
 
@@ -264,6 +265,64 @@ static void narrow(const char *fb) {
           "leans %.3f of a level at level %d of four, quarter %d", lean[at] / rows[at], at / 4, at % 4);
 }
 
+/* The turn brings every pixel the frame changed, and only those, to the page exactly as one pixel
+ * worked out alone would be: each channel half a panel step up, held at white, the dropped bits
+ * cleared, after Night Shift's scale when it is on. Noise on the canvas and rects of odd sizes and
+ * places (heights that are not whole bands, one pixel wide, at the screen's edges) catch a turn
+ * that takes rows together getting a band's last rows or a rect's edges wrong. */
+static uint32_t one_pixel(uint32_t c, int bits, int kelvin) {
+    static const unsigned char green[] = NS_GREEN, blue[] = NS_BLUE;
+    unsigned v[3] = { c >> 16 & 255, c >> 8 & 255, c & 255 }, out = 0xff000000;
+    if (kelvin) {
+        unsigned i = (unsigned)(kelvin - NS_WARM) / NS_STEP;
+        v[1] = (v[1] * green[i] + 127) / 255, v[2] = (v[2] * blue[i] + 127) / 255;
+    }
+    for (int ch = 0; ch < 3; ++ch) {
+        unsigned b = bits == 565 ? (ch == 1 ? 6 : 5) : (unsigned)bits, w = v[ch] + (0x80u >> b);
+        out |= ((w > 255 ? 255 : w) & (0xffu << (8 - b)) & 0xff) << (16 - 8 * ch);
+    }
+    return out;
+}
+static void turned_exactly(const char *fb) {
+    static const struct {
+        int bits, kelvin;
+    } as[] = { { 6, 0 }, { 5, 0 }, { 565, 0 }, { 8, 0 }, { 6, 3400 }, { 8, 2000 } };
+    static const rect_t odd[] = { { 0, 0, 1, 1 }, { 3, 5, 101, 13 }, { 200, 77, 1, 243 }, { 300, 0, 75, 7 }, { 17, 311, 358, 9 } };
+    static uint32_t page[320 * 375], before[SCREEN_W * SCREEN_H];
+    uint32_t seed = 12345;
+    for (unsigned k = 0; k < sizeof as / sizeof *as; ++k) {
+        fb_depth(as[k].bits);
+        fb_warm(as[k].kelvin);
+        /* two whole frames, so both pages hold the first canvas; a third of one pixel, so the fourth turns
+         * only the odd rects (and that pixel) onto the page the second filled */
+        for (int i = 0; i < SCREEN_W * SCREEN_H; ++i) before[i] = canvas[i] = (seed = seed * 1103515245u + 12345u) >> 4 | 0xff000000;
+        dmg_all(), fb_present(), dmg_all(), fb_present();
+        dmg_add(odd[0]), fb_present();
+        for (int i = 0; i < SCREEN_W * SCREEN_H; ++i) canvas[i] = (seed = seed * 1103515245u + 12345u) >> 4 | 0xff000000;
+        for (unsigned j = 1; j < sizeof odd / sizeof *odd; ++j) dmg_add(odd[j]);
+        fb_present();
+        FILE *f = fopen(fb, "rb");
+        fseek(f, (long)(fb_page() * 320 * 375 * 4), SEEK_SET);
+        size_t got = fread(page, 4, 320 * 375, f);
+        fclose(f);
+        int wrong = 0, wx = -1, wy = -1;
+        for (int y = 0; y < SCREEN_H; ++y)
+            for (int x = 0; x < SCREEN_W; ++x) {
+                int in = 0;
+                for (unsigned j = 0; j < sizeof odd / sizeof *odd; ++j)
+                    in |= x >= odd[j].x && x < odd[j].x + odd[j].w && y >= odd[j].y && y < odd[j].y + odd[j].h;
+                uint32_t want = one_pixel(in ? canvas[y * SCREEN_W + x] : before[y * SCREEN_W + x], as[k].bits, as[k].kelvin);
+                if (page[x * 320 + (319 - y)] != want && !wrong++) wx = x, wy = y;
+            }
+        char what[160];
+        snprintf(what, sizeof what, "the turn at %d bits%s sends each changed pixel as it is alone, and leaves the rest", as[k].bits,
+                 as[k].kelvin ? " under Night Shift" : "");
+        check(what, got == 320 * 375 && !wrong, "%d pixels differ, the first at (%d, %d)", wrong, wx, wy);
+    }
+    fb_warm(0);
+    fb_depth(6);
+}
+
 /* The page on screen, read back from the panel file. */
 static uint32_t shown[320 * 375];
 static void read_back(const char *fb) {
@@ -333,6 +392,7 @@ int main(int argc, char **argv) {
     glyphs();
     ramps();
     narrow(argv[1]);
+    turned_exactly(argv[1]);
     flats(argv[1]);
     paint_guard();
     printf("q2ui-test: %s\n", failed ? "FAILED" : "all checks passed");
