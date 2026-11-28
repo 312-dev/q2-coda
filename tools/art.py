@@ -284,6 +284,18 @@ def status_wifi_none(ink):
     return png(w, STATUS_PX, laid(w, STATUS_PX, [(fan, lambda px, py: (ink, STATUS_UNLIT)), (x, lambda px, py: (ink, 1))]))
 
 
+def status_drop(ink, phase):
+    """A download's arrow at phase (0 to 1 of its second), a STATUS_PX square PNG in ink: a 2 px stem and an open head
+    falling STATUS_DROP_FALL px, eased in as a weight falls, onto the tray q2ui and demo draw under it (ui/status.c
+    drop, patch/status_row.c sync_paint), and fading out over the last STATUS_DROP_FADE of the second (the review
+    sheet's Download option A, a default the owner may revisit; docs/oled-design.md#status-row)."""
+    dy = STATUS_DROP_FALL * phase * phase
+    alpha = 1 - max(0.0, (phase - (1 - STATUS_DROP_FADE)) / STATUS_DROP_FADE)
+    box = (0, 0, STATUS_PX, STATUS_PX)
+    arrow = coverage_nonzero(stroke([[(7, 1 + dy), (7, 8 + dy)], [(3.8, 5 + dy), (7, 8.2 + dy), (10.2, 5 + dy)]], 2), box)
+    return png(STATUS_PX, STATUS_PX, laid(STATUS_PX, STATUS_PX, [(arrow, lambda x, y: (ink, alpha))]))
+
+
 def status_turn(name, px, ink, rgb, turn):
     """name at its optical size, turned clockwise by turn (a fraction of a whole turn) about the box's centre, a px
     square PNG in rgb: a frame of the status row's sync arrows."""
@@ -325,7 +337,7 @@ STATE_INKS = inks('primary', 'd', 'l')
 # Wi-Fi is iOS's fan, drawn here (wifi_fan): its levels light 1 to 3 of the dot and two bands over the rest in
 # the same ink at STATUS_UNLIT's opacity (iOS's rule; the owner's, 2026-11-27). The play state and the padlock are 13 px boxes drawn as they were (their ink 10.6 and 11 px); the
 # sync arrows turn through STATUS_SPIN frames of a half turn (the glyph repeats every half turn), sized by their
-# longer side as they turn, in Text Primary (the user's, 2026-11-20); the download's arrow sits in its ring, white.
+# longer side as they turn, in Text Primary (the user's, 2026-11-20); a download's arrow falls onto its tray (status_drop).
 STATUS_PX = 14
 STATUS_INK = 11.0
 STATUS_TOP = 1.0
@@ -335,8 +347,7 @@ STATUS_FAN_DEG = 90
 # the dot and the bands' radii: 2 px bands with 2 px of ground between, on whole pixels up the centre so the gaps are
 # wholly dark and do not blur (the owner's, chosen by eye on a Q2 among three, 2026-11-27)
 STATUS_FAN = ((0, 3), (5, 7), (9, 11))
-STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0),
-                 'status_down': ('arrow-down-bold', 8, 0)}
+STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0)}
 STATUS_FIT = {'status_headphones': ('headphones-bold', STATUS_PX), 'status_car': ('car-profile-bold', STATUS_CAR_W),
               # the volume pill's speaker, and muted at 0 (vol_pill.c)
               'status_vol': ('speaker-simple-high-fill', STATUS_PX), 'status_mute': ('speaker-simple-x-fill', STATUS_PX)}
@@ -348,6 +359,10 @@ STATUS_TALL = 12.0
 STATUS_TALL_FIT = {'status_bt': ('bluetooth-bold', 9), 'status_wired': ('headphones', STATUS_PX)}
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 30  # status_row.c SR_SPIN: a half turn a second at 30 fps
+# A download: its arrow's frames (status_drop), STATUS_SPIN a second as the arrows', over a 12 x 2 tray on the box's
+# rows 11 and 12 (ui/status.c DROP_*, patch/status_row.c SR_TRAY_*) that fills in Status Blue to the share downloaded
+STATUS_DROP_FALL = 4.0
+STATUS_DROP_FADE = 0.3
 KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
 # Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
@@ -771,6 +786,7 @@ def status_images(prefix):
     out |= {f'{prefix}_status_offline_{k}': status_glyph('cloud-slash-bold', STATUS_PX, token('warning')) for k in STATE_INKS}
     out |= {f'{prefix}_status_sync_{f}_{k}': status_turn('arrows-clockwise-bold', STATUS_PX, STATUS_INK, c, f / STATUS_SPIN / 2)
             for f in range(STATUS_SPIN) for k, c in STATE_INKS.items()}
+    out |= {f'{prefix}_status_drop_{f}_{k}': status_drop(c, f / STATUS_SPIN) for f in range(STATUS_SPIN) for k, c in STATE_INKS.items()}
     return out
 
 

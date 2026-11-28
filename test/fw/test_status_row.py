@@ -1,5 +1,5 @@
 """patch/status_row.c: the status row's glyph slots, right to left the battery, the level bars, Wi-Fi, a card app's
-sync, wired headphones, Bluetooth (its link, a headset's battery, a car) and Buttons Lock's padlock; their layout (the
+sync, wired headphones, Bluetooth (its link, a car, a guest's phone) and Buttons Lock's padlock; their layout (the
 clock's edge), paint, taps and repaints."""
 import ctypes as C
 import struct
@@ -70,9 +70,10 @@ class Row(StatusRow):
             return load(w, name, bitmap)
         self.fw.mock('widget_load_image', loaded)
         canvas.art = {n: (WIFI_W, 14) for n in ('oled_status_wifi_3_d', 'oled_status_wifi_2_d', 'oled_status_wifi_1_d', 'oled_status_wifi_x_d')}
-        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (RUNE_W, 14), 'oled_status_down_d': (14, 14), 'oled_status_wired_d': (14, 14),
+        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (RUNE_W, 14), 'oled_status_wired_d': (14, 14),
                        'oled_status_offline_d': (14, 14)}
         canvas.art |= {f'oled_status_sync_{f}_d': (14, 14) for f in range(30)}
+        canvas.art |= {f'oled_status_drop_{f}_d': (14, 14) for f in range(30)}
         self.fw.fn('status_slots_paint', None, C.c_void_p, C.c_void_p)(self.bar.addr, canvas.addr)
         return canvas, names
 
@@ -100,9 +101,9 @@ def test_the_slots_lay_out_right_to_left_from_the_battery(fw, row):
     row.app(1)
     assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 12
     row.app(2, 500)
-    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 16
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 14  # a download's box
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
-    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 16 - GAP - 13
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 14 - GAP - 13
 
 
 @pytest.mark.parametrize('status, wifi, left', [(1, None, BODY), (0, 3, BODY - GAP - WIFI_W), (3, 0, BODY - GAP - 10),
@@ -146,7 +147,7 @@ def bt_link(fw, status=None, level=None, cls=None, thread=0):
     (None, 0, None, None, 0, []),  # off or idle: nothing
     (1, 1, None, None, RUNE_W, ['oled_status_btdim_d']),  # connecting: the dim rune
     (3, 0, None, None, RUNE_W, ['oled_status_bt_d']),  # connected, no level: the white rune
-    (3, 0, 72, 0x240404, 14 + 2 + 15 + 2, ['oled_status_headphones_d']),  # a headset's level: headphones, battery
+    (3, 0, 72, 0x240404, RUNE_W, ['oled_status_bt_d']),  # a headset that says its level: the rune alone (option A)
     (3, 0, None, 0x200420, 19, ['oled_status_car_d']),  # a car: 11 px tall, 19 wide (SR_CAR_W)
 ])
 def test_the_bluetooth_slot_says_what_the_link_is(fw, row, status, thread, level, cls, width, art):
@@ -159,18 +160,6 @@ def test_the_bluetooth_slot_says_what_the_link_is(fw, row, status, thread, level
     canvas.art = {n: (14, 14) for n in art}
     fw.fn('status_row__headset_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY)
     assert names == art
-
-
-@pytest.mark.parametrize('level, fill', [(72, 0xffffff), (20, 0xffffff), (19, 0xff453a)])
-def test_the_headset_s_battery_is_15_by_8_and_red_under_20(fw, row, level, fill):
-    from test_peq_page import rgb
-    bt_link(fw, 3, level, 0x240404)
-    fw.mock('canvas_get_vgcanvas', lambda *_: 1)
-    canvas = Canvas(fw)
-    canvas.art = {'oled_status_headphones_d': (14, 14)}
-    fw.fn('status_row__headset_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY)
-    assert rgb(fw.calls('vgcanvas_set_fill_color')[0][1][1]) == fill  # the level's fill, then the nub's grey
-    assert len(fw.calls('vgcanvas_stroke')) == 1  # the body's outline
 
 
 def jacks(fw, po=0, bal=0):
@@ -268,6 +257,19 @@ def test_the_slot_s_kind_repaints_the_row(fw, row):
     assert row.sync_sig() == 0
     bt_link(fw, 3, None, None, 0)
     assert row.sync_sig() == 1
+
+
+def test_a_headset_s_level_changing_repaints_nothing(fw, row):
+    """The rune alone stands for a headset (option A): its battery level moving changes nothing the row draws."""
+    files = bt_link(fw, 3, 72, 0x240404)
+    level = fw.fn('bt_headset_battery', C.c_int)
+    row.sync_sig()
+    assert row.sync_sig() == 0 and level() == 72
+    fw.var('g_backlight_status', C.c_ubyte).value = 1  # lit: the level asked again BATT_POLL_MS on
+    files.files['/tmp/q2-btbatt'] = f'{HEAD} 40 48000 {0x240404}\n'.encode()
+    fw.mock('time_now_ms', lambda *_: 100000 + 300000)
+    level()  # the run starts and ends; its answer read at the next look
+    assert level() == 40 and row.sync_sig() == 0
 
 
 def test_the_play_state_stands_on_the_digits_baseline_in_text_primary_playing_or_paused(fw, st, row):
@@ -428,10 +430,11 @@ def test_wifi_lights_arcs_by_its_bars_and_crosses_out_with_no_internet(fw, row, 
     assert names == [art] and canvas.images == [(x, CY - 7, WIFI_W, 14)]
 
 
-def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_ring(fw, row):
+def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_tray(fw, row):
     """The user's (2026-11-20): the arrows at 30 fps, a half turn a second as before. They ride ui_kit's one 33 ms loop
     timer (no timer of their own), their frame the clock's place in the half turn's second (SR_TURN_MS over SR_SPIN
-    frames), and each new frame repaints only their art's box; a download's ring does not turn."""
+    frames), and each new frame repaints only their art's box. A download (Download option A) is a 2 px tray, Text
+    Primary at 30% filled in Status Blue to its share, under an arrow falling onto it on the same loop and clock."""
     now = [10_000]
     fw.mock('time_now_ms', lambda *_: now[0])
     row.status = 0
@@ -455,9 +458,14 @@ def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_ring(fw, row):
     row.app(2, 250)
     fw.mock('canvas_get_vgcanvas', lambda *_: 1)
     canvas, names = row.paint()
-    assert names == ['oled_status_down_d'] and canvas.images == [(BODY - GAP - 16 + 4, CY - 4, 14, 14)]
-    assert len(fw.calls('vgcanvas_arc')) == 2 and len(fw.calls('vgcanvas_stroke')) == 2  # the track, then the fill
-    assert tick(None) == 7  # a download does not turn: the loop drops the arrows and, the last, ends
+    assert names == ['oled_status_drop_0_d'] and canvas.images == [(BODY - GAP - 14, CY - 7, 14, 14)]
+    assert not fw.calls('vgcanvas_arc') and len(fw.calls('vgcanvas_stroke')) == 2  # the tray, then its filled part
+    row.dirty.clear()
+    now[0] += 34
+    assert tick(None) == 8 and row.dirty == [(BODY - GAP - 14, 0, 14, 26)]  # the arrow's next frame, its box alone
+    assert row.paint()[1] == ['oled_status_drop_1_d']
+    row.app(0)
+    assert tick(None) == 7  # nothing to move: the loop drops the sync and, the last, ends
 
 
 def test_the_padlock_sits_where_buttons_lock_put_it(fw, row):
@@ -511,13 +519,13 @@ def test_a_tap_on_the_bars_opens_now_playing_after_the_dispatch(fw, row):
 
 CLOCK_W = 38  # test_nav_painters.StatusRow's widest clock, "00:00"
 LEFT_ROOM = 62 + CLOCK_W + 7  # the strip's left edge: CLOCK_BESIDE past the widest clock at the row's left
-ROOM = 214  # a room narrower than the crowd below, for the marquee's tests: 30 px short
+ROOM = 240  # a room narrower than the crowd below, for the marquee's tests: 30 px short
 OFFLINE_W = 14  # SR_OFFLINE: cloud-slash's 13.6 px of ink at 11 tall
 
 
 def crowd(fw, row, room=ROOM):
-    """Every slot shown: bars 10, Wi-Fi 16, a download's ring 16, a headset 33, the padlock 13 and the offline cloud
-    14, with their six gaps: 138 px left of the battery's body, 30 more than ROOM leaves; the strip's room then set
+    """Every slot shown: bars 10, Wi-Fi 16, a download 14, a headset's rune 9, the padlock 13 and the offline cloud
+    14, with their six gaps: 112 px left of the battery's body, 30 more than ROOM leaves; the strip's room then set
     to room."""
     row.wifi(3)
     row.app(2, 500)
@@ -526,7 +534,7 @@ def crowd(fw, row, room=ROOM):
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
     row.place()
     fw.fn('status_strip_room', None, C.c_int)(room)
-    return 10 + WIFI_W + 16 + 33 + 13 + OFFLINE_W + 6 * GAP
+    return 10 + WIFI_W + 14 + RUNE_W + 13 + OFFLINE_W + 6 * GAP
 
 
 def test_the_clock_at_the_row_s_left_leaves_every_glyph_room(fw, row):
@@ -792,7 +800,7 @@ def state(fw):
     (2, 0, None, None, None, 'wire', 'none', '-1'),  # a USB DAC
     (3, 0, None, None, None, 'other', 'none', '-1'),  # the car's USB audio
     (1, 0, 3, None, None, 'other', 'rune', '-1'),  # a headset linked that says no level
-    (1, 0, 3, 72, 0x240404, 'other', 'headset', '72'),  # one that says its level
+    (1, 0, 3, 72, 0x240404, 'other', 'rune', '-1'),  # one that says its level: the rune all the same
     (1, 0, 3, None, 0x200420, 'other', 'car', '-1'),  # a car
 ])
 def test_q2ui_is_told_where_the_sound_goes_and_what_bluetooth_links(fw, row, way, po, link, level, cls, out, bt, btbatt):

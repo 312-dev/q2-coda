@@ -32,15 +32,10 @@
 #define SR_CAR_W 19    /* tools/art.py STATUS_CAR_W: car-profile 11 px tall is 18.5 wide */
 #define SR_RUNE_W 9    /* tools/art.py STATUS_TALL_FIT: the Bluetooth rune 12 px tall is 8.4 wide */
 #define SR_LOCK 13     /* the padlock's box, tools/art.py STATE_PX */
-#define SR_RING 16     /* the download ring's box: a 14 px ring and its stroke */
+#define SR_DROP_W 14   /* a download's box: its arrow over its tray (tools/art.py status_drop) */
 #define SR_SPIN_W 12   /* the turning arrows' box: frame 0's ink, 12 of its SR_GLYPH art's 14 */
-#define SR_RING_R 7.0f /* its centre line's radius */
-#define SR_RING_LINE 1.6f
-#define SR_DOWN 8       /* the arrow inside it */
-#define SR_BT_GAP 2     /* the headphones glyph's box, then the headset's battery */
-#define SR_HS_BATT_W 15 /* the headset's battery: a 15x8 body (list_marks.c battery_slim) */
-#define SR_HS_BATT_H 8
-#define SR_HS_NUB 2 /* ... and its nub's columns past it */
+#define SR_UNLIT 77     /* the tray's unfilled part: its ink's alpha, tools/art.py STATUS_UNLIT 0.3 */
+#define SR_BT_GAP 2     /* round a guest's relay mark */
 #define SR_RELAY 8  /* a guest's relay mark between its phone and the Q2's device (tools/art.py) */
 #define SR_TAP_W 44 /* a slot's tap target round its centre, as the battery's */
 #define SR_TAP_H 40
@@ -139,7 +134,7 @@ static int wifi_shown(void) { return wifi_level() ? SR_WIFI_W : 0; }
  * into it (tools/art.py status_turn: 10 to 14 px of ink across the frames). */
 static int sync_shown(void) {
     int kind = addon_sync((int *)0);
-    return kind == 2 ? SR_RING : kind ? SR_SPIN_W : 0;
+    return kind == 2 ? SR_DROP_W : kind ? SR_SPIN_W : 0;
 }
 /* The Bluetooth slot (docs/oled-design.md#status-row, P9): what the link is, BT_SLOT_*. Stock's
  * link list's last item is the device it links (status 3 connected, as its rows read it); a link
@@ -149,7 +144,6 @@ enum {
     BT_SLOT_NONE,
     BT_SLOT_CONNECTING,
     BT_SLOT_RUNE,
-    BT_SLOT_HEADSET,
     BT_SLOT_CAR,
     BT_SLOT_GUEST
 };
@@ -164,8 +158,7 @@ static int bt_slot(void) {
     if (n > 0) getBtLinkItem(n - 1, &status, item);
     if (status != 3)
         return n > 0 && I(bt_connectstatus, 0) == 1 ? BT_SLOT_CONNECTING : BT_SLOT_NONE;
-    if (!tk_strcmp(bt_kind(bt_headset_class()), "car")) return BT_SLOT_CAR;
-    return bt_headset_battery() >= 0 ? BT_SLOT_HEADSET : BT_SLOT_RUNE;
+    return !tk_strcmp(bt_kind(bt_headset_class()), "car") ? BT_SLOT_CAR : BT_SLOT_RUNE;
 }
 /* A guest's: its phone, and while relayed to a Bluetooth device the mark and that device's glyph */
 static int guest_relayed(void) {
@@ -181,10 +174,7 @@ static int headset_shown(void) {
     int slot = bt_slot();
     if (slot == BT_SLOT_GUEST)
         return SR_GLYPH + (guest_relayed() ? SR_BT_GAP + SR_RELAY + SR_BT_GAP + linked_w() : 0);
-    return slot == BT_SLOT_NONE      ? 0
-           : slot == BT_SLOT_HEADSET ? SR_GLYPH + SR_BT_GAP + SR_HS_BATT_W + SR_HS_NUB
-           : slot == BT_SLOT_CAR     ? SR_CAR_W
-                                     : SR_RUNE_W;
+    return slot == BT_SLOT_NONE ? 0 : slot == BT_SLOT_CAR ? SR_CAR_W : SR_RUNE_W;
 }
 static int lock_shown(void) { return g_keylock_flag ? SR_LOCK : 0; }
 /* Wired headphones taking the sound: the player's output way 2, a USB DAC (USB-C headphones among
@@ -211,18 +201,19 @@ static int offline_shown(void) { return cloud_offline() ? SR_OFFLINE : 0; }
  * sound goes, the Bluetooth link, Buttons Lock, a card app's sync and the cloud's reach are demo's alone
  * today, so demo says them, by the same tests its own row paints from:
  *   out=wire|other  wired headphones take the sound, or not
- *   bt=none|connecting|rune|headset|car|guest, btbatt=N  the Bluetooth slot, a headset's level
+ *   bt=none|connecting|rune|car|guest, btbatt=-1  the Bluetooth slot; btbatt, a headset's level in the
+ *     file's form (docs/gate.md), is -1 here: the row draws a headset as the rune alone
  *   relay=none|headphones|car  where a guest's phone plays through the Q2, while one plays
   *   lock=0|1  sync=0|1|2 syncpm=N  offline=0|1  net=0|1 (0: Wi-Fi linked with no internet)
  *   clock24=0|1 tz=TZ  the clock's 24-hour setting and time zone (autozone.c autozone_tz; empty for none) */
 unsigned status_row_state(char *b, unsigned room) {
-    static const char *const bt[] = { "none", "connecting", "rune", "headset", "car", "guest" };
+    static const char *const bt[] = { "none", "connecting", "rune", "car", "guest" };
     int slot = bt_slot(), permille = 0, sync = addon_sync(&permille);
     const char *relay = slot != BT_SLOT_GUEST || !guest_relayed() ? "none" : linked_w() == SR_CAR_W ? "car" : "headphones";
     int n = tk_snprintf(b, room, "out=%s\nbt=%s\nbtbatt=%d\nrelay=%s\nlock=%d\nsync=%d\nsyncpm=%d\noffline=%d\nnet=%d\n"
                                  "clock24=%d\ntz=%s\n",
                         wired_on() ? "wire" : "other", bt[slot],
-                        slot == BT_SLOT_HEADSET ? bt_headset_battery() : -1, relay, !!g_keylock_flag, sync,
+                        -1, relay, !!g_keylock_flag, sync,
                         sync == 2 ? permille : 0, !!cloud_offline(), !wifi_offline(), !!g_time24h_flag, autozone_tz());
     return n < 0 ? 0 : (unsigned)n >= room ? room - 1 : (unsigned)n;
 }
@@ -310,43 +301,49 @@ static void wifi_paint(void *bar, void *canvas, int x, int cy) {
     status_art(bar, canvas, stem, x, cy);
 }
 
-/* A card app's sync: checking, the arrows turning in Text Secondary; downloading, a ring that fills
- * in Status Blue (the blue whatever the accent) from 12 o'clock clockwise with its arrow in it. */
+/* A card app's sync: checking, the arrows turning in Text Secondary; downloading (the review sheet's option A, a
+ * default the owner may revisit; docs/oled-design.md#status-row), a 12 x 2 tray on the box's rows 11 and 12 in Text
+ * Primary at SR_UNLIT, filled from the left in Status Blue (the blue whatever the accent) to the share downloaded, and
+ * over it the arrow falling onto it once a second (tools/art.py status_drop, frame sr.spin), as q2ui's ui/status.c
+ * drop. */
 static void sync_paint(void *bar, void *canvas, int x, int cy) {
     int permille = 0;
+    char stem[24];
     if (addon_sync(&permille) != 2) {
-        char stem[24];
         tk_snprintf(stem, sizeof stem, "status_sync_%d", sr.spin % SR_SPIN);
         glyph(bar, canvas, stem, x, SR_SPIN_W, cy, SR_GLYPH);
         return;
     }
     void *vg = canvas_get_vgcanvas(canvas);
     if (vg) {
-        int light = ipod_light();
-        float cx = (float)x + SR_RING / 2.0f, fy = (float)cy;
+        unsigned ink = ipod_light() ? RGB_PRIMARY_L : RGB_PRIMARY;
+        float done = 12 * (float)(permille < 0 ? 0 : permille > 1000 ? 1000 : permille) / 1000, fy = (float)cy + 5;
         vgcanvas_save(vg);
         vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
-        vgcanvas_set_line_width(vg, SR_RING_LINE);
+        vgcanvas_set_line_width(vg, 2);
+        vgcanvas_set_line_cap(vg, "round"); /* the caps make its 1 px corners */
         vgcanvas_begin_path(vg);
-        vgcanvas_arc(vg, cx, fy, SR_RING_R, 0, 6.2831853f, 0);
-        vgcanvas_set_stroke_color(vg, RGBA(light ? RGB_TRACK_L : RGB_TRACK));
+        vgcanvas_move_to(vg, (float)x + 2, fy);
+        vgcanvas_line_to(vg, (float)x + 12, fy);
+        vgcanvas_set_stroke_color(vg, (RGBA(ink) & 0x00ffffffu) | (unsigned)SR_UNLIT << 24);
         vgcanvas_stroke(vg);
         if (permille > 0) {
             vgcanvas_begin_path(vg);
-            vgcanvas_arc(vg, cx, fy, SR_RING_R, -1.5707963f,
-                         -1.5707963f + 6.2831853f * (float)permille / 1000, 0);
+            vgcanvas_move_to(vg, (float)x + 2, fy);
+            vgcanvas_line_to(vg, (float)x + 2 + (done > 2 ? done - 2 : 0.01f), fy);
             vgcanvas_set_stroke_color(vg, RGBA(RGB_STATUS_BLUE));
             vgcanvas_stroke(vg);
         }
         vgcanvas_restore(vg);
     }
-    glyph(bar, canvas, "status_down", x, SR_RING, cy, SR_DOWN);
+    tk_snprintf(stem, sizeof stem, "status_drop_%d", sr.spin % SR_SPIN);
+    status_art(bar, canvas, stem, x, cy);
 }
 
 /* The Bluetooth slot: a guest playing (Guest Play), its phone in Status Blue, and relayed to a car
  * or headset "› car"; else nothing while off or idle; the rune dim while a device connects and in
- * Text Primary once one is connected; a headset that reports its level, the headphones glyph and a
- * 15x8 battery, filled to the level and red under 20% as the status battery's; a car, its glyph. */
+ * Text Primary once one is connected, a headset's battery level or not (option A, 2026-11-28: the
+ * level is in Settings > Bluetooth); a car, its glyph. */
 static void headset_paint(void *bar, void *canvas, int x, int cy) {
     switch (bt_slot()) {
     case BT_SLOT_CONNECTING:
@@ -368,13 +365,6 @@ static void headset_paint(void *bar, void *canvas, int x, int cy) {
                        cy);
         }
         break;
-    case BT_SLOT_HEADSET: {
-        int level = bt_headset_battery();
-        glyph(bar, canvas, "status_headphones", x, SR_GLYPH, cy, SR_GLYPH);
-        battery_slim(bar, canvas, x + SR_GLYPH + SR_BT_GAP, cy - SR_HS_BATT_H / 2, SR_HS_BATT_W,
-                     SR_HS_BATT_H, (unsigned)(level > 100 ? 100 : level) << 4);
-        break;
-    }
     }
 }
 
@@ -561,13 +551,13 @@ void status_touch(unsigned type, int x, int y) {
         sr.nav = timer_add(np_due, (void *)0, 0);
 }
 
-/* Whether the arrows turn: an app checks. */
-static int moving(void) { return addon_sync((int *)0) == 1; }
-/* The shared loop's (ui_kit.c motion_loop), MO_LOOP_MS apart while lit and the arrows turn, as the
- * level bars' frames: their frame the clock's place in SR_TURN_MS, and only their art's box
- * repainted when it changed, a px either side of the slot's (ringnav_paint_bg paints it with the
- * bar's background under it); 0 (dropped) once they stop. A report of what the app does, so they
- * turn under Reduce Motion too. */
+/* Whether the sync's art moves: an app checks (the arrows turn) or downloads (its arrow falls). */
+static int moving(void) { return addon_sync((int *)0) != 0; }
+/* The shared loop's (ui_kit.c motion_loop), MO_LOOP_MS apart while lit and the sync's art moves, as
+ * the level bars' frames: their frame the clock's place in SR_TURN_MS, and only their art's box
+ * repainted when it changed, the arrows' a px either side of the slot's, a download's its own
+ * (ringnav_paint_bg paints it with the bar's background under it); 0 (dropped) once they stop. A
+ * report of what the app does, so they move under Reduce Motion too. */
 static int sr_spin_frame(void) {
     void *bar = *(void *const *)system_bar;
     if (!g_backlight_status || !bar || !moving()) return 0;
@@ -576,6 +566,7 @@ static int sr_spin_frame(void) {
     if (sr.w[SLOT_SYNC] && spin != sr.spin) {
         sr.spin = spin;
         rect_t r = { sr.x[SLOT_SYNC] - (SR_GLYPH - SR_SPIN_W) / 2, 0, SR_GLYPH, I(bar, W_H) };
+        if (sr.w[SLOT_SYNC] == SR_DROP_W) r.x = sr.x[SLOT_SYNC], r.w = SR_DROP_W;
         widget_invalidate_force(bar, &r);
     }
     return 1;
@@ -657,7 +648,7 @@ static int sr_strip_frame(void) {
  * the bars' loop while they move, the strip's marquee while it runs past its room (from rest when
  * it newly does), the arrows' loop while lit and they turn; 1 when what the slots show changed
  * (which slots, the play state, Wi-Fi's level or its internet, the sync's kind and its ring to the
- * 50th, wired headphones, the Bluetooth slot's kind and the headset's level, the
+ * 50th, wired headphones, the Bluetooth slot's kind, the
  * lock, a cloud service out of reach, the strip scrolling or not), so the bar repaints whole after the
  * frame. */
 int status_row_sync(void) {
@@ -672,14 +663,9 @@ int status_row_sync(void) {
         motion_loop(sr_strip_frame);
     }
     if (g_backlight_status && moving()) motion_loop(sr_spin_frame);
-    int permille = 0, kind = addon_sync(&permille), wifi = wifi_level(),
-        head = bt_headset_battery();
+    int permille = 0, kind = addon_sync(&permille), wifi = wifi_level();
     unsigned sig = (unsigned)bar_status() | (unsigned)(wifi && wifi_offline() ? 5 : wifi) << 3 |
                    (unsigned)kind << 6 | (unsigned)(kind == 2 ? permille / 20 : 0) << 8 |
-                   (unsigned)(head < 0     ? 127
-                              : head > 100 ? 100
-                                           : head)
-                       << 14 |
                    (unsigned)!!g_keylock_flag << 21 | 1u << 22 | (unsigned)bt_slot() << 23 |
                    (unsigned)cloud_offline() << 27 |
                    (unsigned)!!sr.over << 28 | (unsigned)wired_on() << 29;

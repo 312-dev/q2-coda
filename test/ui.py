@@ -2341,6 +2341,8 @@ def told(binary, work):
         png(icons/f'oled_{name}.png', w, 14, rgb)
     for f in range(30):  # the sync arrows' frames, a colour each
         png(icons/f'oled_status_sync_{f}_d.png', 14, 14, (10 + f * 8, 50, 50))
+    for f in range(30):  # a download's arrow's frames, a colour each, 10 rows tall to leave its tray (rows 11, 12) clear
+        png(icons/f'oled_status_drop_{f}_d.png', 14, 10, (50, 10 + f * 8, 50))
 
     def row(said, wifi=False):
         d = pathlib.Path(tempfile.mkdtemp(dir=work))
@@ -2367,15 +2369,17 @@ def told(binary, work):
                   rune.at(274, 22) == colour('status_bt_d') and dim.at(274, 22) == colour('status_btdim_d') and
                   rune.at(258, 22) == (0, 0, 0), f'{rune.at(274, 22)} {dim.at(274, 22)} {rune.at(258, 22)}')
     headset = row({'out': 'other', 'bt': 'headset', 'btbatt': 19})
-    good &= check("a headset that says its level: headphones, then its own battery, red under a fifth",
-                  headset.at(253, 22) == colour('status_headphones_d') and headset.at(265, 23) == (0xff, 0x45, 0x3a),
-                  f'{headset.at(253, 22)} {headset.at(265, 23)}')
+    good &= check("a headset that says its level is the rune alone (option A), no battery beside it",
+                  headset.at(274, 22) == colour('status_bt_d') and all(headset.at(x, 22) == (0, 0, 0) for x in range(240, 268)),
+                  f'{headset.at(274, 22)} {[x for x in range(240, 268) if headset.at(x, 22) != (0, 0, 0)]}')
     many = row({'out': 'other', 'sync': 2, 'syncpm': 500, 'lock': 1, 'offline': 1})
-    good &= check("a download's ring half filled clockwise from 12 o'clock, then the padlock, then the cloud",
-                  # the ring's 1.6 px line is mostly edge: its hue, not its whole colour
-                  many.at(278, 23)[2] > 120 > many.at(278, 23)[0] and len(set(many.at(264, 23))) == 1 and many.at(264, 23)[0] > 20 and
-                  many.at(250, 22) == colour('keylock_d') and many.at(231, 22) == colour('status_offline_d'),
-                  f'{many.at(278, 23)} {many.at(264, 23)} {many.at(250, 22)} {many.at(231, 22)}')
+    arrow = many.at(272, 20)
+    good &= check("a download (option A): its arrow over a 12 x 2 tray half filled in Status Blue from the left, the rest the "
+                  'ink at 30%; then the padlock, then the cloud',
+                  many.at(268, 27) == many.at(268, 28) == (0x21, 0x60, 0xd8) and many.at(276, 27) == many.at(276, 28) and many.at(276, 27) in ((76, 76, 76), (77, 77, 77)) and
+                  many.at(272, 29) == (0, 0, 0) and arrow[0] == arrow[2] == 50 and many.at(264, 27) == (0, 0, 0) and
+                  many.at(252, 22) == colour('keylock_d') and many.at(233, 22) == colour('status_offline_d'),
+                  f'{many.at(268, 27)} {many.at(276, 27)} {many.at(272, 29)} {arrow} {many.at(264, 27)} {many.at(252, 22)} {many.at(233, 22)}')
     crossed = row({'out': 'other', 'net': 0}, wifi=True)
     good &= check('Wi-Fi linked with no internet is the fan crossed out', crossed.at(271, 22) == colour('status_wifi_x_d'), str(crossed.at(271, 22)))
     # the arrows turn while a card app checks its server: a frame of theirs every 33 ms
@@ -2385,6 +2389,11 @@ def told(binary, work):
     _, pics, _ = script(binary, work, 5, lines, '--told', d/'told', '--icons', icons)
     frames = {pics[f's{k}'].at(306, 23) for k in range(6)}  # no battery here: the arrows end at the row's right, 313
     good &= check('the sync arrows turn, a frame of theirs every 33 ms', len(frames) >= 5, str(frames))
+    (d/'told').write_text('out=other\nsync=2\nsyncpm=500\n')
+    _, pics, _ = script(binary, work, 5, lines, '--told', d/'told', '--icons', icons)
+    frames = {pics[f's{k}'].at(306, 20) for k in range(6)}  # the arrow's box ends at the row's right too, 313
+    good &= check("a download's arrow falls, a frame of its every 33 ms", len(frames) >= 5, str(frames))
+    (d/'told').write_text('out=other\nsync=1\n')
     # and live, where only the loop's own wake-up moves them: both panel pages read, as a page is never at rest
     run = Run(binary, work, 5, '--told', d/'told', '--icons', icons, '--clock', '12:00')
     try:

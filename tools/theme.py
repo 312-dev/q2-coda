@@ -475,7 +475,7 @@ def accent_set(top):
 
 
 # The default accent (theme.xml's OLED_ACCENT default, oled-arterial: the ACCENTS row Arterial's top) and the
-# status row's glyphs that keep the blue whatever the accent (the sync download's ring, Guest Play's phone)
+# status row's glyphs that keep the blue whatever the accent (a download's tray, Guest Play's phone)
 DEFAULT_ACCENT = ACCENT_TONES[ACCENT_NAMES.index('arterial')][0]
 STATUS_BLUE = 0x2160d8
 
@@ -492,7 +492,7 @@ TOKENS = {'canvas': (0x000000, 0xffffff), 'primary': (0xffffff, 0x000000), 'seco
           # text in the accent (an action row's words, a link under a button), the default accent's (accent_set); q2ui
           # takes the chosen accent's (UI_ACCENTS) for this and caption_on_accent
           'accent_text': accent_set(DEFAULT_ACCENT)[1:3],
-          # the sync download's ring and Guest Play's phone in the status row: the blue they had before the accent
+          # a download's tray and Guest Play's phone in the status row: the blue they had before the accent
           # turned Arterial, kept whatever the accent (the owner's, 2026-11-27)
           'status_blue': (STATUS_BLUE, STATUS_BLUE)}
 

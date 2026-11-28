@@ -140,7 +140,7 @@ its glyphs' inks. A test fails on a colour literal equal to a token anywhere els
 | Accent         | `#B8141C` | Selection bar, progress fill, switch on, slider knob ring, big status glyphs | Arterial, the default; Blue `#2160D8` when chosen (the concept's bar `#1544B2` to `#225BCB`) |
 | Accent Pressed | `#C03038` | The selection bar while Centre is held ([Press](#selection-bar))             | The Accent 12% of the way to white                         |
 | Accent Text    | `#C84C50` | Words in the accent on black (an action row, a link); on white `#B8141C`     | The Accent lifted until 4.5:1 on black                     |
-| Status Blue    | `#2160D8` | The sync download's ring and Guest Play's phone in the status row, whatever the Accent | The blue they had before Arterial (the owner's, 2026-11-27) |
+| Status Blue    | `#2160D8` | A download's tray and Guest Play's phone in the status row, whatever the Accent | The blue they had before Arterial (the owner's, 2026-11-27) |
 | On Accent      | `#FFFFFF` | Text and chevrons on the selection bar                                       |                                                            |
 | Positive       | `#34C759` | "Connected" dots, charging, OK to Disconnect, a song added                    | Green dot on Bluetooth                                     |
 | Warning        | `#FF9F0A` | A charger too weak, Charge to Update                                         |                                                            |
@@ -272,9 +272,11 @@ All lists share one grid.
   - **Sync**, left of the glyph before it: while a card app checks its server or its metadata, Phosphor
     `arrows-clockwise` (bold) turning in Text Primary, 30 frames a second, a half turn a second (S1, the user's
     30 fps and white, 2026-11-20, `sync-heart-1120/sync-arrows-white.mp4`), its box its upright ink's 12 px so
-    the 6 px either side match the row's (turning, its corners pass up to 1 px nearer); while it downloads songs, a 14 px ring (1.6 px) in
-    `#333333` filling clockwise from 12 o'clock in Status Blue, Phosphor `arrow-down` (bold, 8 px, Text Primary) in
-    it (S2, `mock_sync_status.py`).
+    the 6 px either side match the row's (turning, its corners pass up to 1 px nearer); while it downloads songs, a 14 px box: a 12 x 2 tray on
+    its rows 11 and 12 in Text Primary at 30%, filling from the left in Status Blue to the share downloaded, and over it
+    an arrow (2 px stem, open head) falling 4 px onto it once a second, eased in and fading out over the last 30%, 30
+    frames a second (`tools/art.py` status_drop; the review sheet's Download option A, taken by default 2026-11-28,
+    the owner may revisit).
   - **Wired headphones**, left of the sync: Phosphor `headphones` (regular) in Text Primary, 12 px tall on rows 16 to
     27 as the battery's body (its ink 13.6 px wide), while the sound goes to a jack (3.5 mm or 4.4 mm) or a USB DAC
     (USB-C headphones among them) (the user's, 2026-11-25, `hpicon/mockup2.png`); nothing otherwise, with no output
@@ -282,9 +284,9 @@ All lists share one grid.
   - **Bluetooth** (P9 in `design/bt-redesign`), left of wired headphones: nothing while Bluetooth is off or nothing
     is connected, or while wired headphones take the sound (a jack plugged in over a linked headset plays there, and
     the row shows where the sound goes: one glyph, never both); Phosphor `bluetooth` (bold, 12 px tall on rows 16 to
-    27 as wired headphones, 8.4 px wide) in Text Tertiary while a device connects and in Text Primary once one is connected; a
-    headset that reports its level, `headphones` (bold) and a 15x8 battery 2 px after it, filled to the level as
-    the status battery's (red under 20%); a car, `car-profile` (bold, 18.5 px wide at 11 tall). While a guest plays
+    27 as wired headphones, 8.4 px wide) in Text Tertiary while a device connects and in Text Primary once one is connected,
+    a headset that reports its battery level too (option A, 2026-11-28: the level is on Settings > Bluetooth, and
+    the row stays short); a car, `car-profile` (bold, 18.5 px wide at 11 tall). While a guest plays
     ([Guest Play](#guest-play)), `device-mobile` (fill) in Status Blue, and while it is relayed to the Q2's
     Bluetooth device a `›` (8 px, Text Secondary) and that device's glyph.
   - **Buttons Lock**: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
@@ -296,7 +298,7 @@ All lists share one grid.
     says why. On Now Playing too (`mock_subsonic_offline.py`, the user's, 2026-11-19;
     [internals](internals.md#cloud-reach)).
 - **The strip.** The glyphs left of the battery have the room from 8 px past the widest clock, at the row's left, to
-  the battery (about 170 px: every slot at once with a headset's battery takes about 145). When they need more, that strip (never the battery) scrolls as a marquee: at rest its
+  the battery (about 170 px: every slot at once takes 112, or 148 with a guest relayed to a car). When they need more, that strip (never the battery) scrolls as a marquee: at rest its
   left end shows, the first glyph after the clock, for 2.75 s; then it slides left at 35 px/s until its right end
   meets the battery's 6 px, holds there 1.5 s and goes back, as Now Playing's lines do. Each end whose glyphs are cut
   fades over 6 px, the house marquee's 12 tightened: the right at rest, both while it slides, the left at its end.

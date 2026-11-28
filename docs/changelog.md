@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Look: a connected Bluetooth headset shows the Bluetooth symbol alone in the status row, instead of headphones and a small battery; its battery level is on Settings > Bluetooth.
+  - Look: while an app downloads, the status row shows an arrow dropping onto a small tray that fills in blue as it goes, instead of a ring with an arrow in it.
   - New UI (preview): turning the wheel scrolls a list smoothly at the speed of your finger, instead of in a small surge at each click; it still moves one row a click and stops on a row.
   - Look: Wi-Fi with no internet shows the Wi-Fi fan faint with a small x at its lower right, instead of a fan with an x across it.
   - New UI (preview): after it starts or reloads, the red cells in the selected row drift at once, as they do in any list you open, instead of standing still until the first press.
