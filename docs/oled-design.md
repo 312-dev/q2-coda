@@ -144,7 +144,7 @@ its glyphs' inks. A test fails on a colour literal equal to a token anywhere els
 | On Accent      | `#FFFFFF` | Text and chevrons on the selection bar                                       |                                                            |
 | Positive       | `#34C759` | "Connected" dots, charging, OK to Disconnect, a song added                    | Green dot on Bluetooth                                     |
 | Warning        | `#FF9F0A` | A charger too weak, Charge to Update                                         |                                                            |
-| Negative       | `#FF453A` | The low battery (under 20%), a failed step                                  |                                                            |
+| Negative       | `#FF453A` (Light `#D70015`) | The low battery (under 20%), a failed step                                  |                                                            |
 | Favorite       | `#FF375F` | Now Playing's heart while the song is liked (iOS's dark systemPink; not Negative, which means a failure) | the same in Light Mode |
 | Raised         | `#1C1C1E` | Toasts, cards, the modal's panel, keys                                       |                                                            |
 | Raised 2       | `#2C2C2E` | Pills and placeholders on a raised surface, a lifted row                     |                                                            |
@@ -979,11 +979,14 @@ as its callers move onto it.
   case, wrapped at words to the text column on as many lines as it needs (four at most), the card growing with it; a code (a pairing's "482
   913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
   column) and the answers, 32 px rows of Inter Regular 20 centered, stacked; 8 px of padding.
-- **Kinds:** destructive (Cancel, then the verb in Negative red; opens on Cancel), consequential
-  (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK). The lit
-  answer's bar is the accent, 8 px in from the card's sides, or Negative red on a destructive verb. Every kind's
+- **Kinds:** destructive (Cancel, then the verb in Negative red after an 18 px trash in Negative; opens on Cancel),
+  consequential (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK).
+  The lit answer's bar is the accent, 8 px in from the card's sides; on a destructive verb it is a neutral gray
+  platter (`#3A3A3C`, Light `#E5E5EA`) with the verb in Text Primary, the trash staying Negative, so red never fills a
+  row (the owner's danger-card ruling, 2026-11-28). The trash and verb are centred together and show the same lit or
+  not, so the verb never moves with the selection. Every kind's
   answers stand 32 px apart, with no gap before a destructive one, as Shut Down's (the user's, 2026-11-19).
-- **Red:** Negative `#FF453A`, the design's one red, not the mock's `#FF3B30` (iOS's light-mode red, darker on black).
+- **Red:** Negative `#FF453A`, the design's one red, not the mock's `#FF3B30` (iOS's light-mode red, darker on black). In Light Mode Negative is `#D70015` (iOS's high-contrast light red), 5.38:1 on the white card where `#FF453A` was 3.6:1.
 - **Input:** the wheel moves the bar; Center answers the lit row or flips the switch;
   Return answers the safe row; Play/Pause, Next and Previous do nothing while the card asks.
 - **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px

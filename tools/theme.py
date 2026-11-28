@@ -483,7 +483,9 @@ TOKENS = {'canvas': (0x000000, 0xffffff), 'primary': (0xffffff, 0x000000), 'seco
           'tertiary': (0x858585, 0x6e6e6e), 'chevron': (0x999999, 0x8a8a8a), 'track': (0x333333, 0xd9d9d9),
           'on_accent': (0xffffff, 0xffffff), 'caption_on_accent': (accent_set(DEFAULT_ACCENT)[3],) * 2,
           'raised': (0x1c1c1e, None), 'raised_2': (0x2c2c2e, None), 'off': (0x3a3a3c, None),
-          'positive': (0x34c759, 0x34c759), 'warning': (0xff9f0a, 0xff9f0a), 'negative': (0xff453a, 0xff453a),
+          'positive': (0x34c759, 0x34c759), 'warning': (0xff9f0a, 0xff9f0a), 'negative': (0xff453a, 0xd70015),
+          # Negative's light half is iOS's high-contrast light red, 5.38:1 on white: #FF453A was 3.6:1 there (the owner's
+          # danger-card ruling, 2026-11-28)
           # a song liked: Now Playing's heart filled (tools/art.py np_heart), iOS's dark systemPink, not Negative's red,
           # which means a failure; Light Mode keeps the hue (the user's, 2026-11-19)
           'favorite': (0xff375f, 0xff375f),

@@ -462,6 +462,7 @@ MODE_GLYPHS = {'phone': 'device-mobile-fill', 'check': 'arrows-clockwise-fill', 
 USB_ROW_PX = 19
 USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-hifi', 'debug': 'terminal-window'}
 USB_TOAST_PX = 15
+CARD_TRASH_PX = 18  # feedback.c CARD_TRASH
 PAIR_GLYPH_PX = 28  # the pairing card's phone, over its title (pair_prompt.c, feedback.c CARD_GLYPH)
 # adb's Allow this computer? (usb_ui.c auth_open): Phosphor laptop, regular, Text Primary per half, beside the card's
 # title (feedback.c AC_GLYPH) and in the status pill after Allow (vol_pill.c VP_MSG_GLYPH)
@@ -882,6 +883,9 @@ def images(t):
     # and the status row's relay mark (phone › car) in Text Secondary per half
     out[f'{prefix}_guestphone_a'] = phosphor('device-mobile-fill', USB_TOAST_PX, on)
     out[f'{prefix}_pairing_phone'] = phosphor('device-mobile', PAIR_GLYPH_PX, on)  # pair_prompt.c's card
+    # a destructive answer's trash before its verb on the confirmation card (feedback.c confirm_rows_paint), Negative per half
+    # whether the row is lit (on the gray platter) or not
+    out |= {f'{prefix}_cardtrash_{k}': phosphor('trash', CARD_TRASH_PX, c) for k, c in inks('negative', 'd', 'l').items()}
     out |= {f'{prefix}_adb{n}_{k}': phosphor('laptop', px, c) for n, px in (('card', ADB_CARD_PX), ('pill', ADB_PILL_PX))
             for k, c in inks('primary', 'd', 'l').items()}
     out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, token('status_blue'), STATUS_INK)  # the blue, whatever the accent
