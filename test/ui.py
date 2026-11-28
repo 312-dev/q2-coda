@@ -171,7 +171,7 @@ def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=
 class Run:
     """One live q2ui over a library of n songs, with its panel file, inputs and stats in a folder of its own."""
 
-    def __init__(self, binary, work, n, *options, at=None, fds=()):
+    def __init__(self, binary, work, n, *options, at=None, fds=(), stats=True):
         self.dir = at or folder(work, n)
         if not at:
             (self.dir/'input').mkdir()
@@ -179,7 +179,12 @@ class Run:
                 os.mkfifo(self.dir/'input'/f'event{k}')
             os.mkfifo(self.dir/'cmdq')
         self.queue = os.open(self.dir/'cmdq', os.O_RDWR | os.O_NONBLOCK)  # demo's end of the player's queue
-        self.proc = subprocess.Popen(base_args(binary, self.dir) + ['--input', self.dir/'input', *options], pass_fds=fds)
+        args = base_args(binary, self.dir)
+        self.stats_file = self.dir/'stats.json' if stats else pathlib.Path('/tmp/q2ui-stats.json')
+        if not stats:  # q2ui's own stats file, where it puts it with no --stats
+            k = args.index('--stats')
+            del args[k:k + 2]
+        self.proc = subprocess.Popen(args + ['--input', self.dir/'input', *options], pass_fds=fds)
         self.wheel = open(self.dir/'input/event3', 'wb', buffering=0)
         self.keys = open(self.dir/'input/event1', 'wb', buffering=0)
         self.touch = open(self.dir/'input/event2', 'wb', buffering=0)
@@ -197,7 +202,7 @@ class Run:
             time.sleep(gap)
 
     def stats(self):
-        return json.loads((self.dir/'stats.json').read_text())
+        return json.loads(self.stats_file.read_text())
 
     def wakes(self):
         """How often the program has been woken from a wait (its voluntary context switches)."""
@@ -3159,6 +3164,14 @@ def frame_log(binary, work):
                       'cost is its work less its pan',
                       len(pan) == len(work_us) and any(p > 0 for p in pan) and all(p <= w for p, w in zip(pan, work_us)),
                       f'{len(pan)} of {len(work_us)}; pan max {max(pan or [0])} us')
+        run.ticks(30, 0.05)  # a second and a half of motion: the once-a-second stats write lands between two frames
+        s = run.rest()
+        loop, fl = s.get('frame_log_loop_us', []), s.get('frame_log_flags', [])
+        second = [u for u, f in zip(loop, fl) if f & 64]  # FRAME_SECOND
+        good &= check("each frame logged has the loop's own work before it, and a frame after the once-a-second stats write is "
+                      'flagged so, with that write in its loop time',
+                      len(loop) == len(fl) > 0 and bool(second) and all(u > 0 for u in second),
+                      f'{len(loop)} of {len(fl)}; after the stats write {second[:6]} us')
         good &= check("a gap in the first turns after the start is counted apart (start_late), not as a motion's late frame",
                       isinstance(s.get('start_late'), int), str(s.get('start_late')))
         good &= check('each tick is timed to the first frame shown after it, inside a refresh or two on the host',
@@ -3240,6 +3253,37 @@ def wheel_scroll(binary, work):
     d = steps(trace)
     good &= check('a fast turn moves the rows one way only, and to whole rows', min(d) >= -0.01 and whole(trace, 32),
                   f'least step {min(d):.2f}, rest {trace[-1]["scroll"]}')
+    return good
+
+
+def stats_default(binary, work):
+    """With no --stats the stats file is on tmpfs (/tmp/q2ui-stats.json), never the internal flash: /mnt/data is UBIFS
+    mounted sync on a Q2, where a write each second wore it. A stats file a q2ui before left on /mnt/data, and its
+    half-written .new, are removed at the start: checked where /mnt/data can be written (a Q2, an emulator), not on a
+    host that has none."""
+    data, tmp = pathlib.Path('/mnt/data'), pathlib.Path('/tmp/q2ui-stats.json')
+    old = [data/'q2ui-stats.json', data/'q2ui-stats.json.new']
+    can = os.access(data, os.W_OK)
+    for f in old if can else ():
+        f.write_text('{}')
+    tmp.unlink(missing_ok=True)
+    run = Run(binary, work, 50, stats=False)
+    try:
+        run.ticks(30, 0.05)  # over a second of motion: the once-a-second write too, not only the start's and the rest's
+        time.sleep(1.5)
+        good = check('with no --stats, q2ui writes its stats to /tmp/q2ui-stats.json (tmpfs), live while the list moves',
+                     tmp.exists() and json.loads(tmp.read_text()).get('frames', 0) > 0, f'/tmp/q2ui-stats.json {tmp.exists()}')
+        if can:
+            left = sorted(p.name for p in data.iterdir() if p.name.startswith('q2ui-stats'))
+            good &= check('nothing of the stats under /mnt/data: the file and .new an earlier q2ui left there are removed at the start',
+                          not left, str(left))
+        else:
+            print('skip the stale /mnt/data stats file removal: no writable /mnt/data here')
+    finally:
+        run.end()
+        tmp.unlink(missing_ok=True)
+        for f in old if can else ():
+            f.unlink(missing_ok=True)
     return good
 
 
@@ -3594,6 +3638,7 @@ def main():
         if not only or 'live' in only:
             good &= live(binary, work)
             good &= live_stats(binary, work)
+            good &= stats_default(binary, work)
             good &= stats_rests(binary, work)
             good &= frame_log(binary, work)
             good &= lcd_site(binary, work)

@@ -258,7 +258,8 @@ def make_fixture(src, library=None):
 # state/data's files that are one run's own state, not settings or something the copy needs: removed at each fresh
 # lease. Everything else there stays: wpa_supplicant.conf and q2-defaults (boot and Wi-Fi), q2-battery, coda-rc (the
 # pool's stand-in), userequalizer and the logs; database.db is the library fixture's (reset_card).
-# ui-target and q2ui's files: a lease that chose q2ui as the UI (docs/ui-rewrite.md#cutover) must not choose it for the next
+# ui-target and q2ui's files (q2ui-stats.json: the stats file of a q2ui built before they went to /tmp): a lease that
+# chose q2ui as the UI (docs/ui-rewrite.md#cutover) must not choose it for the next
 DATA_PER_RUN = ('memoryfile', 'q2-state', 'q2-stall', 'q2-cf-trace', 'q2-library-scope', 'peq-active', 'ringnav-*',
                 'ui-target', 'q2ui.args', 'q2ui-stats.json')
 

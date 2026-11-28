@@ -333,6 +333,7 @@ struct ui_frame_rec {
     uint32_t glyph_max_us; /* the slowest of them */
     uint32_t faults;       /* major page faults since the frame before (a mapped font's pages read from flash) */
     uint32_t pan_us;       /* its pan ioctl's time, the refresh wait included: work_us less this is the frame's own */
+    uint32_t loop_us;      /* the loop's own work since the frame before: the watches' readers and the second's hook */
 };
 #define FRAME_MOVING 1  /* the frame asked for the next */
 #define FRAME_OVERLAP 2 /* the panel said the page this frame was turned onto was the one shown */
@@ -340,6 +341,7 @@ struct ui_frame_rec {
 #define FRAME_PAGE1 8   /* turned onto page 1 (else 0) */
 #define FRAME_INPUT 16  /* input came in for it */
 #define FRAME_SCANNED 32 /* its turn wrote into the page the display controller was reading (--lcd-site) */
+#define FRAME_SECOND 64  /* the once-a-second hook (ui_on_second: the stats file) ran since the frame before */
 extern struct ui_frame_rec *ui_frame_log;
 extern unsigned ui_frame_log_n, ui_frame_log_at; /* the log's length and the next slot, oldest first from there */
 extern double list_drawn_scroll;                 /* list.c: the scroll of the list drawn last (list_drawn: one was) */
