@@ -731,7 +731,9 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
     fb.write_bytes(bytes(320 * 375 * 4 * 2))
     inp = emu/'input'
     inp.mkdir(exist_ok=True)
-    for n in (1, 2, 3):  # the keys and the wheel, by the emulator's numbering (q2ui's input.c); 2, q2sysd's power key alone
+    # q2ui's keys, touch and wheel by the emulator's numbering (ui/input.c input_open: 1, 2, 3), and 4, a power key of
+    # q2sysd's alone: a FIFO has one reader's bytes, where a real device gives each reader every event
+    for n in (1, 2, 3, 4):
         if not (inp/f'event{n}').exists():
             os.mkfifo(inp/f'event{n}')
     import sqlite3
@@ -826,7 +828,7 @@ def boot(composed, qemu, keep=None, wait_s=90, logs=None, perturb=None, card=Fal
             got = sys_heat(fs, 'time')
             check(got == f'time zone={zone_want}', f"q2sysd: the zone config.ini saves, {zone_want} (docs/sysd.md#the-clock) ({got})")
         if not card and proc.poll() is None:
-            sysd_checks(fs, inp/'event2', emu/'record')
+            sysd_checks(fs, inp/'event4', emu/'record')
         if card:  # the services' first lines
             time.sleep(3)
     finally:
