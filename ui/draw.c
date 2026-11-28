@@ -66,6 +66,19 @@ void fill_alpha(rect_t r, uint32_t rgb, unsigned alpha) {
 
 #define EYE PX_EYE
 
+/* The living row's pixel (docs/oled-design.md#selection-bar): the cells' ink at the box's column for
+ * u (1/64 px from the box's middle) on a row of the mask (0: a row the mask does not reach), the
+ * gleam's white over it, dithered once. A cell only darkens the platter. */
+static inline uint32_t cells_at(const struct cells_paint *cp, const uint8_t *keep, int u, int hwq, unsigned white,
+                                unsigned noise) {
+    unsigned k = 255;
+    if (keep) {
+        int mx = (u + hwq) >> 6;
+        if (mx >= 0 && mx < cp->mask->w) k = keep[mx];
+    }
+    return cells_px(cp->ink, k, white > 65535 ? 65535 : white, noise);
+}
+
 /* A float to 1/64 px, rounded. */
 static inline int q6(float v) { return (int)(v * PX_ONE + (v < 0 ? -0.5f : 0.5f)); }
 
@@ -101,6 +114,9 @@ void fill_round(rectf_t r, float radius, float tilt, uint32_t rgb, float alpha, 
         const uint8_t *noise = dither64 + (y & 63) * 64;
         uint32_t *row = canvas + y * SCREEN_W;
         unsigned amid = (unsigned)(mid * whole) >> 8;
+        const struct cells_paint *cp = g ? g->cells : 0;
+        int my = cp ? (int)floorf(v + hh) : -1;
+        const uint8_t *keep = cp && my >= 0 && my < cp->mask->h ? cp->mask->keep + my * cp->mask->stride : 0;
         /* a column's place across the box, 1/64 px, is a straight line of the screen's */
         int u0 = q6(((float)c.x - cx) / s), x = c.x;
         for (int pass = 0; pass < 2; ++pass) {
@@ -115,11 +131,30 @@ void fill_round(rectf_t r, float radius, float tilt, uint32_t rgb, float alpha, 
                         row[x] = px_mix16(row[x], 0xffffff, (unsigned)(g->strength * k * k * 65535) * (unsigned)a >> 8, noise[x & 63]);
                     continue;
                 }
+                if (cp) {
+                    uint32_t ink = cells_at(cp, keep, u, hwq, 0, noise[x & 63]);
+                    row[x] = a >= 256 ? ink : px_mix(row[x], ink & 0xffffff, (unsigned)a);
+                    continue;
+                }
                 row[x] = a >= 256 ? 0xff000000 | rgb : px_mix(row[x], rgb, (unsigned)a);
             }
             if (pass) break;
             x = in0;
-            if (!shine) {
+            if (cp) { /* the living row: every pixel its own, the gleam's white over the cells' ink */
+                float gv = shine ? (v - g->gy) / g->ry : 0;
+                int gv2 = (int)(gv * gv * 16384), strength = shine ? (int)(g->strength * 65535) : 0;
+                for (; x < in1; ++x) {
+                    int u = (int)(((int64_t)(2 * (x - c.x) + 1) * inv) >> 11) + u0;
+                    unsigned white = 0;
+                    if (shine) {
+                        int gu = (int)(((float)u / PX_ONE - g->gx) / g->rx * 16384);
+                        int k = 16384 - ((gu >> 2) * (gu >> 2) >> 10) - gv2;
+                        white = k > 0 && gu > -32768 && gu < 32768 ? (unsigned)((k * k >> 14) * (strength >> 2) >> 12) : 0;
+                    }
+                    uint32_t ink = cells_at(cp, keep, u, hwq, white, noise[x & 63]);
+                    row[x] = amid >= 256 ? ink : px_mix(row[x], ink & 0xffffff, amid);
+                }
+            } else if (!shine) {
                 if (amid >= 256)
                     for (; x < in1; ++x) row[x] = 0xff000000 | rgb;
                 else

@@ -96,10 +96,17 @@ void fill_alpha(rect_t r, uint32_t rgb, unsigned alpha); /* alpha 0-255 */
 /* A rounded box at a sub-pixel place, its edge smoothed by how much of each pixel it covers,
  * blended onto whatever is there. tilt (radians) turns it about its horizontal middle line with a
  * little perspective, the top edge away from the eye when positive, as a tvOS card leans. */
+#include "cells.h"
+/* the living row's cells for fill_round (list.c): the mask, the box's size, and its ink */
+struct cells_paint {
+    const cells_t *mask;
+    const cells_ink_t *ink;
+};
 typedef struct {
     float gx, gy;   /* the gleam's centre from the box's, px */
     float rx, ry;   /* its radii */
     float strength; /* 0 to 1 of white at its centre; 0: none */
+    const struct cells_paint *cells; /* 0: none; else the box's fill is the cells' ink (cells_px) */
 } gleam_t;
 #define RGB_GLEAM_ONLY 0xff000000u /* fill_round's rgb for the gleam alone, over what is there */
 void fill_round(rectf_t r, float radius, float tilt, uint32_t rgb, float alpha, const gleam_t *g);
@@ -455,6 +462,7 @@ int list_lifted(const ui_list *l);
 void list_moved_row(ui_list *l, int from, int to);
 float list_scroll(const ui_list *l); /* px scrolled, for a test */
 extern int list_motion; /* 0: every move is at its end at once (a bench, Reduce Motion) */
+extern int list_living, list_living_fps; /* the living row: drawn; its frames a second at rest (list.c) */
 /* A page that is one list and nothing else. */
 extern const ui_page list_page;
 ui_list *list_page_list(void *st);
