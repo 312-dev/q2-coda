@@ -76,7 +76,7 @@ static struct {
           "/dev/fb0",
           "/dev/input",
           "/release/assets/default/raw/fonts",
-          "/mnt/data/q2ui-stats.json",
+          "/tmp/q2ui-stats.json", /* tmpfs: /mnt/data is the internal flash, UBIFS mounted sync */
           0,
           0,
           "home",
@@ -632,6 +632,10 @@ int main(int argc, char **argv) {
     uint64_t t0 = mono_us();
     parse_file("/mnt/data/q2ui.args");
     parse(argc - 1, argv + 1);
+    /* the stats file a q2ui once kept on the internal flash, and its half-written .new, not left there for good
+     * (unless --stats chose that place) */
+    if (strcmp(opt.stats, "/mnt/data/q2ui-stats.json"))
+        unlink("/mnt/data/q2ui-stats.json"), unlink("/mnt/data/q2ui-stats.json.new");
     snprintf(regular, sizeof regular, "%s/inter.ttf", opt.fonts);
     snprintf(medium, sizeof medium, "%s/inter-medium.ttf", opt.fonts);
     snprintf(fallback, sizeof fallback, "%s/default.ttf", opt.fonts);
