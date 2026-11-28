@@ -13,7 +13,8 @@
    the wheel's own events, the frame read back from the file, no frame and no wake at rest, Return ends it.
 
 Without the build's inputs (stb_truetype, stb_image and SQLite's header in the third-party cache, the host's SQLite)
-it prints why it is skipped and passes.
+it fails with one line naming what is missing, so a run that forgot them cannot pass unseen; with --allow-skip it
+prints why it is skipped and passes instead.
 """
 import json
 import os
@@ -2368,8 +2369,8 @@ def told(binary, work):
     good &= check('the Bluetooth rune stands by the battery with no output, the slots closing up, and dim while a device connects',
                   rune.at(274, 22) == colour('status_bt_d') and dim.at(274, 22) == colour('status_btdim_d') and
                   rune.at(258, 22) == (0, 0, 0), f'{rune.at(274, 22)} {dim.at(274, 22)} {rune.at(258, 22)}')
-    headset = row({'out': 'other', 'bt': 'headset', 'btbatt': 19})
-    good &= check("a headset that says its level is the rune alone (option A), no battery beside it",
+    headset = row({'out': 'other', 'bt': 'rune', 'btbatt': 19})
+    good &= check("a headset is the rune alone (option A): a level in the word draws no battery beside it",
                   headset.at(274, 22) == colour('status_bt_d') and all(headset.at(x, 22) == (0, 0, 0) for x in range(240, 268)),
                   f'{headset.at(274, 22)} {[x for x in range(240, 268) if headset.at(x, 22) != (0, 0, 0)]}')
     many = row({'out': 'other', 'sync': 2, 'syncpm': 500, 'lock': 1, 'offline': 1})
@@ -2895,7 +2896,8 @@ def told_text(out, bt, btbatt, wifi, bton, cable, vol):
 
 def api_status(binary, work):
     """The status row's states from Q2SYS/1, Q2BT/1 and Q2NET/1 (ui/api.c api_told) on Vamp OS: q2gate's file, byte for
-    byte, for a headset playing with a jack plugged and for Bluetooth off; a plug told by Q2SYS/1's watch asked again;
+    byte, for a headset playing with a jack plugged, Bluetooth off, on and idle, connecting, a car, and a headset linked
+    while the wire takes the sound; a plug told by Q2SYS/1's watch asked again;
     and the status row drawn from them as from demo's file of the same text."""
     good = True
     pages = {name: vamp_page(name) for name in ('system', 'bt', 'network')}
@@ -2908,14 +2910,22 @@ def api_status(binary, work):
         good &= check("The stand-in network's status has network.md's fields",
                       all(re.fullmatch(r, NET_HOME) for b in transcripts(pages['network']) for k, r in b
                           if k == '<~' and r.startswith('status ')), '')
-    cases = (('buds', BT_BUDS, told_text('other', 'headset', 80, 1, 1, 0, 40)),
-             ('off', BT_OFF, told_text('wire', 'none', -1, 1, 0, 0, 40)))
-    for name, bt_line, want in cases:
+    # the Bluetooth word by demo's rule (patch/status_row.c bt_slot) and q2gate's: none while off, on and idle, or the
+    # sound goes to the wire; connecting; a car; any other connected device the rune; btbatt always -1
+    idle = 'status power=1 state=on device= name= kind= codec= battery=-1 output=dac'
+    out = ['jack po=0 bal=0']  # the jack's first answer, and its second (after the watch) when none is plugged
+    cases = (('buds', BT_BUDS, told_text('other', 'rune', -1, 1, 1, 0, 40), ['jack po=1 bal=0']),
+             ('off', BT_OFF, told_text('wire', 'none', -1, 1, 0, 0, 40), ['jack po=1 bal=0']),
+             ('idle', idle, told_text('other', 'none', -1, 1, 1, 0, 40), out),
+             ('connecting', idle.replace('state=on', 'state=connecting'), told_text('other', 'connecting', -1, 1, 1, 0, 40), out),
+             ('car', BT_BUDS.replace('kind=headphones', 'kind=car'), told_text('other', 'car', -1, 1, 1, 0, 40), out),
+             ('wire', BT_BUDS.replace('output=bluetooth', 'output=dac'), told_text('wire', 'none', -1, 1, 1, 0, 40), ['jack po=1 bal=0']))
+    for name, bt_line, want, after in cases:
         held = {}
 
-        def start(d, bt_line=bt_line):
+        def start(d, bt_line=bt_line, after=after):
             (d/'vamp').mkdir()
-            held['sys'] = Service(d/'vamp/sys.sock', 'Q2SYS/1', {'caps': [SYS_CAPS], 'battery': [SYS_BATTERY], 'jack': [['jack po=0 bal=0'], ['jack po=1 bal=0']],
+            held['sys'] = Service(d/'vamp/sys.sock', 'Q2SYS/1', {'caps': [SYS_CAPS], 'battery': [SYS_BATTERY], 'jack': [out, after],
                                                                  'watch': ['ok', 'jack po 1']})
             held['bt'] = Service(d/'vamp/bt.sock', 'Q2BT/1', {'caps': [BT_CAPS], 'status': [bt_line]})
             held['net'] = Service(d/'vamp/net.sock', 'Q2NET/1', {'caps': [NET_CAPS], 'status': [NET_HOME]})
@@ -3521,10 +3531,13 @@ def main():
         if not ui.HOST_SQLITE.exists():
             raise SystemExit(f'no {ui.HOST_SQLITE}')
     except (SystemExit, OSError) as e:
-        print(f'skipped: q2ui cannot be built here ({e})')
-        return 0
+        if '--allow-skip' in sys.argv[1:]:
+            print(f'skipped: q2ui cannot be built here ({e})')
+            return 0
+        print(f'test/ui.py: q2ui cannot be built here, missing {e} (--allow-skip to pass without it)')
+        return 2
     binary, engine = ui.build('host'), ui.build('host', 'q2ui-test')
-    only = sys.argv[1:]
+    only = [a for a in sys.argv[1:] if a != '--allow-skip']
     good = True
     with tempfile.TemporaryDirectory() as work:
         if not only or 'engine' in only:

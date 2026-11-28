@@ -265,7 +265,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/tuner.py': [],  # Radio's receiver on a dropout, its restarts and the dial's click (tuner_core.c with fmrx.c), host cc
     'test/uac1_bind.py': 'needs a usb_f_uac1.ko, which only tools/uac1_module/uac1_build.py makes (a cross gcc and a kernel tree); run it by hand',
     'test/uac1_isoc.py': 'needs a usb_f_uac1.ko, which only tools/uac1_module/uac1_build.py makes (a cross gcc and a kernel tree); run it by hand',
-    'test/ui.py': [],  # q2ui built for this machine, a file for the panel; without the build's inputs it prints skip and passes
+    'test/ui.py': [],  # q2ui built for this machine, a file for the panel; without the build's inputs it fails, naming them
     'test/thirdparty.py': ['{build}', '{qemu_static}', '--offline'],  # its TLS checks need the network, which a gate does not
 }
 STOCKFS_CACHE = pathlib.Path(os.environ.get('Q2_STOCKFS', pathlib.Path.home()/'.cache/q2-stockfs'))
