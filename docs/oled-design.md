@@ -144,7 +144,7 @@ its glyphs' inks. A test fails on a colour literal equal to a token anywhere els
 | On Accent      | `#FFFFFF` | Text and chevrons on the selection bar                                       |                                                            |
 | Positive       | `#34C759` | "Connected" dots, charging, OK to Disconnect, a song added                    | Green dot on Bluetooth                                     |
 | Warning        | `#FF9F0A` | A charger too weak, Charge to Update                                         |                                                            |
-| Negative       | `#FF453A` | The low battery (under 20%), a failed step                                  |                                                            |
+| Negative       | `#FF453A` (Light `#D70015`) | The low battery (under 20%), a failed step                                  |                                                            |
 | Favorite       | `#FF375F` | Now Playing's heart while the song is liked (iOS's dark systemPink; not Negative, which means a failure) | the same in Light Mode |
 | Raised         | `#1C1C1E` | Toasts, cards, the modal's panel, keys                                       |                                                            |
 | Raised 2       | `#2C2C2E` | Pills and placeholders on a raised surface, a lifted row                     |                                                            |
@@ -979,11 +979,14 @@ as its callers move onto it.
   case, wrapped at words to the text column on as many lines as it needs (four at most), the card growing with it; a code (a pairing's "482
   913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
   column) and the answers, 32 px rows of Inter Regular 20 centered, stacked; 8 px of padding.
-- **Kinds:** destructive (Cancel, then the verb in Negative red; opens on Cancel), consequential
-  (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK). The lit
-  answer's bar is the accent, 8 px in from the card's sides, or Negative red on a destructive verb. Every kind's
+- **Kinds:** destructive (Cancel, then the verb in Negative red after an 18 px trash in Negative; opens on Cancel),
+  consequential (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK).
+  The lit answer's bar is the accent, 8 px in from the card's sides; on a destructive verb it is a neutral gray
+  platter (`#3A3A3C`, Light `#E5E5EA`) with the verb in Text Primary, the trash staying Negative, so red never fills a
+  row (the owner's danger-card ruling, 2026-11-28). The trash and verb are centred together and show the same lit or
+  not, so the verb never moves with the selection. Every kind's
   answers stand 32 px apart, with no gap before a destructive one, as Shut Down's (the user's, 2026-11-19).
-- **Red:** Negative `#FF453A`, the design's one red, not the mock's `#FF3B30` (iOS's light-mode red, darker on black).
+- **Red:** Negative `#FF453A`, the design's one red, not the mock's `#FF3B30` (iOS's light-mode red, darker on black). In Light Mode Negative is `#D70015` (iOS's high-contrast light red), 5.38:1 on the white card where `#FF453A` was 3.6:1.
 - **Input:** the wheel moves the bar; Center answers the lit row or flips the switch;
   Return answers the safe row; Play/Pause, Next and Previous do nothing while the card asks.
 - **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
@@ -1612,7 +1615,8 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start (white in Light Mode, where the
   fill is dark). Volume ends at y 248, the toggles block's foot.
 - <a id="cc-usb-row"></a>**USB row** (approved 2026-11-17 from `design/usb-row` `mock_usb_row.py`), only while a cable is
-  in: 335 x 38 from (20, 258), 10 px under the blocks, fully round as the sliders, in the block's color: Phosphor's
+  in: 319 x 38 from (28, 258), 10 px under the blocks, its ends 8 px in from theirs so that it, its ring and the landing's
+  overshoot stay inside the glass's bottom corners ([Corners](#corners); the owner's, 2026-11-28: it ran off the rounded edge), fully round as the sliders, in the block's color: Phosphor's
   `usb` (fill, 20 px, Text Primary) centered 22 px in, "USB" in Inter Medium 15 from 40 px in, the remembered choice
   (Automatic, Transfer Files, USB Audio, Charge Only, Ask Every Time, USB Debugging) in 15 px Text Secondary ending 30 px from its
   end, and a 13 px bold `caret-right` in the chevron's gray centered 18 px from it. The wheel's ring round it is the
@@ -1637,7 +1641,12 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
 - **Coming and going** (the owner's, 2026-11-27: it comes down from the top, never in from the side): a finger pulled
   down from the top edge holds the sheet's foot under it as it moves (an interactive transition), and let go the sheet
   settles open, or back up when let go less than a third of the way down unless flung down (faster than 300 px/s; a
-  fling up closes it from anywhere). Return held drops it from the top; Return or a swipe up sends it back up. Each
+  fling up closes it from anywhere). Open, a finger dragged up or down anywhere on it (the owner's, 2026-11-28: "move
+  WITH finger up and down and have a trigger point to collapse") holds its foot as far above the screen's foot as the
+  finger has gone up once it has gone 10 px up or down, even after going sideways first (a thumb from the screen's
+  foot does), in the frame that takes each move, and let go the sheet goes back up past a third of the way up or
+  flung up, else it settles open again: the pull's rule from the other side. A slider dragged across is still a slider.
+  Return held drops it from the top; Return sends it back up. Each
   settle is cubic out, 260 ms over the whole screen and its share of that for less; under Reduce Motion it stands
   or goes at once, and a finger still pulls it. The page under it stays as it was.
 - **Now Playing block**: a tap anywhere on it but the transport, or Center on it, closes the page and opens Now

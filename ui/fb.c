@@ -42,6 +42,9 @@ static int fd = -1, shown, can_wait = 1;
 static unsigned refresh_us = 16667;
 static uint64_t paced_ns;
 uint64_t fb_panned_us; /* when the last frame was panned to: its work ended there (ui.c) */
+/* the last frame's pan ioctl and its wait for the refresh after it, apart (ui.c account: the stats' pan_us and
+ * vsync_wait_us, to tell a pan that waits for the panel from work that runs long) */
+uint64_t fb_pan_us, fb_wait_us;
 static uint32_t *pages;
 static struct fb_var_screeninfo var;
 static struct damage {
@@ -118,14 +121,22 @@ void fb_close(void) {
 /* c with noise n (0-255) scaled to one step of the panel's depth added to each channel, held at
  * white, and the bits the link drops cleared */
 unsigned px_bits_rb = 8, px_bits_g = 8; /* red and blue's bits, and green's: a 565 panel gives green one more */
+/* What narrow() adds and keeps for the panel's depth, worked out once a turn rather than a pixel
+ * (px_bits_* are globals the page's stores could alias, so the compiler cannot hoist them). */
+struct levels {
+    uint32_t half_rb, half_g, keep_rb, keep_g;
+};
+static struct levels levels(void) {
+    uint32_t keep_rb = (0xffu << (8 - px_bits_rb)) & 0xff, keep_g = (0xffu << (8 - px_bits_g)) & 0xff;
+    return (struct levels){ (0x80u >> px_bits_rb) * 0x10001u, (0x80u >> px_bits_g) << 8, keep_rb * 0x10001u, keep_g << 8 };
+}
 /* c at the nearest level the panel has for each channel: half a step added, held at white, the bits
  * the panel drops cleared. No noise: see the note at the top. */
-static inline uint32_t narrow(uint32_t c) {
-    uint32_t keep_rb = (0xffu << (8 - px_bits_rb)) & 0xff, keep_g = (0xffu << (8 - px_bits_g)) & 0xff;
-    uint32_t rb = (c & 0xff00ff) + (0x80u >> px_bits_rb) * 0x10001u, g = (c & 0xff00) + ((0x80u >> px_bits_g) << 8);
+static inline uint32_t narrow(uint32_t c, struct levels l) {
+    uint32_t rb = (c & 0xff00ff) + l.half_rb, g = (c & 0xff00) + l.half_g;
     uint32_t orb = rb & 0x1000100u, og = g & 0x10000u;
-    rb = (rb | (orb - (orb >> 8))) & (keep_rb * 0x10001u);
-    g = (g | (og - (og >> 8))) & (keep_g << 8);
+    rb = (rb | (orb - (orb >> 8))) & l.keep_rb;
+    g = (g | (og - (og >> 8))) & l.keep_g;
     return 0xff000000 | rb | g;
 }
 /* Night Shift (docs/internals.md#night-shift, demo's patch/nightshift.c): while on, each pixel turned to the panel
@@ -148,34 +159,33 @@ void fb_depth(int bits) {
     fb_bits = bits == 5 || bits == 6 || bits == 565 ? bits : 8;
     px_bits_rb = fb_bits == 565 ? 5 : (unsigned)fb_bits, px_bits_g = fb_bits == 565 ? 6 : (unsigned)fb_bits;
 }
-static unsigned turn_narrow(uint32_t *page, rect_t r) {
-    for (int y = r.y; y < r.y + r.h; ++y) {
-        const uint32_t *src = canvas + y * SCREEN_W + r.x;
-        uint32_t *dst = page + r.x * PAGE_W + (PAGE_W - 1 - y);
-        if (warming)
-            for (int i = 0; i < r.w; ++i, dst += PAGE_W) *dst = narrow(warm(src[i]));
-        else
-            for (int i = 0; i < r.w; ++i, dst += PAGE_W) *dst = narrow(src[i]);
-    }
-    return (unsigned)(r.w * r.h);
+/* What the turn does to each pixel: COPY on an 8-bit panel, NARROW to fewer bits, WARM then NARROW
+ * under Night Shift (which an 8-bit panel narrows too: to its own 8 bits, a no-op on the levels). */
+enum { COPY, NARROW, WARM };
+static inline __attribute__((always_inline)) uint32_t turned(uint32_t c, int how, struct levels l) {
+    return how == COPY ? c : how == NARROW ? narrow(c, l) : narrow(warm(c), l);
 }
-
-/* r of the canvas onto page: canvas (x, y) to page (319 - y, x), BAND rows at a time */
-static unsigned turn(uint32_t *page, rect_t r) {
-    if (fb_bits != 8 || warming) return turn_narrow(page, r);
+/* r of the canvas onto page: canvas (x, y) to page (319 - y, x), BAND rows at a time. Inlined once
+ * for each `how`, so the pixel loop carries no test. */
+static inline __attribute__((always_inline)) unsigned turn_as(uint32_t *page, rect_t r, int how) {
+    struct levels l = levels();
     int y = r.y;
     for (; y + BAND <= r.y + r.h; y += BAND) {
         const uint32_t *src = canvas + y * SCREEN_W + r.x;
         uint32_t *dst = page + r.x * PAGE_W + (PAGE_W - BAND - y);
         for (int i = 0; i < r.w; ++i, ++src, dst += PAGE_W)
-            for (int k = 0; k < BAND; ++k) dst[k] = src[(BAND - 1 - k) * SCREEN_W];
+            for (int k = 0; k < BAND; ++k) dst[k] = turned(src[(BAND - 1 - k) * SCREEN_W], how, l);
     }
     for (; y < r.y + r.h; ++y) {
         const uint32_t *src = canvas + y * SCREEN_W + r.x;
         uint32_t *dst = page + r.x * PAGE_W + (PAGE_W - 1 - y);
-        for (int i = 0; i < r.w; ++i, dst += PAGE_W) *dst = src[i];
+        for (int i = 0; i < r.w; ++i, dst += PAGE_W) *dst = turned(src[i], how, l);
     }
     return (unsigned)(r.w * r.h);
+}
+static unsigned turn(uint32_t *page, rect_t r) {
+    if (warming) return turn_as(page, r, WARM);
+    return fb_bits == 8 ? turn_as(page, r, COPY) : turn_as(page, r, NARROW);
 }
 
 unsigned fb_present(void) {
@@ -187,8 +197,10 @@ unsigned fb_present(void) {
     for (int i = 0; i < last.n; ++i) add(&both, last.r[i]);
     for (int i = 0; i < both.n; ++i) px += turn(page, both.r[i]);
     var.yoffset = (unsigned)(hidden * PAGE_H);
+    uint64_t pan_at = mono_us();
     ioctl(fd, FBIOPAN_DISPLAY, &var);
     fb_panned_us = mono_us();
+    fb_pan_us = fb_panned_us - pan_at, fb_wait_us = 0;
     if (fb_vsync) {
         uint32_t crtc = 0;
         if (can_wait && ioctl(fd, FBIO_WAITFORVSYNC, &crtc) < 0) can_wait = 0;
@@ -204,6 +216,7 @@ unsigned fb_present(void) {
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, 0);
         }
     }
+    if (fb_vsync) fb_wait_us = mono_us() - fb_panned_us;
     shown = hidden;
     last = now;
     now.n = 0;

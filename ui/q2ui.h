@@ -272,6 +272,7 @@ extern int ui_reduce_motion;
 extern int ui_painting; /* 1 while a frame is drawn: marks and state changes are refused */
 int ui_run(void);       /* the loop, until ui_quit; the exit code */
 void ui_on_rest(void (*fn)(void));       /* called once each time the loop comes to rest */
+void ui_on_second(void (*fn)(void));     /* called at most once a second while the loop runs (frames or input) */
 void ui_on_stack(void (*fn)(void));      /* called when a page has opened or closed */
 void ui_on_hold(int key, void (*fn)(void)); /* a key held, on any page, is fn's and not the page's (Return: Control Center) */
 void ui_on_pull(void (*fn)(const input_t *e)); /* a finger pulled down from the screen's top edge, on any page: the
@@ -284,7 +285,7 @@ extern void (*ui_clicker)(int button);
 void ui_watch(int fd, void (*fn)(void)); /* fn when fd is readable (a daemon's message); sixteen at most */
 void ui_unwatch(int fd);                 /* fd is no longer waited on (a connection that ended) */
 extern const char *ui_backlight;         /* the folder of backlights whose state says the screen is dark */
-int ui_dark(void);                       /* the screen is dark (demo's backlight is off) */
+int ui_dark(void);                       /* the screen is dark: Q2SYS/1's word, demo's dark=, else the backlight's */
 /* One pass by hand, for the bench and a script: events, the step at the frame's time, the draw,
  * the frame. Returns whether a frame went out. */
 int ui_frame(const input_t *in, int n);
@@ -297,6 +298,8 @@ struct ui_stats {
     unsigned hist[8];                       /* work time: under 1, 2, 4, 8, 12, 16.7, 33 ms, more */
     unsigned streak, streak_max;            /* frames shown back to back, each a refresh after the last */
     unsigned deferred;                      /* glyphs a frame left for the next to make */
+    uint64_t pan_us, pan_max_us, wait_us;   /* the pan ioctl's time, inside work_us, and the wait for the refresh after it */
+    unsigned gap_hist[5]; /* a motion's frames by the time since the one before: 1, 2, 3, 4 to 6 refreshes, more */
 };
 extern struct ui_stats ui_stats;
 void ui_stats_reset(void);
@@ -328,6 +331,8 @@ int notice_event(const input_t *e); /* 1: the card took it */
 void notice_step(void);
 void notice_draw(rect_t r);         /* over the page and the status row */
 void notice_toast(const char *text); /* q2ui's own toast, queued as a connection's */
+int notice_ask_local(const char *title, const char *body, const char *const *choices, int n, int initial, int danger,
+                     void (*done)(int n)); /* q2ui's own question: done told the choice from 1, 0 none; -1 full */
 int notice_up(void);                /* a question is on the card */
 int notice_trace(char *out, size_t room); /* "notice card=ID lit=N level=X toast=on|leaving|- waiting=N"; 0 with none up */
 void notice_stats(char *out, size_t room); /* the stats file's "card", "card_from", "toast", "toasts_waiting" */
@@ -345,6 +350,7 @@ long status_time(void);           /* the time the clock reads */
 /* where the battery, Wi-Fi's state and its signal are read (a test's are its own files) */
 extern const char *status_power, *status_wifi, *status_wireless, *status_told;
 void status_told_changed(void); /* demo's file of the states only it knows changed (now.c's watch) */
+const char *status_told_text(void); /* those states' text, the file's or on Vamp OS the services' */
 int status_told_value(const char *key, char *out, size_t room); /* demo's word on key; 0 when it said nothing */
 int status_wifi_bars(void); /* the link as the row draws it: 0 not joined, 1 to 3 its fan's lit parts, 4 joined with no internet */
 
@@ -525,6 +531,22 @@ extern const char *art_dir;
 extern int art_sync; /* read in place, not by the worker: a script's, so its pictures repeat */
 unsigned now_cover_seq(void);
 extern const char *now_file, *now_cover_file;
+
+/* ---- api.c: Vamp API 1's services, on Vamp OS (--api auto|demo) ---- */
+extern const char *api_dir, *api_choice; /* the services' folder (/run/vamp); auto, demo or vamp */
+extern int api_vamp;                     /* 1: the services are spoken to, 0: demo's pipe and files */
+void api_open(void);
+int api_field(const char *line, const char *key, char *out, size_t room); /* key=VALUE, percent-decoded; 0 absent */
+int api_play_has(const char *word);                   /* Q2PLAY/1's caps name the word */
+int api_play_send(const char *verb);                  /* a verb to Q2PLAY/1; 0 sent */
+int api_play_list(const char *head, const int *ids, int n); /* play or queue and its N id lines; 0 sent */
+int api_now_overlay(ui_now *n);                       /* Q2PLAY/1's now over the file's; 1 when it said one */
+int api_play_live(void);                              /* connected to Q2PLAY/1 */
+void api_wait(unsigned ms);                           /* a script's wait for every answer, up to ms */
+int api_screen_dark(void);            /* Q2SYS/1's screen: 1 dark, 0 lit, -1 no word (off Vamp OS) */
+int api_sys_send(const char *verb);   /* a command to Q2SYS/1 (`screen on`); 0 sent */
+int api_screen(int on);               /* Q2SYS/1 `screen on` or `screen off`; 0 sent, -1 off Vamp OS */
+int api_told(char *out, size_t room); /* the status row's states from Q2SYS/1, Q2BT/1 and Q2NET/1 as /tmp/q2ui.status has them; 0 off Vamp OS */
 
 /* ---- player.c: the player, through demo while demo owns it ---- */
 int player_play(const int *ids, int n, int at, int shuffle); /* the list, starting at its song `at`; 0 sent */

@@ -11,7 +11,7 @@
  * patch/ratings.c rate_now_like; the heart drawn is the like, not the stars); STAGE_US without a key, or Return, ends
  * either. Centre held NP_HOLD_US (short of More's hold) with no scrub, or pressed again within DOUBLE_US
  * of the release that started a scrub with the wheel still, ends the cycle unseeked and turns the screen
- * off, as demo's does ("screenoff" down demo's pipe). Play and pause are the Play/Pause key's, which stays demo's. While the volume changes, by
+ * off, as demo's does (Q2SYS/1 `screen off` on Vamp OS, else "screenoff" down demo's pipe). Play and pause are the Play/Pause key's, which stays demo's. While the volume changes, by
  * the wheel here or the side buttons, its level takes the bar's place for VOLUME_SHOW_US, white on
  * the same track, and the times stand aside (demo shows its own volume window then, which q2ui's
  * page is over). The cover is a card of layers (docs/ui-rewrite.md#cards): it lifts as the page
@@ -222,7 +222,7 @@ static void n_event(void *st, const input_t *e) {
             /* np_cancel, unseeked (a double's wheel never turned), then np_single: the screen off, as demo's */
             s->scrub = 0, s->scrub_moved = 0;
             stage_set(s, STAGE_REST);
-            player_line("screenoff", 0);
+            if (api_screen(0)) player_line("screenoff", 0); /* q2sysd's on Vamp OS, else demo's */
         } else {
             int was = s->scrub;
             centre(s);

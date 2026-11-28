@@ -82,6 +82,7 @@ void config_read(void) {
     int reduce = config_motion_forced || motion_setting;
     if (reduce != ui_reduce_motion) ui_reduce_motion = reduce, ui_mark_all();
     config_light_now();
+    if (api_vamp) status_told_changed(); /* the status states take Brightness, Max Volume and the rest from here */
 }
 
 static void changed(void) {

@@ -251,6 +251,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/q2bip.py': [],  # q2-bip on the host: a controller over a UNIX packet socket, a real ffmpeg, the L2CAP socket
     'test/q2eq.py': [],
     'test/q2update.py': [],
+    'test/q2vampos.py': [],  # the card boot's hand-off; its FUSE tests skip without /dev/fuse, qemu-mipsel and the binary
     'test/radiofetch.py': [],  # recorded answers from a local server; --live (the real services) is by hand
     'test/release.py': [],
     'test/remote.py': [],

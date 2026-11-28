@@ -55,15 +55,19 @@ static struct {
     float at; /* 0 to 1 */
 } slide;
 extern uint64_t fb_panned_us; /* fb.c: when the last frame's pan was made */
+extern uint64_t fb_pan_us, fb_wait_us; /* fb.c: the last pan ioctl's time and the refresh wait after it */
 
 static void (*rest_hook)(void), (*stack_hook)(void);
 void ui_on_rest(void (*fn)(void)) { rest_hook = fn; }
+static void (*second_hook)(void);
+void ui_on_second(void (*fn)(void)) { second_hook = fn; }
 static int hold_key;
 static void (*hold_fn)(void);
 void ui_on_hold(int key, void (*fn)(void)) { hold_key = key, hold_fn = fn; }
 /* A finger that lands above PULL_Y and goes PULL_PX down: pull_fn, on every page (stock's pull-down,
  * on_wm_tsmove_fun: g_pressdown_y under 31, 20 px down), given the move that crossed and every event
- * of that touch after it, its lift too, so what it opens can follow the finger; no page sees them. */
+ * of that touch after it, its lift too, so what it opens can follow the finger; no page sees them. The page that
+ * had the touch until then is given an IN_TOUCH_UP of value 1: the touch is over for it, and it is no tap. */
 #define PULL_Y 31
 #define PULL_PX 20
 static void (*pull_fn)(const input_t *e);
@@ -75,6 +79,10 @@ static int pulled(const input_t *e) {
     if (e->type == IN_TOUCH_DOWN) pull.y0 = e->y, pull.pulled = 0;
     if (e->type < IN_TOUCH_DOWN) return 0;
     if (!pull.pulled && !(e->type == IN_TOUCH_MOVE && pull_fn && pull.y0 < PULL_Y && e->y - pull.y0 >= PULL_PX)) return 0;
+    if (!pull.pulled && depth && stack[depth - 1].page->event) { /* the page had the touch until now: it ends, no tap */
+        input_t gone = { IN_TOUCH_UP, 1, 0, e->ms, e->x, e->y };
+        stack[depth - 1].page->event(stack[depth - 1].st, &gone);
+    }
     pull.pulled = e->type != IN_TOUCH_UP;
     pull_fn(e);
     return 1;
@@ -260,11 +268,14 @@ static void account(uint64_t start_us, uint64_t draw_ns, uint64_t show_ns, unsig
     if (draw_ns > s->draw_max_ns && s->frames > 2) s->draw_max_ns = draw_ns;
     if (work > s->work_max_us && s->frames > 2) s->work_max_us = work;
     if (work > refresh) ++s->over_budget;
+    s->pan_us += fb_pan_us, s->wait_us += fb_wait_us;
+    if (fb_pan_us > s->pan_max_us && s->frames > 2) s->pan_max_us = fb_pan_us;
     if (s->frames > 2 && (draw_ns + show_ns) / 1000u > refresh) ++s->cpu_over;
     /* a frame of a motion follows the last by one refresh; one that took a refresh and a half or
      * more missed that many refreshes */
     if (last_moving && last_shown_us && fb_vsync) {
-        uint64_t gap = mono_us() - last_shown_us;
+        uint64_t gap = mono_us() - last_shown_us, k = (gap + refresh / 2) / refresh;
+        ++s->gap_hist[k <= 1 ? 0 : k == 2 ? 1 : k == 3 ? 2 : k <= 6 ? 3 : 4];
         if (gap >= refresh * 3 / 2) {
             s->dropped += (unsigned)((gap + refresh / 2) / refresh) - 1, ++s->late;
             s->streak = 0;
@@ -336,14 +347,21 @@ int ui_frame(const input_t *in, int n) {
 }
 
 
-/* Whether the screen is dark: demo turns the backlight off after its idle time and on at the
- * next press, which is then a wake and nothing else (docs/internals.md#screen-off-and-wake). q2ui
- * reads the same keys, so it drops what arrives while the light is off. No backlight to read (a
- * host run, the emulator) is a lit screen. */
+/* Whether the screen is dark: demo, or q2sysd on Vamp OS, turns the light off after its idle time and
+ * on at the next press, which is then a wake and nothing else (docs/internals.md#screen-off-and-wake).
+ * q2ui reads the same keys, so it drops what arrives while the light is off. The Q2 has no
+ * backlight class device (its light is stock's PWM on /dev/jz_pwm), so the word is the light's
+ * owner's: Q2SYS/1's screen events on Vamp OS (ui/api.c), demo's dark= in its status file
+ * (patch/q2ui_gate.c tell). Where neither says, a backlight device's bl_power and brightness; none
+ * of the three (a host run, the emulator) is a lit screen. */
 const char *ui_backlight = "/sys/class/backlight";
 int ui_dark(void) {
     static char power[160], level[160];
     static int found = -1;
+    int said = api_screen_dark();
+    if (said >= 0) return said;
+    char word[8];
+    if (status_told_value("dark", word, sizeof word)) return atoi(word) != 0;
     if (found < 0) {
         found = 0;
         char cmd[200];
@@ -395,7 +413,7 @@ void ui_unwatch(int fd) {
  * old one was, take effect with no restart of the Q2 and without demo's gate seeing anything end.
  * If that cannot be done it ends with UI_EXIT_RELOAD, on which a gate that knows the code starts
  * it again (patch/q2ui_gate.c). The signal is held back everywhere but in the loop's wait
- * (ppoll), so it always ends a wait and is seen at once: let in anywhere else, one that came
+ * (ppoll), from main's first line (main.c) on, so one sent while q2ui starts waits for the loop; it always ends a wait and is seen at once: let in anywhere else, one that came
  * between the loop's look at it and its next wait was seen only when that wait ended, at rest up
  * to a minute later. */
 void (*ui_restart)(void);
@@ -437,13 +455,25 @@ int ui_run(void) {
             rested = 0;
         struct timespec ts = { wait / 1000, (long)(wait % 1000) * 1000000L };
         ppoll(fds, (nfds_t)n, wait >= 0 ? &ts : 0, &open_mask);
+        /* dark as the wait ended, before the watches read a word of the screen lit: the press that
+         * lit it (demo's wake, at the same key) may be read in the same pass as that word */
+        int dark = ui_dark();
         for (int k = 0; k < watches; ++k)
             if (fds[nfds + k].revents && fds[nfds + k].fd == watch[k].fd && watch[k].fd >= 0) watch[k].fn();
         input_t in[64];
         int got = input_read(in, 64);
-        /* the press that wakes the screen is only that, its release included */
+        /* the press that wakes the screen is only that, its release included. demo lights it at a
+         * key itself (patch/nav/input.c); q2sysd only at the power key, so on Vamp OS q2ui asks for
+         * it at any other key's press (not the wheel's tick nor a touch, as demo's wake_key) */
         static uint64_t quiet_until, last_input;
-        if (got && ui_dark()) quiet_until = mono_us() + 400000;
+        if (got && (dark || ui_dark())) {
+            quiet_until = mono_us() + 400000;
+            for (int i = 0; i < got && api_vamp; ++i)
+                if (in[i].type == IN_KEY_DOWN && in[i].value != 116) { /* KEY_POWER: q2sysd's */
+                    api_sys_send("screen on");
+                    break;
+                }
+        }
         if (got && mono_us() < quiet_until) got = 0;
         /* a panel set up again on waking is back at 16 bits a pixel (panel.c): told again when the
          * screen was dark, and at the first input after a pause long enough for it to have been */
@@ -456,6 +486,8 @@ int ui_run(void) {
         }
         showed = ui_frame(in, got);
         if (showed) rested = 0;
+        static uint64_t second_at; /* while it runs, once a second (the stats file, read live on a Q2) */
+        if (second_hook && mono_us() - second_at >= 1000000u) second_at = mono_us(), second_hook();
     }
     while (depth) {
         --depth;

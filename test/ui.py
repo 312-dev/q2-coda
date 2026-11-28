@@ -111,13 +111,15 @@ class Picture:
 NOW = 'seq=3\nstate=1\npos=14000\nlen=180\nid=5\nvolume=40\nsource=library\ntitle=A Made-Up Song\nartist=Its Artist\nalbum=Its Album\n'
 
 
-def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=False, clicks=False):
+def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=False, clicks=False, before=None):
     """q2ui run over a script; the trace (a dict a frame), the pictures it saved by name, and the stats. now is what
     plays (the text of demo's file for it), code the exit code expected (None: any), and with queue the player's queue is a FIFO
     whose lines come back as a fourth value with the list file's ids. With ctl, q2ui is also given the write end of
     a pipe as demo gives it one for settings (patch/q2ui_gate.c, --ctl FD), and the lines it wrote come back fifth: its
-    settings, or with clicks its key clicks ("click 0|1") alone."""
+    settings, or with clicks its key clicks ("click 0|1") alone. before(d), given, runs first (a stand-in service)."""
     d = folder(work, n)
+    if before:
+        before(d)
     if now:
         (d/'now').write_text(now)
     fifo = None
@@ -125,6 +127,7 @@ def script(binary, work, n, lines, *options, now=None, code=0, queue=False, ctl=
         os.mkfifo(d/'cmdq')
         fifo = os.open(d/'cmdq', os.O_RDWR | os.O_NONBLOCK)
     text = '\n'.join(lines).replace('@', str(d) + '/') + '\n'
+    options = [o.replace('@', str(d) + '/', 1) if isinstance(o, str) and o.startswith('@') else o for o in options]
     (d/'script').write_text(text)
     pipe = os.pipe() if ctl else None
     given = ['--ctl', str(pipe[1])] if pipe else []
@@ -628,6 +631,7 @@ def pages(binary, work):
     good &= wireless(binary, work, home)
     good &= wifi_networks(binary, work, home)
     good &= bt_devices(binary, work, home)
+    good &= danger_card(binary, work, home)
     good &= clicks(binary, work)
     good &= comebacks(binary, work, home)
     good &= general(binary, work, home)
@@ -969,7 +973,7 @@ def bt_devices(binary, work, home):
     # Phones' page: Disconnect; the found one; Car's page: Forget; then the found one selected as demo's new list comes
     lines = to + ['rows @rows.txt', 'tick 1', 'rest', 'key centre', 'rest', 'rows @phones.txt', 'key centre', 'rest',
                   'tick 2', 'rest', 'key centre', 'rest', 'tick -1', 'rest', 'key centre', 'rest', 'rows @car.txt',
-                  'tick 1', 'rest', 'key centre', 'rest', 'tick 1', 'rest',
+                  'tick 1', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest', 'tick 1', 'rest',
                   f'btdevices {d/"later"}', 'rest', 'rows @later.txt', 'key centre', 'rest', 'rows @again.txt']
     _, _, _, (_, _, out), said = script(binary, work, 60, lines, *home, '--told', d/'told', '--bt-devices', d/'devs',
                                         queue=True, ctl=True)
@@ -983,12 +987,69 @@ def bt_devices(binary, work, home):
     good &= check("a connected device's page offers Disconnect and Forget, a paired one's Connect",
                   rows('phones.txt') == ['Disconnect', 'Forget This Device'] and
                   rows('car.txt') == ['Connect', 'Forget This Device'], f"{rows('phones.txt')} {rows('car.txt')}")
-    good &= check('the page scans as it opens; Disconnect, a found device and Forget go down the pipe by MAC',
+    good &= check('the page scans as it opens; Disconnect, a found device and Forget (asked, then Forget Device) go down '
+                  'the pipe by MAC',
                   said[:4] == ['btscan', 'btlink AA:BB:CC:DD:EE:01', 'btlink AA:BB:CC:DD:EE:03',
                                'btforget AA:BB:CC:DD:EE:02'], repr(said))
     good &= check('a new list from demo is shown and keeps the selection on its device (moved up into My Devices)',
                   rows('later.txt')[:4] == ['Bluetooth', 'My Devices', 'Fixture Phones\tNot Connected', 'Fixture Back\\sl']
                   and rows('again.txt') == ['Disconnect', 'Forget This Device'], f"{rows('later.txt')} {rows('again.txt')}")
+    return good
+
+
+TRASH = (0x12, 0x34, 0x56)  # the card's trash glyph, made up here as one colour (tools/art.py cardtrash_d and _l)
+
+
+def danger_card(binary, work, home):
+    """Forget This Device asks first (ui/page_bluetooth.c, demo's bt_detail.c forget_ask), on the confirmation card's
+    destructive kind (ui/notice.c, docs/oled-design.md#confirmation-card, the owner's ruling 2026-11-28): it opens on
+    Cancel, so Centre at once forgets nothing; the verb has the trash before it whether lit or not and does not move;
+    unlit the verb is Negative (#FF453A, #D70015 on Light's white card), lit it sits on a gray platter (#3A3A3C, Light
+    #E5E5EA) in Text Primary, never the accent. Before/after PNGs with Q2UI_KEEP."""
+    good = True
+    car = ['rest', 'tick 6', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest',  # Settings > Bluetooth
+           'tick 2', 'rest', 'key centre', 'rest', 'tick 1', 'rest', 'key centre', 'rest']  # Car's page, Forget This Device
+    for half, light, negative, platter, primary in (('dark', 0, (0xff, 0x45, 0x3a), (0x3a, 0x3a, 0x3c), (255, 255, 255)),
+                                                     ('light', 1, (0xd7, 0x00, 0x15), (0xe5, 0xe5, 0xea), (0, 0, 0))):
+        def before(d, light=light):
+            (d/'told').write_text('bton=1\n')
+            (d/'devs').write_text(DEVICES)
+            (d/'config.ini').write_text(f'[IPOD]\nLIGHT={light}\n')
+            for k in 'dl':
+                png(d/f'oled_cardtrash_{k}.png', 18, 18, TRASH)
+        lines = car + ['shot @ask.ppm', 'tick 1', 'rest', 'shot @lit.ppm', 'tick -1', 'rest', 'key centre', 'rest', 'rows @after.txt']
+        _, pics, _, (_, _, out), said = script(binary, work, 60, lines, *home, '--told', '@told', '--bt-devices', '@devs',
+                                               queue=True, ctl=True, before=before)
+        ask, lit = pics['ask'], pics['lit']
+        if os.environ.get('Q2UI_KEEP'):
+            for name, pic in (('ask', ask), ('lit', lit)):
+                pathlib.Path(f"{os.environ['Q2UI_KEEP']}/danger-{half}-{name}.ppm").write_bytes(b'P6\n%d %d\n255\n' % (W, H) + pic.rgb)
+        cancel = [y for y in range(44, 302) if ask.at(55, y) == ACCENT]
+        top = cancel[-1] + 1 if cancel else 0  # the verb's row is the 32 px under Cancel's bar
+
+        def row(pic):
+            return {pic.at(x, y) for y in range(top + 2, top + 30) for x in range(60, 316)}
+
+        def inked(colours, ink):  # a glyph's core in ink: text's edges blend into the ground, its cores do not
+            return any(sum(abs(a - b) for a, b in zip(c, ink)) <= 24 for c in colours)
+
+        def trash_x(pic):
+            xs = [x for x in range(60, 316) if sum(abs(a - b) for a, b in zip(pic.at(x, top + 16), TRASH)) <= 3]  # blend rounding
+            return (xs[0], xs[-1]) if xs else None
+        unlit, lit_row = row(ask), row(lit)
+        good &= check(f'({half}) the card opens on Cancel, lit in the accent, the verb under it unlit',
+                      len(cancel) >= 28 and ACCENT not in unlit, f'{len(cancel)} accent rows')
+        good &= check(f'({half}) unlit, the verb is Negative {negative} after the trash', inked(unlit, negative) and trash_x(ask) is not None,
+                      f'negative {inked(unlit, negative)}, trash {trash_x(ask)}')
+        good &= check(f'({half}) lit, a gray platter {platter} and the verb in Text Primary, no accent and no Negative ink',
+                      lit.at(55, top + 16) == platter and inked(lit_row, primary) and ACCENT not in lit_row
+                      and not inked(lit_row, negative),
+                      f'platter {lit.at(55, top + 16)}, primary {inked(lit_row, primary)}, accent {ACCENT in lit_row}')
+        good &= check(f'({half}) the trash shows lit and unlit in the same place', trash_x(ask) == trash_x(lit) and trash_x(lit) is not None,
+                      f'{trash_x(ask)} {trash_x(lit)}')
+        after = (out/'after.txt').read_text().splitlines() if (out/'after.txt').exists() else []
+        good &= check(f'({half}) Cancel forgets nothing and the device page stays', not any('btforget' in x for x in said)
+                      and after == ['Connect', 'Forget This Device'], f'{said} {after}')
     return good
 
 
@@ -1365,7 +1426,7 @@ def control_center(binary, work, home):
         if ticks == 9:
             u = pics['at']
             good &= check('with a cable in, the USB row under the blocks, ringed white 2 px wide 5 px out when the wheel is on it',
-                          u.at(100, 277) == RAISED and u.at(16, 277) == (255, 255, 255), f'{u.at(100, 277)} {u.at(16, 277)}')
+                          u.at(100, 277) == RAISED and u.at(24, 277) == (255, 255, 255), f'{u.at(100, 277)} {u.at(24, 277)}')
     good &= check("AirPlay's Centre, the USB row's Centre, EQ held and Car held each open demo's page for it",
                   asks == [('systemset/netservice_page', []), ('usbpick_page', []), ('playset/equalizer_page', []), ('carremote_page', [])], str(asks))
     rows = {}
@@ -1425,6 +1486,9 @@ def control_center_touch(binary, work, home):
     good &= check('a swipe up closes the sheet, from the grab bar or over the Brightness slider, which it leaves alone',
                   shut == [('home', []), ('home', [])], str(shut))
     good &= control_center_motion(binary, work, home, told)
+    good &= control_center_lift(binary, work, home, told)
+    good &= control_center_lift_device(binary, work, home, told)
+    good &= control_center_usb(binary, work, home)
     return good
 
 
@@ -1481,12 +1545,198 @@ def control_center_motion(binary, work, home, told):
     return good
 
 
+
+def control_center_lift(binary, work, home, told):
+    """The open sheet held by a finger (the owner's, 2026-11-28: "control center drag should move WITH finger up and
+    down and have a trigger point to collapse"): a drag up or down anywhere on it moves its foot with the finger, in the
+    frame that takes the move, and the lift closes it past a third of the way up or on a fast flick up, else it springs
+    back open; a tap still acts and a slider dragged sideways is still a slider."""
+    good = True
+    opened = ['rest', 'hold return', 'rest']
+    lines = opened + ['touch 187 250', 'move 187 240', 'move 187 200', 'move 187 150', 'move 187 230', 'move 187 245', 'run 300',
+                      'lift', 'rest']
+    trace, _, stats, _, said = script(binary, work, 60, lines, *home, '--told', told, queue=True, ctl=True)
+    feet = [int(r['reveal']) for r in trace if 'reveal' in r]
+    want = [320 - 10, 320 - 50, 320 - 100, 320 - 20, 320 - 5]  # the foot 320 + (finger - 250) after each move
+    rest = feet.index(320) if 320 in feet else len(feet)  # open: the drop is over
+    lifted = feet[rest:]
+    at = next((i for i in range(len(lifted)) if lifted[i:i + len(want)] == want), None)
+    good &= check("dragged up and back down, the open sheet's foot is where the finger is in each move's own frame, up and down",
+                  at is not None, lifted[:20])
+    good &= check('let go a sixth of the way up, held still, it springs back open; the circle under the finger is not flipped',
+                  stats['top'] == 'control' and feet[-1] == 320 and said == [], f"{stats['top']} {feet[-3:]} {said}")
+    _, _, stats = script(binary, work, 60, opened + ['touch 187 250', 'move 187 200', 'move 187 130', 'run 300', 'lift', 'rest'], *home,
+                         '--told', told)
+    good &= check('let go more than a third of the way up, held still, it closes', stats['top'] == 'home', stats['top'])
+    _, _, stats = script(binary, work, 60, opened + ['touch 187 250', 'move 187 238', 'move 187 226', 'lift', 'rest'], *home,
+                         '--told', told)
+    good &= check('flicked up fast a tenth of the way, it closes', stats['top'] == 'home', stats['top'])
+    _, _, stats = script(binary, work, 60, opened + ['touch 187 250', 'move 187 100', 'run 200', 'move 187 120', 'move 187 140', 'lift', 'rest'], *home,
+                         '--told', told)
+    good &= check('dragged past the third, then flung back down short of it, it stays open', stats['top'] == 'control', stats['top'])
+    trace, _, stats = script(binary, work, 60, opened + ['touch 200 181', 'move 230 181', 'move 300 181', 'lift', 'rest'], *home,
+                             '--told', told)
+    good &= check('a slider dragged sideways moves its level and the sheet stays put',
+                  stats['top'] == 'control' and all(int(r.get('reveal', 320)) == 320 for r in trace[[int(r.get('reveal', 0)) for r in trace].index(320):]),
+                  stats['top'])
+    return good
+
+
+
+def device_strokes(path):
+    """A Q2's hyn_ts capture (16-byte input_events: a 32-bit timeval, type, code, value) as strokes, each a list of (ms
+    from its start, x, y) upright: x is the panel's ABS_Y, y 319 minus its ABS_X; a finger is ABS_PRESSURE 1 to 0."""
+    data = pathlib.Path(path).read_bytes()
+    strokes, cur, ax, ay, t0 = [], None, 0, 0, 0
+    for i in range(0, len(data) - 15, 16):
+        sec, usec, kind, code, value = struct.unpack_from('<IIHHi', data, i)
+        ms = sec * 1000 + usec // 1000
+        if kind == EV_ABS and code == ABS_X:
+            ax = value
+        elif kind == EV_ABS and code == ABS_Y:
+            ay = value
+        elif kind == EV_ABS and code == ABS_PRESSURE:
+            if value:
+                cur, t0 = [], ms
+            elif cur is not None:
+                strokes.append(cur)
+                cur = None
+        elif kind == EV_SYN and cur is not None:
+            cur.append((ms - t0, ay, 319 - ax))
+    return strokes
+
+
+def control_center_lift_device(binary, work, home, told):
+    """The owner's own drags closing the open sheet, recorded on a Q2 (test/data/ccdrag-20261127.bin; the owner's,
+    2026-11-28: "its just closing after i finish drag vs. moving with my thumb"): each starts at the screen's foot
+    and goes sideways before it goes up. Replayed at their own times, the sheet's foot is under the finger (320 px
+    below where it went down, moved as far as the finger) in the frame of every move once the finger has gone 10 px
+    up, and the lift closes it."""
+    good = True
+    for n, stroke in enumerate([s for s in device_strokes(ROOT/'test/data/ccdrag-20261127.bin') if s[0][2] > 200]):
+        lines, t = ['rest', 'hold return', 'rest'], 0
+        x0, y0 = stroke[0][1], stroke[0][2]
+        lines.append(f'touch {x0} {y0}')
+        for ms, x, y in stroke[1:]:
+            if ms > t + 1:
+                lines.append(f'run {ms - t}')
+                t = ms
+            lines.append(f'move {x} {y}')
+        lines += ['lift', 'rest']
+        trace, _, stats = script(binary, work, 60, lines, *home, '--told', told)
+        feet = [int(r['reveal']) for r in trace if 'reveal' in r]
+        rest = feet.index(320) if 320 in feet else len(feet)
+        want = [max(0, 320 + y - y0) for _, _, y in stroke[1:] if y0 - y >= 10]
+        moved = [f for f in feet[rest:] if f < 320]
+        good &= check(f"the owner's drag {n + 1} up from the foot: the sheet's foot follows the finger move by move, and it closes",
+                      want and all(w in moved for w in want) and stats['top'] == 'home', (len(want), want[:5], moved[:8]))
+    return good
+
+def control_center_usb(binary, work, home):
+    """The USB row (a cable in) inside the glass's rounded corners (oled-design.md#corners: GLASS_R, CORNER_SLACK more for
+    text and icons; the owner's, 2026-11-28: "the USB row is currently running off the rounded edge a bit"), at rest, with
+    the wheel's ring round it, and through the landing's overshoot."""
+    sys.path.insert(0, str(ROOT/'tools'))
+    import ipod
+    r, slack = ipod.CORNER_R, ipod.CORNER_SLACK
+    told = cc_told(work, CC_TOLD.replace('cable=0', 'cable=1').replace('usb=Automatic', 'usb=Ask Every Time'))
+    lines = ['rest', 'hold return', 'run 270'] + [f'run 17\nshot @f{k}.ppm' for k in range(20)] + ['rest', 'tick 9', 'run 50', 'shot @ring.ppm']
+    _, pics, _ = script(binary, work, 60, lines, *home, '--told', told)
+    out = []
+    for name, pic in pics.items():
+        for y in range(320 - r, 320):
+            for x in list(range(0, r)) + list(range(375 - r, 375)):
+                cx = r if x < r else 374 - r
+                cy = 319 - r
+                if (x - cx) ** 2 + (y - cy) ** 2 > (r - slack) ** 2 and pic.at(x, y) != (0, 0, 0):
+                    out.append((name, x, y))
+    return check("the USB row, its ring and its landing's overshoot stay inside the glass's corners, slack included", not out,
+                 out[:6] + [len(out)])
+
 # A Q2's own hyn_ts, recorded from /dev/input/event2 on the owner's Q2 (2026-11-27) while a finger pulled down from the
 # screen's top edge: (ms from the first, type, code, value). The panel says a finger only by ABS_PRESSURE 1 and 0, never
 # BTN_TOUCH, on its portrait axes: ABS_X from 320 at the upright screen's top edge, ABS_Y across it.
 HYN_PULL = [(0, 3, 0, 308), (0, 3, 1, 73), (0, 3, 24, 1), (0, 0, 0, 0), (11, 3, 0, 303), (11, 0, 0, 0), (22, 3, 0, 292),
             (22, 3, 1, 74), (22, 0, 0, 0), (34, 3, 0, 274), (34, 0, 0, 0), (45, 3, 0, 245), (45, 0, 0, 0), (56, 3, 0, 216),
             (56, 0, 0, 0), (68, 3, 0, 180), (68, 0, 0, 0), (78, 3, 24, 0), (78, 0, 0, 0)]
+
+
+def list_touch(binary, work, home):
+    """A finger on a list (ui/list.c list_touch, docs/ui-rewrite.md#the-toolkit): a tap on Home's Library row opens the
+    Library and a tap on a song plays it; a drag moves the rows with the finger and, let go fast, flings them on to rest
+    on whole rows; a slow one only settles; past the top the rows give and spring back; a still finger held on a song
+    opens its hold menu; and a pull down from the status row opens Control Center with no tap on the row under it."""
+    good = True
+    rows = lambda d, name: [r.split('\t')[0] for r in (d/name).read_text().splitlines()] if (d/name).exists() else []
+    # Home's rows from y 40, 32 px each: Library is the first when nothing plays
+    _, _, _, (_, _, d) = script(binary, work, 60, ['rest', 'rows @home.txt', 'touch 60 56', 'lift', 'rest', 'rows @after.txt'], *home,
+                                queue=True)
+    home_rows, after = rows(d, 'home.txt'), rows(d, 'after.txt')
+    good &= check('a tap on Home\'s Library row opens the Library', home_rows[:1] == ['Library']
+                  and 'Songs' in after and after != home_rows, f'{home_rows[:3]} {after[:3]}')
+    # Songs: Shuffle pinned at y 58, the songs from y 90; a tap on the second song (y 138) plays it
+    _, _, _, (sent, ids, d) = script(binary, work, 60, ['rest', 'rows @songs.txt', 'touch 150 138', 'lift', 'rest'], queue=True)
+    songs = rows(d, 'songs.txt')
+    good &= check('a tap on a song plays it', any(' play' in f' {s}' for s in sent), str(sent))
+    # a fast drag up 150 px over 100 ms: the rows follow, then fling on and come to rest on whole rows
+    trace, _, _ = script(binary, work, 400, ['rest', 'swipe 150 260 150 110 100', 'rest'])
+    at_lift = [t['scroll'] for t in trace]
+    peak, end = max(at_lift), at_lift[-1]
+    good &= check('a fast drag up flings the rows past where the finger left them, to rest on a whole row',
+                  end > 160 and end % 32 == 0 and any(120 <= s <= 150 for s in at_lift), f'end {end} trace {at_lift[:12]}')
+    trace, _, _ = script(binary, work, 400, ['rest', 'swipe 150 260 150 110 1500', 'rest'])
+    end = trace[-1]['scroll']
+    good &= check('a slow drag of 150 px settles on the nearest whole row, no fling', end in (128.0, 160.0), str(end))
+    trace, _, _ = script(binary, work, 400, ['rest', 'touch 150 120', 'move 150 140', 'move 150 220', 'rest'])
+    given = min(t['scroll'] for t in trace)
+    trace2, _, _ = script(binary, work, 400, ['rest', 'touch 150 120', 'move 150 140', 'move 150 220', 'lift', 'rest'])
+    good &= check('dragged down past the top the rows give, less than the finger, and spring back on the lift',
+                  -80 < given < -10 and trace2[-1]['scroll'] == 0, f'{given} {trace2[-1]["scroll"]}')
+    _, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'touch 150 138', 'run 700', 'lift', 'rest', 'rows @menu.txt'], queue=True)
+    good &= check('a still finger held on a song opens its hold menu, and plays nothing', rows(d, 'menu.txt')[:2] == ['Play Next', 'Play Last']
+                  and not sent, f'{rows(d, "menu.txt")[:2]} {sent}')
+    trace, _, _, (sent, _, d) = script(binary, work, 60, ['rest', 'swipe 150 10 150 200 300', 'rest', 'rows @cc.txt'], queue=True)
+    good &= check('a pull from the status row opens Control Center, and the list under it neither scrolls nor plays',
+                  not sent and all(t['scroll'] == 0 for t in trace if 'scroll' in t), f'{sent}')
+    return good
+
+
+def list_touch_device(binary, work, home):
+    """List touch through q2ui's own reader (ui/input.c), events as a Q2's panel sends them (ABS_PRESSURE alone, the
+    panel's portrait axes: upright (x, y) is ABS_X 319 - y, ABS_Y x): a tap on Home's Library row opens the Library, and
+    a drag on Songs moves its rows. The device read of the same is ~/.cache/q2-xfer/q2touch.py tap and drag."""
+    good = True
+
+    def stroke(run, points, gap=0.016):
+        for k, (x, y) in enumerate(points):
+            run.touch.write(event(3, 0, 319 - y) + event(3, 1, x) + (event(3, 24, 1) if not k else b'') + event(0, 0, 0))
+            time.sleep(gap)
+        run.touch.write(event(3, 24, 0) + event(0, 0, 0))
+
+    run = Run(binary, work, 60, *home, '--clock', '12:00')
+    try:
+        run.rest()
+        stroke(run, [(60, 56)])
+        top = run.rest().get('top')
+        good &= check("a tap the panel's way on Home's Library row opens the Library", top == 'list', str(top))
+    finally:
+        run.proc.kill()
+        run.proc.wait(timeout=5)
+        os.close(run.queue)
+    run = Run(binary, work, 400, '--clock', '12:00')
+    try:
+        run.rest()
+        before = run.picture()
+        stroke(run, [(150, 260 - 10 * k) for k in range(16)], gap=0.03)
+        run.rest()
+        after = run.picture()
+        changed = sum(shot.pixel(before, x, y) != shot.pixel(after, x, y) for x in range(10, 300, 10) for y in range(100, 280, 4))
+        good &= check("a drag the panel's way on Songs moves its rows", changed > 300, str(changed))
+    finally:
+        run.proc.kill()
+        run.proc.wait(timeout=5)
+        os.close(run.queue)
+    return good
 
 
 def touch_device(binary, work, home):
@@ -2187,6 +2437,24 @@ def panel(binary, work):
     return good
 
 
+def early_hup(binary, work):
+    """A SIGHUP that comes while q2ui is still starting (q2libd's `sv hup` after its first library write, in Vamp OS) is
+    held until the loop runs and then starts it again in place: it neither ends the program nor is lost."""
+    d = folder(work, 20)
+    proc = subprocess.Popen(base_args(binary, d) + ['--page', 'home'])
+    time.sleep(0.005)  # long before the loop: fonts, the library, the panel and input are still opening
+    proc.send_signal(signal.SIGHUP)
+    try:
+        code = proc.wait(timeout=2.5)
+    except subprocess.TimeoutExpired:
+        code = None
+    alive = code is None and (d/'stats.json').exists()
+    if code is None:
+        proc.kill()
+        proc.wait(timeout=5)
+    return check('a SIGHUP in the first milliseconds is held until q2ui runs, and does not end it', alive, f'exit {code}')
+
+
 def reload(binary, work):
     """kill -HUP: q2ui starts itself again in place, the same process, on the pages it had open, with demo's settings
     pipe (--ctl) still open: it has no other way back."""
@@ -2405,7 +2673,8 @@ class Client:
 
 def transcripts(text):
     """A page's conformance blocks (```conformance, or the protocol page's unnamed block under its Conformance
-    heading), each a list of (kind, text): '>' sent, '<' the next answer exactly, '<~' the next answer matching."""
+    heading), each a list of (kind, text): '>' sent, '<' the next answer exactly, '<~' the next answer matching, '<*~'
+    any number of lines matching (the Vamp API 1 pages' event lines)."""
     out, cur, under = [], None, False
     for line in text.splitlines():
         if line.startswith('## '):
@@ -2417,9 +2686,9 @@ def transcripts(text):
             cur = None
         elif cur is not None and line:
             kind, _, rest = line.partition(' ')
-            if kind == '<' and rest.startswith('~ '):
-                kind, rest = '<~', rest[2:]
-            assert kind in ('>', '<', '<~'), line
+            if kind in ('<', '<*') and rest.startswith('~ '):
+                kind, rest = kind + '~', rest[2:]
+            assert kind in ('>', '<', '<~', '<*', '<*~'), line
             cur.append((kind, rest))
     return out
 
@@ -2439,6 +2708,352 @@ def replay(path, block):
     finally:
         c.close()
 
+
+
+def vamp_page(name):
+    """A Vamp API 1 protocol page (docs/platform/NAME.md) as feat/vamp-os-base has it; None without that branch."""
+    got = subprocess.run(['git', 'show', f'feat/vamp-os-base:docs/platform/{name}.md'], cwd=ROOT, capture_output=True,
+                         text=True)
+    return got.stdout if got.returncode == 0 else None
+
+
+class Service:
+    """A stand-in for one of Vamp OS's services on its socket (docs/platform/README.md's common shape): the hello, an
+    answer a line from answers (a command's first word, or the whole command, to its lines; 'ok' otherwise), and a
+    command's id lines taken after it when its last word is their count (play, queue). Every line kept in order."""
+
+    def __init__(self, path, proto, answers):
+        self.proto, self.answers, self.lines = proto, answers, []
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.s.bind(str(path))
+        self.s.listen(4)
+        import threading
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                c, _ = self.s.accept()
+            except OSError:
+                return
+            f = c.makefile('rb')
+            for raw in f:
+                line = raw.decode().rstrip('\n')
+                self.lines.append(line)
+                if len(self.lines) == 1 or line.startswith('Q2'):
+                    c.sendall(f'{self.proto} ok\n'.encode() if line == self.proto else b'err version\n')
+                    continue
+                word = line.split(' ')[0]
+                if word in ('play', 'queue'):
+                    for _ in range(int(line.split()[-1])):
+                        self.lines.append(f.readline().decode().rstrip('\n'))
+                out = self.answers.get(line, self.answers.get(word, ['ok']))
+                if out and isinstance(out[0], list):  # answers in turn, the last kept
+                    out = out.pop(0) if len(out) > 1 else out[0]
+                c.sendall(''.join(x + '\n' for x in out).encode())
+
+    def close(self):
+        self.s.close()
+
+
+PLAY_CAPS = 'caps play toggle pause resume next previous seek volume stop now watch source focus output rating rate like album click'
+PLAY_NOW = 'now title=Alpha%20One%25 artist=Ann album=First state=1 pos=12 len=200 volume=40 id=2'
+# the same song in the now file q2playd and demo write (ui/now.c), under another title: Q2PLAY/1's word is taken over it
+PLAY_FILE = 'title=File Title\nartist=Ann\nalbum=First\nstate=1\npos=12000\nlen=200\nvolume=40\nid=2\nshuffle=0\nrepeat=0\nhearts=3\nliked=1\n'
+
+
+def api_play(binary, work):
+    """Q2PLAY/1 spoken to directly (ui/api.c) when Vamp OS's services are there: the hello and caps, what plays read
+    from its now lines (percent-decoded) and its rating, the verbs a list's song, Now Playing's wheel and heart send
+    on the socket as the same verbs demo's queue took, a word caps does not name (mode) still down the FIFO, a long
+    list windowed to Q2PLAY/1's 1000, and with --api demo, or no services, nothing on the socket."""
+    good = True
+    page = vamp_page('playback')
+    if page:  # the stand-in speaks as the protocol page says
+        blocks = transcripts(page)
+        sent = {text.split(' ')[0] for b in blocks for kind, text in b if kind == '>'}
+        caps = [text for b in blocks for kind, text in b if kind == '<' and text.startswith('caps ')]
+        nows = [text for b in blocks for kind, text in b if kind == '<~' and text.startswith('now ')]
+        play_caps = caps[0] if caps else PLAY_CAPS  # the page's own: the service gains words (queue, mode)
+        keys = [[part.split('=')[0] for part in r.split(' ')[1:]] for r in nows]
+        play_now = PLAY_NOW + ''.join(f' {k}=0' for k in (keys[0] if keys else [])[8:])  # shuffle=, repeat= where it has them
+        good &= check("The stand-in's now line has playback.md's now fields, in their order",
+                      keys and all(k == [part.split('=')[0] for part in play_now.split(' ')[1:]] for k in keys), keys)
+    else:
+        print('  (no feat/vamp-os-base here: the stand-in is not checked against playback.md)')
+        sent, play_caps, play_now = None, PLAY_CAPS, PLAY_NOW
+    answers = {'caps': [play_caps], 'now': [play_now], 'rating 0': ['rating id=2 stars=3 liked=1']}
+    lines = ['api', 'rest', 'tick 2', 'rest', 'key centre', 'api', 'rest', 'run 600',
+             'tick 1', 'api', 'run 600',  # the wheel's volume
+             'key centre', 'run 600', 'key centre', 'run 600',  # a scrub begun and ended: shuffle's stop
+             'key centre', 'run 600',  # shuffle flipped (mode: the FIFO's)
+             'tick 1', 'tick 1', 'run 100', 'key centre', 'api', 'run 600']  # the heart
+    runs = {}
+    for name, opts, vamp in (('vamp', ('--api', 'auto'), True), ('demo', ('--api', 'demo'), True), ('none', ('--api', 'auto'), False)):
+        held = {}
+
+        def start(d, vamp=vamp, held=held):
+            (d/'vamp').mkdir()
+            if vamp:
+                held['svc'] = Service(d/'vamp/play.sock', 'Q2PLAY/1', answers)
+            else:
+                os.rmdir(d/'vamp')
+        _, _, stats, (fifo, ids, d) = script(binary, work, 60, lines, '--api-dir', '@vamp', *opts, queue=True, now=PLAY_FILE,
+                                              before=lambda d, s=start: s(d))
+        svc = held.get('svc')
+        runs[name] = (stats, [f.split(' ', 1)[1] for f in fifo], ids, svc.lines if svc else [])
+        if svc:
+            svc.close()
+    return good & api_checks(runs, sent, ' mode ' in play_caps + ' ') & api_window(binary, work, play_caps)
+
+
+def api_checks(runs, sent, mode):
+    good = True
+    stats, fifo, ids, sock = runs['vamp']
+    demo_stats, demo_fifo, demo_ids, demo_sock = runs['demo']
+    good &= check("With Vamp OS there, q2ui opens with the hello, caps and now, the song's rating, then watch",
+                  sock[:5] == ['Q2PLAY/1', 'caps', 'now', 'rating 0', 'watch'], sock[:6])
+    good &= check("What plays is Q2PLAY/1's now line, percent-decoded, with its rating's stars and like",
+                  stats.get('api_vamp') == 1 and stats.get('api_play') == 1 and stats.get('title') == 'Alpha One%'
+                  and stats.get('hearts') == 3 and stats.get('liked') == 1, {k: stats.get(k) for k in ('api_play', 'title', 'hearts', 'liked')})
+    plays = [i for i, line in enumerate(sock) if line.startswith('play ')]
+    demo_play = [f for f in demo_fifo if f.startswith('play ')]
+    good &= check("A song chosen is Q2PLAY/1's play with the ids demo's list file got, and nothing down the FIFO",
+                  len(plays) == 1 and demo_play and sock[plays[0]] == demo_play[0]
+                  and sock[plays[0] + 1:plays[0] + 1 + len(demo_ids)] == demo_ids and not [f for f in fifo if f.startswith('play')],
+                  (sock[plays[0]] if plays else None, demo_play, fifo))
+    vols, demo_vols = [x for x in sock if x.startswith('volume ')], [f for f in demo_fifo if f.startswith('volume ')]
+    good &= check("The wheel's volume on Now Playing is Q2PLAY/1's volume, as demo's queue had it",
+                  vols and vols == demo_vols, (vols, demo_vols))
+    on_fifo, on_sock = [f for f in fifo if f.startswith('mode ')], [x for x in sock if x.startswith('mode')]
+    if mode:
+        good &= check("Shuffle's flip is Q2PLAY/1's mode, its caps naming it", on_sock == ['mode 1 -1'] and not on_fifo, (on_sock, fifo))
+    else:
+        good &= check("Shuffle's flip, a word Q2PLAY/1's caps lack, still goes down q2playd's FIFO", on_fifo == ['mode 1 -1'] and not on_sock,
+                      fifo)
+    likes = [x for x in sock if x.startswith('like ')]
+    good &= check("The heart's flip of a liked song is Q2PLAY/1's like 0 for it, then its rating asked again",
+                  likes == ['like 0 2'] and sock[sock.index('like 0 2') + 1] == 'rating 0'
+                  and [f for f in demo_fifo if f.startswith('like ')] == ['like 2'], (likes, demo_fifo))
+    if sent is not None:
+        words = {x.split(' ')[0] for x in sock if not x.lstrip('-').isdigit()}
+        good &= check("Every command q2ui sent is one playback.md's transcripts send", words <= sent, words - sent)
+    good &= check('With --api demo, or no /run/vamp, nothing is said on the socket and the FIFO has the verbs',
+                  demo_sock == [] and runs['none'][3] == [] and demo_stats.get('api_vamp') == 0
+                  and runs['none'][0].get('api_vamp') == 0 and runs['none'][1] == demo_fifo, (demo_sock, runs['none'][1], demo_fifo))
+    return good
+
+
+def api_window(binary, work, caps):
+    """A list of 1500 songs: Q2PLAY/1's play of every one from the song chosen, as demo's queue takes them."""
+    held = {}
+    lines = ['api', 'rest', 'tick 1300', 'rest', 'key centre', 'api', 'rest']
+    out = {}
+    for name in ('vamp', 'demo'):
+        def start(d, name=name):
+            (d/'vamp').mkdir()
+            held[name] = Service(d/'vamp/play.sock', 'Q2PLAY/1', {'caps': [caps], 'now': [PLAY_NOW]})
+        _, _, _, (fifo, ids, _) = script(binary, work, 1500, lines, '--api-dir', '@vamp', '--api', 'auto' if name == 'vamp' else 'demo',
+                                         queue=True, before=start)
+        out[name] = (fifo, ids, held[name].lines)
+        held[name].close()
+    demo_play = [f.split(' ', 1)[1] for f in out['demo'][0] if ' play ' in f]
+    sock = out['vamp'][2]
+    i = next((k for k, x in enumerate(sock) if x.startswith('play ')), None)
+    return check("A list of 1500 is Q2PLAY/1's play of all 1500 from the song chosen, as demo's queue had it",
+                 demo_play and i is not None and sock[i] == demo_play[0] and demo_play[0].endswith(' 1500')
+                 and sock[i + 1:i + 1501] == out['demo'][1], (demo_play, sock[i] if i is not None else None))
+
+
+SYS_BATTERY = 'battery level=73 mv=3912 status=Discharging cable=0'  # docs/platform/system.md's stand-in
+BT_BUDS = ('status power=1 state=connected device=AA:BB:CC:DD:EE:01 name=Fixture%20Buds kind=headphones codec=SBC battery=80 '
+           'output=bluetooth')  # docs/platform/bt.md's stand-in
+BT_OFF = 'status power=0 state=off device= name= kind= codec= battery=-1 output=dac'
+NET_HOME = 'status state=connected ssid=Home ip=192.168.1.5 smart=1 held=0'
+SYS_CAPS = 'caps screen awake brightness usb usb-dac usb-car standby heat jack battery time find click watch'
+BT_CAPS = 'caps status power scan devices pair connect disconnect forget codec watch'
+NET_CAPS = 'caps status scan networks add forget wake hold off smart time watch'
+
+
+def told_text(out, bt, btbatt, wifi, bton, cable, vol):
+    """/tmp/q2ui.status as q2gate writes it (docs/gate.md, The files) for a config.ini with none of its keys"""
+    return (f'out={out}\nbt={bt}\nbtbatt={btbatt}\nrelay=none\nlock=0\nsync=0\nsyncpm=0\noffline=0\nnet=1\nclock24=1\n'
+            f'wifi={wifi}\nbton={bton}\nbtbusy=0\nairplay=0\ncar=0\nsmart=0\neq=0\nusb=Automatic\ncable={cable}\nbright=50\n'
+            f'vol={vol}\nvolmax=100\n')
+
+
+def api_status(binary, work):
+    """The status row's states from Q2SYS/1, Q2BT/1 and Q2NET/1 (ui/api.c api_told) on Vamp OS: q2gate's file, byte for
+    byte, for a headset playing with a jack plugged and for Bluetooth off; a plug told by Q2SYS/1's watch asked again;
+    and the status row drawn from them as from demo's file of the same text."""
+    good = True
+    pages = {name: vamp_page(name) for name in ('system', 'bt', 'network')}
+    if all(pages.values()):
+        lines = {name: [text for b in transcripts(page) for kind, text in b if kind == '<'] for name, page in pages.items()}
+        good &= check("The stand-ins' battery and headset lines are system.md's and bt.md's",
+                      SYS_BATTERY in lines['system'] and BT_BUDS in lines['bt'], '')
+        good &= check("The stand-ins answer caps as system.md, bt.md and network.md do",
+                      SYS_CAPS in lines['system'] and BT_CAPS in lines['bt'] and NET_CAPS in lines['network'], '')
+        good &= check("The stand-in network's status has network.md's fields",
+                      all(re.fullmatch(r, NET_HOME) for b in transcripts(pages['network']) for k, r in b
+                          if k == '<~' and r.startswith('status ')), '')
+    cases = (('buds', BT_BUDS, told_text('other', 'headset', 80, 1, 1, 0, 40)),
+             ('off', BT_OFF, told_text('wire', 'none', -1, 1, 0, 0, 40)))
+    for name, bt_line, want in cases:
+        held = {}
+
+        def start(d, bt_line=bt_line):
+            (d/'vamp').mkdir()
+            held['sys'] = Service(d/'vamp/sys.sock', 'Q2SYS/1', {'caps': [SYS_CAPS], 'battery': [SYS_BATTERY], 'jack': [['jack po=0 bal=0'], ['jack po=1 bal=0']],
+                                                                 'watch': ['ok', 'jack po 1']})
+            held['bt'] = Service(d/'vamp/bt.sock', 'Q2BT/1', {'caps': [BT_CAPS], 'status': [bt_line]})
+            held['net'] = Service(d/'vamp/net.sock', 'Q2NET/1', {'caps': [NET_CAPS], 'status': [NET_HOME]})
+            held['play'] = Service(d/'vamp/play.sock', 'Q2PLAY/1', {'caps': [PLAY_CAPS], 'now': [PLAY_NOW]})
+        _, pics, _ = script(binary, work, 20, ['api', 'api', 'rest', 'told @told', 'shot @row.ppm'], '--page', 'home',
+                            '--api-dir', '@vamp', before=start)[:3]
+        d = pathlib.Path(held['sys'].s.getsockname()).parent.parent
+        got = (d/'told').read_text()
+        for s in held.values():
+            s.close()
+        good &= check(f"On Vamp OS ({name}) the status states are q2gate's file for the services' lines, byte for byte",
+                      got == want, got)
+        good &= check(f'A plug Q2SYS/1 told ({name}) was asked again: jack after the watch', held['sys'].lines[-1:] == ['jack'],
+                      held['sys'].lines)
+        _, demo_pics, _ = script(binary, work, 20, ['rest', 'shot @row.ppm'], '--page', 'home', '--api', 'demo',
+                                 before=lambda d, w=want: ((d/'told').write_text(w), (d/'now').write_text(PLAY_FILE.replace('File Title', 'Alpha One%'))))[:3]
+        a, b = pics['row'], demo_pics['row']
+        diff = [(x, y) for y in range(BAR_H) for x in range(W) if a.at(x, y) != b.at(x, y)]
+        same = not diff
+        if diff and os.environ.get('Q2UI_KEEP'):
+            for pic, side in ((a, 'vamp'), (b, 'demo')):
+                pathlib.Path(f"{os.environ['Q2UI_KEEP']}/{name}-{side}.ppm").write_bytes(b'P6\n%d %d\n255\n' % (W, H) + pic.rgb)
+        good &= check(f"The status row ({name}) is drawn from them as from demo's file of the same text", same,
+                      diff and (min(diff), max(diff), len(diff)))
+    return good
+
+
+def screen_dark(binary, work):
+    """The Q2 has no backlight device (its light is stock's PWM), so the screen's state is its owner's word: Q2SYS/1's
+    screen on Vamp OS, demo's dark= in its status file otherwise. Dark, a press only wakes: no tick moves, Centre plays
+    nothing, and on Vamp OS a key other than Centre (116, the power key: q2sysd lights at its release dark) asks Q2SYS/1
+    for `screen on`; lit again, the same press acts. Lit on Vamp OS, Now Playing's Centre hold asks `screen off`, a Centre
+    held toward q2sysd's 3 s power off selects nothing at its release, and 116 from the other two devices that send it
+    (event0 the PMIC's key, event2 the touch panel's dark double tap) does nothing: Centre is read from event1 alone."""
+    good = True
+
+    def start(before):
+        d = folder(work, 40)
+        (d/'input').mkdir()
+        for k in (0, 1, 2, 3):
+            os.mkfifo(d/'input'/f'event{k}')
+        os.mkfifo(d/'cmdq')
+        return before(d), d
+
+    # Vamp OS: q2sysd says the screen is off; its answer to `screen on` is its watchers' event
+    def vamp(d):
+        (d/'vamp').mkdir()
+        return Service(d/'vamp/sys.sock', 'Q2SYS/1', {'caps': [SYS_CAPS], 'battery': [SYS_BATTERY], 'jack': ['jack po=0 bal=0'],
+                                                       'screen': ['screen off'], 'screen on': [['ok'], ['ok', 'screen on']]})
+    sys_svc, d = start(vamp)
+    r = Run(binary, work, 40, '--api-dir', d/'vamp', '--api', 'auto', at=d)
+    try:
+        r.rest()
+        r.ticks(2)
+        r.key(KEY_CENTRE)
+        time.sleep(0.6)
+        quiet, played, asked = r.rest()['ticks'], r.sent(), [x for x in sys_svc.lines if x == 'screen on']
+        # a question asked dark lights the screen through Q2SYS/1 (q2sysd answers ok and, this once, stays dark)
+        c = Client(d/'ui.sock')
+        c.ask('ask q-1 Title Body Yes')
+        time.sleep(0.5)
+        question = [x for x in sys_svc.lines if x == 'screen on']
+        c.ask('withdraw q-1'), c.line()
+        c.close()
+        r.key(KEY_RETURN)
+        time.sleep(0.8)
+        woke = [x for x in sys_svc.lines if x == 'screen on']
+        r.ticks(2)
+        r.key(KEY_CENTRE)
+        time.sleep(0.6)
+        lit, played_lit = r.rest()['ticks'], r.sent()
+        good &= check('On Vamp OS with Q2SYS/1 saying the screen is off, the wheel and Centre do nothing and Centre asks '
+                      'nothing (the power key is q2sysd\'s)', quiet == 0 and played == [] and asked == [], f'{quiet} ticks, {played}, {asked}')
+        good &= check('A question asked dark asks Q2SYS/1 for screen on', question == ['screen on'], sys_svc.lines)
+        good &= check('Return pressed dark asks Q2SYS/1 for screen on, once', woke == ['screen on'] * 2, sys_svc.lines)
+        good &= check('Lit again by its event, the wheel moves and Centre plays', lit == 2 and len(played_lit) == 1, f'{lit} ticks, {played_lit}')
+        # Now Playing (the play opened it). Centre held toward the power off (q2sysd's, at 3 s): nothing at its release,
+        # where a release taken would be Now Playing's hold, the screen off. Then held 450 ms: Q2SYS/1's screen off
+        r.hold(KEY_CENTRE, 3.2)
+        time.sleep(0.4)
+        held = r.sent() + [x for x in sys_svc.lines if x == 'screen off']
+        r.hold(KEY_CENTRE, 0.45)
+        time.sleep(0.4)
+        good &= check("Now Playing's Centre hold asks Q2SYS/1 for screen off", 'screen off' in sys_svc.lines, sys_svc.lines[-3:])
+        r.key(KEY_RETURN)
+        time.sleep(0.8)
+        r.sent()
+        # 116 from the PMIC's key (event0, axp2101-pek) and the touch panel's dark double tap (event2, hyn_ts): q2ui reads
+        # Centre from md-gpio-keys (event1) alone, so neither selects, and one press seen on both counts once
+        other = [os.open(d/'input/event0', os.O_RDWR), os.open(d/'input/event2', os.O_RDWR)]
+        for fd in other:
+            os.write(fd, event(EV_KEY, KEY_CENTRE, 1) + event(EV_SYN, 0, 0) + event(EV_KEY, KEY_CENTRE, 0) + event(EV_SYN, 0, 0))
+        time.sleep(0.6)
+        others = r.sent()
+        for fd in other:
+            os.close(fd)
+        good &= check('Lit, Centre held 3.2 s on Now Playing does nothing at its release (no screen off, no seek), and 116 on '
+                      'event0 (axp2101-pek) or event2 (hyn_ts) plays nothing on Songs', held == [] and
+                      not any(' play ' in f' {x} ' for x in others), f'{held} {others}')
+    finally:
+        r.proc.kill(), r.proc.wait(timeout=5), os.close(r.queue), sys_svc.close()
+
+    # demo: dark= in its status file (patch/q2ui_gate.c tell)
+    _, d = start(lambda d: (d/'told').write_text('dark=1\n'))
+    r = Run(binary, work, 40, at=d)
+    try:
+        r.rest()
+        r.ticks(2)
+        r.key(KEY_CENTRE)
+        time.sleep(0.6)
+        quiet, played = r.rest()['ticks'], r.sent()
+        (d/'told').write_text('dark=0\n')
+        time.sleep(0.6)
+        r.ticks(2)
+        r.key(KEY_CENTRE)
+        time.sleep(0.6)
+        lit, played_lit = r.rest()['ticks'], r.sent()
+        good &= check("With demo's dark=1 the wheel and Centre do nothing; at dark=0 they act",
+                      quiet == 0 and played == [] and lit == 2 and len(played_lit) == 1, f'{quiet}/{played} then {lit}/{played_lit}')
+    finally:
+        r.proc.kill(), r.proc.wait(timeout=5), os.close(r.queue)
+    return good
+
+
+def live_stats(binary, work):
+    """The stats file while the list moves, not only at rest (the coordinator's, 2026-11-28: a device read during a scroll
+    saw no update): written at most once a second as the loop runs, whole each time."""
+    run = Run(binary, work, 400)
+    try:
+        run.rest()
+        seen = []
+        threading = __import__('threading')
+        spin = threading.Thread(target=run.ticks, args=(40, 0.07))
+        spin.start()
+        for _ in range(3):
+            time.sleep(1.1)
+            seen.append(run.stats()['frames'])
+        spin.join()
+        good = check('scrolling for 3 s, the stats file moves each second before the list rests', seen[0] < seen[1] < seen[2], seen)
+        s = run.rest()
+        gaps = s.get('gap_hist_refreshes', {})
+        # a host run is paced to the refresh by the clock (fb.c): its wait is most of a frame, its pan a file's ioctl
+        good &= check("the frame's pan and its wait for the refresh are timed apart, and a motion's frames counted by "
+                      'the refreshes since the one before', 0 <= s.get('pan_us_per_frame', -1) < 1000
+                      and s.get('vsync_wait_us_per_frame', 0) > 1000 and gaps.get('r1', 0) > 50
+                      and sum(gaps.values()) <= s['frames'], f"pan {s.get('pan_us_per_frame')} wait {s.get('vsync_wait_us_per_frame')} {gaps}")
+        return good
+    finally:
+        run.end()
 
 def lit_folder(work, n):
     """A live run's folder made ahead (Run at=), so the backlight it reads is there from its start, lit."""
@@ -2745,8 +3360,10 @@ def main():
             good &= pages(binary, work)
         if not only or 'live' in only:
             good &= live(binary, work)
+            good &= live_stats(binary, work)
             good &= routes(binary, work)
             good &= reload(binary, work)
+            good &= early_hup(binary, work)
             good &= swap(binary, work)
         if not only or 'panel' in only:
             good &= panel(binary, work)
@@ -2768,6 +3385,9 @@ def main():
             good &= night_shift(binary, work, ('--page', 'home'))
         if not only or 'playing' in only:
             good &= playing_row(binary, work)
+        if not only or 'listtouch' in only:
+            good &= list_touch(binary, work, ('--page', 'home'))
+            good &= list_touch_device(binary, work, ('--page', 'home'))
         if not only or 'touchdev' in only:
             good &= touch_device(binary, work, ('--page', 'home'))
         if not only or 'edithome' in only:
@@ -2780,6 +3400,12 @@ def main():
             good &= wheel_volume(binary, work)
         if not only or 'light' in only:
             good &= light_default(binary, work, ('--page', 'home'))
+        if not only or 'api' in only:
+            good &= api_play(binary, work) & api_status(binary, work)
+        if 'danger' in only:  # the danger card alone ('pages' runs it too)
+            good &= danger_card(binary, work, ('--page', 'home'))
+        if not only or 'dark' in only:
+            good &= screen_dark(binary, work)
         if not only or 'notices' in only:
             good &= notices(binary, work)
         if not only or 'genres' in only:

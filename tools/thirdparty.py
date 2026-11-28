@@ -77,6 +77,16 @@ SOURCES = {
              '4bd8eece78bb5c1361fab95743e7100506e2408a25c4a592a0f8d349746dc5b4'),
     'freeaptx': ('0.2.2', 'https://github.com/regularhunter/libfreeaptx/archive/0.2.2/libfreeaptx-0.2.2.tar.gz',
                  '5ab5ebddf3f2eb7ce47a505b87460b00fc1ede99c70010796d3575ab31ea80bf'),
+    # --dev builds' squashfuse_ll, the card boot's mount of a VampOS image where the kernel has no loop device
+    # (docs/boot.md#vampos-card-boot): squashfuse's low-level FUSE driver, libfuse 2 and LZO (the image's
+    # compression) linked in. libfuse's release is signed by its maintainer; LZO's is not signed (its hash is the
+    # one every distribution carries); squashfuse's is the digest GitHub records for its release asset.
+    'squashfuse': ('0.6.5', 'https://github.com/vasi/squashfuse/releases/download/0.6.5/squashfuse-0.6.5.tar.gz',
+                   '9ec44b8ee6309e09bdcdeba422edc745e876db16136acacb74ecc7e7131e5763'),
+    'libfuse': ('2.9.9', 'https://github.com/libfuse/libfuse/releases/download/fuse-2.9.9/fuse-2.9.9.tar.gz',
+                'd0e69d5d608cc22ff4843791ad097f554dd32540ddc9bed7638cc6fea7c1b4b5'),
+    'lzo': ('2.10', 'https://www.oberhumer.com/opensource/lzo/download/lzo-2.10.tar.gz',
+            'c0f892943208266f9b6543b3ae308fab6284c5c90e627931446fb49b4221a072'),
 }
 
 
@@ -833,6 +843,40 @@ def build_bluealsa(src, stage, env, log):
     run('make', 'install', f'DESTDIR={stage}', cwd=src, env=vars, log=log)
     shutil.copy(src/'LICENSE', stage/'LICENSE')
 
+def build_lzo(src, stage, env, log):
+    # A static library for squashfuse_ll only
+    run('./configure', f'--host={env.host}', '--prefix=/usr', '--enable-static', '--disable-shared',
+        cwd=src, env=env.vars, log=log)
+    run('make', f'-j{JOBS}', cwd=src, env=env.vars, log=log)
+    run('make', 'install', f'DESTDIR={stage}', cwd=src, env=env.vars, log=log)
+
+
+def build_libfuse(src, stage, env, log):
+    # A static library for squashfuse_ll only. No fusermount: squashfuse_ll runs as root, and libfuse then mounts
+    # with mount(2) itself. No mtab: libfuse would otherwise run mount -f to record the mount in /etc/mtab.
+    run('./configure', f'--host={env.host}', '--prefix=/usr', '--enable-static', '--disable-shared',
+        '--enable-lib', '--disable-util', '--disable-example', '--disable-mtab',
+        cwd=src, env=env.vars, log=log)
+    run('make', f'-j{JOBS}', cwd=src, env=env.vars, log=log)
+    run('make', 'install', f'DESTDIR={stage}', cwd=src, env=env.vars, log=log)
+
+
+def build_squashfuse(src, stage, env, log):
+    # squashfuse_ll alone, static (libc.a included: nothing for the rootfs's own libraries to break; -all-static, as
+    # libtool drops a plain -static for a program), LZO only, one
+    # thread (one card to read, and less memory on a Q2 with 115 MB). LIBS puts libfuse.a before the libraries it needs;
+    # given --with-fuse, configure leaves FUSE_USE_VERSION unset, and libfuse 2's headers then give the 2.1 API.
+    lzo, fuse = env.deps['lzo'], env.deps['libfuse']
+    run('./configure', f'--host={env.host}', '--prefix=/usr', '--enable-static', '--disable-shared',
+        '--disable-high-level', '--disable-demo', '--disable-multithreading',
+        '--without-zlib', '--without-xz', '--without-lz4', '--without-zstd',
+        f'--with-lzo={lzo}/usr', f'--with-fuse={fuse}/usr',
+        cwd=src, env=dict(env.vars, CPPFLAGS=env.vars['CPPFLAGS'] + ' -DFUSE_USE_VERSION=26',
+                          LIBS='-lfuse -lpthread -ldl -lrt'), log=log)
+    run('make', f'-j{JOBS}', 'squashfuse_ll', f"LDFLAGS={env.vars['LDFLAGS']} -all-static", cwd=src, env=env.vars, log=log)
+    (stage/'usr/bin').mkdir(parents=True)
+    shutil.copy(src/'squashfuse_ll', stage/'usr/bin/squashfuse_ll')
+    shutil.copy(src/'LICENSE', stage/'squashfuse.LICENSE')
 
 
 RECIPES = {'openssl': (build_openssl, []),
@@ -847,7 +891,8 @@ RECIPES = {'openssl': (build_openssl, []),
            'glib': (build_glib, []), 'dbus': (build_dbus, []), 'bluez': (build_bluez, ['glib', 'dbus']),
            'stocksdk': (build_stocksdk, []), 'sbc': (build_sbc, []), 'freeaptx': (build_freeaptx, []),
            'ldac': (build_ldac, []),
-           'bluealsa': (build_bluealsa, [BLUEALSA_BASE, 'sbc', 'freeaptx', 'ldac'])}
+           'bluealsa': (build_bluealsa, [BLUEALSA_BASE, 'sbc', 'freeaptx', 'ldac']),
+           'lzo': (build_lzo, []), 'libfuse': (build_libfuse, []), 'squashfuse': (build_squashfuse, ['lzo', 'libfuse'])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads

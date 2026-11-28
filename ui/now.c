@@ -6,8 +6,8 @@
  * wakes the loop and a page's step sees now_seq() move, and at rest nothing runs. The same watch
  * tells the status row when demo's file of the states only it knows changes (ui/status.c
  * status_told), and the Wi-Fi and Bluetooth pages when demo's files of the networks and devices do (ui/page_wifi.c,
- * ui/page_bluetooth.c). When q2ui owns the player this file reads its own state instead
- * (docs/ui-rewrite.md#cutover). */
+ * ui/page_bluetooth.c). On Vamp OS, Q2PLAY/1's now line and rating are laid over the file's (ui/api.c
+ * api_now_overlay; docs/ui-rewrite.md#cutover). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,6 +71,7 @@ void now_read(void) {
     }
     if (f) fclose(f);
     now.read_us = mono_us();
+    api_now_overlay(&now); /* on Vamp OS, Q2PLAY/1's word over the file's (ui/api.c) */
     if (memcmp(&was, &now, offsetof(ui_now, read_us))) ++seq;
 }
 

@@ -1108,8 +1108,10 @@ def test_replacements_strips_every_install_entry(tmp_path, monkeypatch):
     assert files['usr/lib/libz.so.1.2.11'] == out/'thirdparty/usr/lib/libz.so.1.2.11'
     # mbedtls and libnl among them; adbd is no replacement (a --dev build's program, docs/adb.md), nor are
     # bluez and the glib and dbus headers it is built against (an --own-bluez build's, docs/bluez.md), nor the
-    # own bluealsa and what it is built from (an --own-bluealsa build's, docs/bluealsa.md#build)
-    beside = {'adbd', 'bluez', 'glib', 'dbus', 'bluealsa', 'stocksdk', 'sbc', 'freeaptx', 'ldac'}
+    # own bluealsa and what it is built from (an --own-bluealsa build's, docs/bluealsa.md#build), nor squashfuse_ll
+    # and the static libraries it links (a --dev build's, docs/boot.md#vampos-card-boot)
+    beside = {'adbd', 'bluez', 'glib', 'dbus', 'bluealsa', 'stocksdk', 'sbc', 'freeaptx', 'ldac',
+              'squashfuse', 'libfuse', 'lzo'}
     assert versions == {name: v for name, (v, _, _) in thirdparty.SOURCES.items() if name not in beside}
 
 

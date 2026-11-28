@@ -1,9 +1,11 @@
 /* Control Center (docs/oled-design.md#control-center), q2ui's own while it has the screen: opened
  * on any page by a finger pulled down from the top edge (ui.c ui_on_pull) or by holding Return
- * (main.c), closed by Return or a swipe up. It comes down from the top and goes back up: pulled, its
+ * (main.c), closed by Return or a finger lifting it. It comes down from the top and goes back up: pulled, its
  * foot follows the finger (an interactive transition: control_pull), and let go it settles open, or
  * back up when let go short of a third of the way down unless flung down (FLING_PX_S); Return held
- * drops it from the top and Return or a swipe up sends it back up, each over DROP_US, cubic out. While
+ * drops it from the top and Return sends it back up, each over DROP_US, cubic out. Open, a finger dragged up or down on
+ * it holds its foot that far above the screen's (lifting), and let go it goes up or settles open by the pull's rule from
+ * the other side (release): past a third of the way up or flung up, else open. While
  * it moves it is two pictures, the sheet whole with its status row and the screen under it, placed by
  * rows each frame; under Reduce Motion it stands or goes at once (a finger still pulls it). Drawn as demo's sheet is
  * (patch/control_center.c cc_paint, the numbers its CC_* are): under the status row, a block of
@@ -36,7 +38,7 @@
  * demo's for AirPlay (Network services), Car Remote and the EQ.
  * A finger, as on demo's sheet (touch): a tap acts as Centre does, the transport's glyphs press
  * Previous, Play/Pause and Next down the queue, a toggle held QUICK_HOLD_MS opens its settings, a
- * finger on a slider sets the level where it is, and a swipe up closes the sheet; touch never
+ * finger on a slider sets the level where it is or dragged across moves it, and one dragged up or down lifts the sheet; touch never
  * brings the ring.
  * ponytail: names are drawn at Inter's advances without demo's caption tracking (text.c has none),
  * and none scrolls as a marquee (the six fit). */
@@ -79,6 +81,9 @@
 #define USB_CHEV 13
 #define USB_CHEV_X 18
 #define USB_RING 5
+/* the USB row's ends drawn in from the blocks' edges: low on the screen, its pill, its ring and the landing's 8 px
+ * overshoot stay inside the glass's bottom corners (GLASS_R, CORNER_SLACK more; docs/oled-design.md#corners) */
+#define USB_INSET 8
 #define RING 3 /* the ring's outer edge past the stop, 2 px wide */
 #define GRAB_W 36
 #define GRAB_H 5
@@ -95,8 +100,8 @@
 #define LEVEL_HOLD_US 1500000u
 #define LEVEL_EASE 0.06f /* the fills' spring, as Now Playing's bar eases (VOL_EASE_MS) */
 /* a finger's, as demo's sheet takes it: a toggle held QUICK_HOLD_MS opens its settings; a touch that
- * goes SLIDE_PX sideways on a slider drags it (rows_settings.c), one that goes SWIPE_PX up closes the
- * sheet; a slider's level goes to demo at most every WRITE_MS while dragged (CC_VOL_WRITE_MS) */
+ * goes SLIDE_PX sideways on a slider drags it (rows_settings.c), one that goes as far up or down lifts the sheet
+ * (or, with no memory for its pictures, closes it once SWIPE_PX up at the lift); a slider's level goes to demo at most every WRITE_MS while dragged (CC_VOL_WRITE_MS) */
 #define QUICK_HOLD_MS 550
 #define SLIDE_PX 10
 #define SWIPE_PX 20
@@ -134,14 +139,15 @@ struct cc_st {
     char usb_s[24];
     struct {
         int on, stop, x0, y0, moved, dragging, held, want; /* want: a dragged level not yet sent, -1 none */
+        int nolift; /* the sheet could not be lifted (no memory for its pictures): this touch does not try again */
         uint64_t at, sent_at;
         float finger; /* a dragged slider's place under the finger, 0 to 1 */
     } touch;
     /* coming down or going up: the sheet's foot on the screen (SCREEN_H open), a finger holding it, or a settle from
      * `from` to `to` begun at t0 over dur; the pull's last move (y, when) and its speed down in px/s; the sheet whole and
      * the screen under it while it moves */
-    float reveal, from, to, vy, last_y;
-    int pulling, moving;
+    float reveal, from, to, vy;
+    int pulling, moving, lifting; /* lifting: the open sheet's foot under a finger (pulling too) */
     uint64_t t0, dur, last_t;
     uint32_t *sheet, *behind;
 };
@@ -163,7 +169,7 @@ static rect_t box(int i) {
     }
     if (i == NOW) return (rect_t){ RIGHT_X, Y0, RIGHT_W, NOW_H };
     if (i == BRIGHT || i == VOLUME) return (rect_t){ RIGHT_X, SLIDER_Y + (i - BRIGHT) * (SLIDER_H + GAP), RIGHT_W, SLIDER_H };
-    if (i == USB) return (rect_t){ X0, USB_Y, X1 - X0, SLIDER_H };
+    if (i == USB) return (rect_t){ X0 + USB_INSET, USB_Y, X1 - X0 - 2 * USB_INSET, SLIDER_H };
     int cx = RIGHT_X + RIGHT_W / 2 + (i - PLAY) * TRANSPORT_DX, cy = Y0 + TRANSPORT_Y, px = i == PLAY ? 30 : ICON;
     return (rect_t){ cx - px / 2, cy - px / 2, px, px };
 }
@@ -216,7 +222,26 @@ static void arrive(struct cc_st *s) {
     ui_status_hidden = 0;
     ui_mark_all();
 }
-/* Return or a swipe up: back up the way it came, uncovering the page under it */
+/* A finger let go of the moving sheet: settled open or gone by where its foot is and how fast it was moving, the same rule
+ * for a pull from the top and a lift of the open sheet: past a third of the way from where the finger found it, or flung
+ * (FLING_PX_S) that way wherever it is, it goes on; else it goes back. */
+static void release(struct cc_st *s, int was_open) {
+    uint64_t now = ui_time();
+    if (now - s->last_t > FLING_STALE_US) s->vy = 0; /* held still before the lift: no fling */
+    s->pulling = 0;
+    int open = was_open ? s->vy > -FLING_PX_S && (s->vy > FLING_PX_S || s->reveal > SCREEN_H * 2 / 3.0f)
+                        : s->vy > FLING_PX_S || (s->vy > -FLING_PX_S && s->reveal >= SCREEN_H / 3.0f);
+    settle(s, open ? SCREEN_H : 0);
+}
+/* the foot under a finger at y: its speed from the move before (px/s, down positive) */
+static void follow(struct cc_st *s, float reveal) {
+    uint64_t now = ui_time();
+    reveal = clampf(reveal, 0, SCREEN_H);
+    if (s->last_t && now > s->last_t) s->vy = (reveal - s->reveal) * 1e6f / (float)(now - s->last_t);
+    s->last_t = now, s->reveal = reveal;
+    ui_mark_all();
+}
+/* Return: back up the way it came, uncovering the page under it */
 static void leave(struct cc_st *s) {
     if (s->moving || s->pulling) return;
     s->behind = ui_snapshot_under();
@@ -287,13 +312,27 @@ static int touch(struct cc_st *s, const input_t *e) {
     int dx = e->x - s->touch.x0, dy = e->y - s->touch.y0, slider = s->touch.stop == BRIGHT || s->touch.stop == VOLUME;
     if (e->type == IN_TOUCH_DOWN) {
         s->touch.on = 1, s->touch.stop = hit(e->x, e->y), s->touch.x0 = e->x, s->touch.y0 = e->y, s->touch.at = ui_time();
-        s->touch.moved = s->touch.dragging = s->touch.held = 0, s->touch.want = -1;
+        s->touch.moved = s->touch.dragging = s->touch.held = s->touch.nolift = 0, s->touch.want = -1;
         if (s->touch.stop >= 0 && s->touch.stop <= EQ) ui_wake_ms(QUICK_HOLD_MS);
         return 0;
     }
     if (!s->touch.on) return 0;
+    if (e->type == IN_TOUCH_UP && e->value) return s->touch.on = 0; /* the pull took the touch (ui.c pulled): no tap */
     if (!s->touch.moved && (abs(dx) >= SLIDE_PX || abs(dy) >= SLIDE_PX))
         s->touch.moved = 1, s->touch.dragging = slider && abs(dx) > abs(dy);
+    /* SLIDE_PX up or down, whatever it did first (a thumb from the screen's foot goes sideways before it goes up),
+     * and not a slider's: the sheet lifts with the finger (lifting) */
+    if (s->touch.moved && !s->touch.dragging && !s->touch.nolift && abs(dy) >= SLIDE_PX) {
+        s->behind = ui_snapshot_under();
+        sheet_make(s);
+        if (!s->sheet || !s->behind) { /* no memory for the motion: a swipe up still closes it on the lift */
+            free(s->sheet), free(s->behind), s->sheet = s->behind = 0, ui_status_hidden = 0, s->touch.nolift = 1;
+        } else {
+            s->pulling = s->lifting = 1, s->vy = 0, s->last_t = 0, s->reveal = SCREEN_H;
+            follow(s, SCREEN_H + (float)dy);
+            return 0;
+        }
+    }
     if (s->touch.dragging) {
         /* the fill under the finger in this frame (direct manipulation: no ease while it is down), the level sent at
          * WRITE_MS's pace */
@@ -310,7 +349,7 @@ static int touch(struct cc_st *s, const input_t *e) {
     s->touch.on = 0;
     if (s->touch.held || s->touch.dragging) return 0;
     if (s->touch.moved) {
-        if (dy <= -SWIPE_PX && -dy > abs(dx)) return leave(s), 1; /* a swipe up closes the sheet, as demo's */
+        if (dy <= -SWIPE_PX && -dy > abs(dx)) return leave(s), 1; /* no pictures to lift: a swipe up closes it, as demo's */
         return 0;
     }
     int i = s->touch.stop;
@@ -338,6 +377,12 @@ static int wake(struct cc_st *s) {
 
 static void cc_event(void *st, const input_t *e) {
     struct cc_st *s = st;
+    if (s->lifting && (e->type == IN_TOUCH_MOVE || e->type == IN_TOUCH_UP)) { /* the open sheet held by a finger */
+        if (e->type == IN_TOUCH_MOVE) follow(s, SCREEN_H + (float)(e->y - s->touch.y0));
+        else
+            s->lifting = s->touch.on = 0, release(s, 1);
+        return;
+    }
     if (s->moving || s->pulling) return; /* coming or going: no input */
     if (e->type >= IN_TOUCH_DOWN) {
         touch(s, e); /* touch never brings the ring */
@@ -634,18 +679,8 @@ void control_pull(const input_t *e) {
             arrive(s);
             return;
         }
-    } else if (!s->pulling)
+    } else if (!s->pulling || s->lifting)
         return;
-    float y = clampf((float)e->y, 0, SCREEN_H);
-    uint64_t now = ui_time();
-    if (e->type == IN_TOUCH_MOVE) {
-        if (s->last_t && now > s->last_t) s->vy = (y - s->last_y) * 1e6f / (float)(now - s->last_t);
-        s->last_y = y, s->last_t = now, s->reveal = y;
-        ui_mark_all();
-        return;
-    }
-    if (e->type != IN_TOUCH_UP) return;
-    if (now - s->last_t > FLING_STALE_US) s->vy = 0; /* held still before the lift: no fling */
-    s->pulling = 0;
-    settle(s, s->vy > FLING_PX_S || (s->vy > -FLING_PX_S && s->reveal >= SCREEN_H / 3.0f) ? SCREEN_H : 0);
+    if (e->type == IN_TOUCH_MOVE) follow(s, (float)e->y);
+    else if (e->type == IN_TOUCH_UP && !s->lifting) release(s, 0);
 }

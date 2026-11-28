@@ -188,6 +188,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     circles = {'circle_check_a': (art.CIRCLE_CHECK_PX, blue), 'circle_check_w': (art.CIRCLE_CHECK_PX, 0xffffff),
                'circle_lock_d': (art.CIRCLE_LOCK_PX, 0xababab), 'circle_lock_l': (art.CIRCLE_LOCK_PX, 0x5c5c5c)}  # list_marks.c
     card = [f'keylock_card_{k}' for k in ('d', 'l')]
+    trash = [f'cardtrash_{k}' for k in ('d', 'l')]  # feedback.c danger_row's, Negative per half
     tiles = {f'pltile_{n}_{k}': c for n in ('playlist', 'otg') for k, c in (('d', 0x858585), ('l', 0x6e6e6e), ('w', 0xffffff))}
     acts = {f'plact_{n}_{k}': c for n in ('shuffle', 'add', 'save', 'clear', 'search') for k, c in (('a', blue), ('w', 0xffffff))}
     pmarks = {f'plmark_{n}_{k}': c for n, d, l in (('in', 0xababab, 0x5c5c5c), ('add', 0x34c759, 0x34c759), ('out', 0xff6b5e, 0xff6b5e))
@@ -197,7 +198,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               'crphone_d', 'crphone_l', 'crphone_w',
                                               *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *warn, *glyphs, *hearts, *menufav, *rates, *stars, *marks, *menus, *speakers, *pair, *quality,
-                                              *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt', 'radio_tower',
+                                              *keylock, *status, *card, *trash, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt', 'radio_tower',
                                               'search_pop', 'search_pop_letters', *(f'search_return_{m}_{k}' for m in ('search', 'go', 'save') for k in 'wa'), 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
                                               *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
@@ -230,6 +231,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.QUALITY_PX, 0xffffff if n.endswith('_d') else 0) for n in quality),
                           *((n, art.STATE_PX, 0 if n.endswith('_l') else 0xffffff) for n in keylock),
                           *((n, art.KEYLOCK_CARD_PX, 0 if n.endswith('_l') else 0xffffff) for n in card),
+                          *((n, art.CARD_TRASH_PX, 0xd70015 if n.endswith('_l') else 0xff453a) for n in trash),
                           *((n, px, c) for n, (px, c) in circles.items()),
                           *((n, art.TILE_PX, c) for n, c in tiles.items()), *((n, art.PL_ACTION_PX, c) for n, c in acts.items()),
                           *((n, art.PL_MARK_PX, c) for n, c in pmarks.items()),
