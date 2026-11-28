@@ -9,11 +9,13 @@ import importlib
 import os
 import pathlib
 import resource
+import select
 import socket
 import subprocess
 import sys
 import threading
 import time
+import traceback
 
 import pytest
 
@@ -85,7 +87,10 @@ def contained(monkeypatch):
 # 60) has written there: every thread's Python stack, and per OS thread its state, kernel wait channel and system call
 # with its arguments (/proc/self/task/*/syscall: a read's first argument is its fd), each open fd's target, and the mount
 # each target is on, so the record names the file, its mount (the container's virtiofs share or not) and where the read
-# waits. Nothing is retried or hidden: the test goes on to its timeout as before.
+# waits. The test's own thread comes first: its Python stack (faulthandler stops at 100 threads, and a full run has more,
+# its leftover stand-ins' accept threads), then ten samples half a second apart of its state, wait channel, system call and
+# /proc I/O counters (rchar, syscr), which tell one request that never returns (the counters still) from many slow ones
+# (the counters climbing). Nothing is retried or hidden: the test goes on to its timeout as before.
 @pytest.fixture(autouse=True)
 def _stall_record(request):
     where = os.environ.get('Q2_STALL_DIR')
@@ -98,6 +103,24 @@ def _stall_record(request):
         out = pathlib.Path(where) / f'stall-{time.strftime("%Y%m%d-%H%M%S")}-{os.getpid()}.txt'
         with open(out, 'w') as f:
             f.write(f'{request.node.nodeid}\nat {time.strftime("%Y-%m-%d %H:%M:%S %z")}\n\n')
+            main = threading.main_thread()
+            frame = sys._current_frames().get(main.ident or 0)
+            f.write('test thread stack:\n' + ''.join(traceback.format_stack(frame)) + '\ntest thread samples:\n')
+            task = pathlib.Path('/proc/self/task') / str(main.native_id)
+            for _ in range(10):
+                got = []
+                for n in ('wchan', 'syscall', 'io'):
+                    try:
+                        text = (task / n).read_text().strip()
+                    except OSError as e:
+                        text = f'({e.strerror})'
+                    if n == 'io':
+                        text = ' '.join(l for l in text.splitlines() if l.startswith(('rchar', 'syscr')))
+                    got.append(f'{n} {text}')
+                f.write(f'  {time.monotonic():.1f}: ' + ', '.join(got) + '\n')
+                f.flush()
+                select.select([], [], [], 0.5)  # time.sleep may be a test's stand-in
+            f.write('\n')
             for task in sorted(pathlib.Path('/proc/self/task').iterdir()):
                 fields = {}
                 for n in ('comm', 'wchan', 'syscall'):
